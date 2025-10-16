@@ -117,7 +117,8 @@ class DataCleaner:
 
         for col in df_filtered.columns:
             series = df_filtered[col]
-            max_consecutive_nan = self._calculate_max_consecutive_nans(series)
+            # 使用新方法获取最大连续NaN及其时间段
+            max_consecutive_nan, nan_start_date, nan_end_date = self._find_max_consecutive_nan_period(series)
 
             if max_consecutive_nan >= threshold:
                 cols_to_remove.append(col)
@@ -127,9 +128,19 @@ class DataCleaner:
                 missing_points = series.isnull().sum()
                 missing_ratio = missing_points / total_points * 100 if total_points > 0 else 0
 
-                print(f"    {log_prefix}标记移除变量: '{col}' "
-                      f"(时间范围内最大连续 NaN: {max_consecutive_nan} >= {threshold}, "
-                      f"缺失率: {missing_ratio:.1f}%)")
+                # 格式化缺失时间段
+                if nan_start_date is not None and nan_end_date is not None:
+                    # 转换为字符串格式
+                    nan_period_str = f"{nan_start_date} to {nan_end_date}"
+                    print(f"    {log_prefix}标记移除变量: '{col}' "
+                          f"(最大连续NaN: {max_consecutive_nan} >= {threshold}, "
+                          f"缺失时间段: {nan_period_str}, "
+                          f"缺失率: {missing_ratio:.1f}%)")
+                else:
+                    nan_period_str = "未知"
+                    print(f"    {log_prefix}标记移除变量: '{col}' "
+                          f"(时间范围内最大连续 NaN: {max_consecutive_nan} >= {threshold}, "
+                          f"缺失率: {missing_ratio:.1f}%)")
 
                 self.removed_variables_log.append({
                     'Variable': col,
@@ -137,6 +148,9 @@ class DataCleaner:
                     'Details': {
                         'time_range': f"{data_start_date} to {data_end_date}",
                         'max_consecutive_nan': max_consecutive_nan,
+                        'nan_start_date': str(nan_start_date) if nan_start_date else None,
+                        'nan_end_date': str(nan_end_date) if nan_end_date else None,
+                        'nan_period': nan_period_str,
                         'threshold': threshold,
                         'total_points_in_range': total_points,
                         'missing_points_in_range': missing_points,
@@ -242,6 +256,60 @@ class DataCleaner:
 
         return max_consecutive_nan
 
+    def _find_max_consecutive_nan_period(self, series: pd.Series) -> tuple:
+        """
+        找到最大连续NaN块的起止日期
+
+        Returns:
+            tuple: (max_consecutive_nan, start_date, end_date)
+        """
+        if series.empty:
+            return 0, None, None
+
+        # 找到第一个有效值
+        first_valid_idx = series.first_valid_index()
+        if first_valid_idx is None:
+            # 全为NaN
+            if len(series) > 0:
+                return len(series), series.index[0], series.index[-1]
+            return 0, None, None
+
+        # 从第一个有效值开始分析
+        series_after_first_valid = series.loc[first_valid_idx:]
+        is_na = series_after_first_valid.isna()
+
+        if not is_na.any():
+            return 0, None, None  # 没有NaN
+
+        # 计算连续NaN块
+        na_blocks = is_na.ne(is_na.shift()).cumsum()[is_na]
+
+        if na_blocks.empty:
+            return 0, None, None
+
+        try:
+            # 找到最大连续NaN块的块ID
+            block_counts = na_blocks.value_counts()
+            if block_counts.empty:
+                return 0, None, None
+
+            max_consecutive_nan = block_counts.max()
+            max_block_id = block_counts.idxmax()
+
+            # 找到该块的所有索引
+            max_block_indices = na_blocks[na_blocks == max_block_id].index
+
+            if len(max_block_indices) > 0:
+                start_date = max_block_indices[0]
+                end_date = max_block_indices[-1]
+                return max_consecutive_nan, start_date, end_date
+            else:
+                return max_consecutive_nan, None, None
+
+        except Exception as e:
+            print(f"    警告: 查找最大连续NaN时间段时出错: {e}")
+            return 0, None, None
+
     def clean_zero_values(self, df: pd.DataFrame, log_prefix: str = "") -> pd.DataFrame:
         """
         将0值替换为NaN
@@ -294,31 +362,49 @@ class DataCleaner:
     def remove_all_nan_columns(self, df: pd.DataFrame, log_prefix: str = "") -> pd.DataFrame:
         """
         移除全为NaN的列
-        
+
         Args:
             df: 输入DataFrame
             log_prefix: 日志前缀
-            
+
         Returns:
             pd.DataFrame: 处理后的DataFrame
         """
         if df.empty:
             return df
-            
+
         cols_before = set(df.columns)
         df_cleaned = df.dropna(axis=1, how='all')
         removed_cols = cols_before - set(df_cleaned.columns)
-        
+
         if removed_cols:
             print(f"  {log_prefix}移除了 {len(removed_cols)} 个全 NaN 列: {list(removed_cols)[:10]}{'...' if len(removed_cols)>10 else ''}")
-            
+
+            # 添加调试信息，检查关键变量
+            debug_vars = [
+                '中国:日产量:尿素',
+                '中国:开工率:聚丙烯下游:塑编',
+                '中国:开工率:聚丙烯下游:双向拉伸聚丙烯薄膜',
+                '中国:开工率:聚丙烯下游:共聚注塑',
+                '中国:开工率:纯苯:下游行业'
+            ]
+            for var in debug_vars:
+                if var in removed_cols:
+                    print(f"    [DEBUG] 关键变量被移除: '{var}'")
+                    if var in df.columns:
+                        non_nan_count = df[var].notna().sum()
+                        total_count = len(df[var])
+                        print(f"      非NaN值数量: {non_nan_count}/{total_count}")
+                        if non_nan_count > 0:
+                            print(f"      前5个非NaN值索引: {df[var].dropna().head().index.tolist()}")
+
             # 记录移除的列
             for col in removed_cols:
                 self.removed_variables_log.append({
                     'Variable': col,
                     'Reason': f'{log_prefix}all_nan'
                 })
-        
+
         return df_cleaned
     
     def remove_all_nan_rows(self, df: pd.DataFrame, log_prefix: str = "") -> pd.DataFrame:

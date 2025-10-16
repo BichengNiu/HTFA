@@ -315,10 +315,26 @@ def render_dfm_data_prep_tab(st):
             # 汇总所有真实日期，返回实际的数据范围（并集）
             if all_dates_found:
                 all_dates = pd.to_datetime(all_dates_found)
-                actual_start = all_dates.min().date()
-                actual_end = all_dates.max().date()
-                print(f"检测到的总体日期范围: {actual_start} 到 {actual_end}")
-                return actual_start, actual_end
+
+                # 过滤掉异常早期的日期（如1970年代的默认值/缺失值标记）
+                # 只保留2000年1月1日之后的日期
+                cutoff_date = pd.Timestamp('2000-01-01')
+                valid_dates = all_dates[all_dates >= cutoff_date]
+
+                if len(valid_dates) > 0:
+                    actual_start = valid_dates.min().date()
+                    actual_end = valid_dates.max().date()
+                    print(f"检测到的总体日期范围: {actual_start} 到 {actual_end}")
+
+                    # 如果过滤掉了很多早期日期，给出提示
+                    if len(all_dates) > len(valid_dates):
+                        filtered_count = len(all_dates) - len(valid_dates)
+                        print(f"  (已过滤 {filtered_count} 个2000年之前的异常日期)")
+
+                    return actual_start, actual_end
+                else:
+                    print("未能检测到2000年之后的有效日期数据")
+                    return None, None
             else:
                 print("未能检测到有效的日期数据")
                 return None, None
@@ -357,6 +373,9 @@ def render_dfm_data_prep_tab(st):
                 detected_start, detected_end = detect_data_date_range(current_file)
             # 缓存结果
             dfm_manager.set_dfm_state('data_prep', cache_key, (detected_start, detected_end))
+            # 同时保存到专门的状态键，供按钮处理时使用
+            set_dfm_state("dfm_detected_start_date", detected_start)
+            set_dfm_state("dfm_detected_end_date", detected_end)
             set_dfm_state("dfm_date_detection_needed", False)
 
             # 清理旧的缓存
@@ -376,7 +395,9 @@ def render_dfm_data_prep_tab(st):
         detected_start, detected_end = cached_result if cached_result else (None, None)
         if detected_start and detected_end:
             # 静默处理缓存的日期范围，避免重复日志
-            pass
+            # 同时保存到专门的状态键，供按钮处理时使用
+            set_dfm_state("dfm_detected_start_date", detected_start)
+            set_dfm_state("dfm_detected_end_date", detected_end)
 
     # 设置默认值：优先使用检测到的日期，否则使用硬编码默认值
     default_start_date = detected_start if detected_start else datetime(2020, 1, 1).date()
@@ -516,7 +537,13 @@ def render_dfm_data_prep_tab(st):
         ))
 
     st.markdown("--- ") # Separator before the new section
-    st.markdown("#### 数据预处理与导出")
+
+    # 使用列布局，让两个标题在同一水平线上
+    title_left_col, title_right_col = st.columns([1, 2])
+    with title_left_col:
+        st.markdown("#### 数据预处理与导出")
+    with title_right_col:
+        st.markdown("#### 处理结果")
 
     left_col, right_col = st.columns([1, 2]) # Left col for inputs, Right col for outputs/messages
 
@@ -529,241 +556,303 @@ def render_dfm_data_prep_tab(st):
             key="ss_dfm_export_basename"
         ))
 
-        run_button_clicked = st.button("运行数据预处理并导出", key="ss_dfm_run_preprocessing")
+        # 将按钮放在一行，使用列布局
+        btn_col1, btn_col2, btn_col3 = st.columns(3)
+        with btn_col1:
+            run_button_clicked = st.button("开始预处理", key="ss_dfm_run_preprocessing", use_container_width=True)
+        with btn_col2:
+            # 下载按钮占位，实际按钮在后面根据数据可用性显示
+            download_data_placeholder = st.empty()
+        with btn_col3:
+            # 下载行业映射按钮占位
+            download_map_placeholder = st.empty()
 
-    with right_col:
-        if run_button_clicked:
-            set_dfm_state("dfm_processed_outputs", None)  # Clear previous downloadable results
-            set_dfm_state("dfm_prepared_data_df", None)
-            set_dfm_state("dfm_transform_log_obj", None)
-            set_dfm_state("dfm_industry_map_obj", None)
-            set_dfm_state("dfm_removed_vars_log_obj", None)
-            set_dfm_state("dfm_var_type_map_obj", None)
+    # 按钮点击处理逻辑
+    if run_button_clicked:
+        # 清空旧的处理结果
+        set_dfm_state("dfm_processed_outputs", None)
+        set_dfm_state("dfm_prepared_data_df", None)
+        set_dfm_state("dfm_transform_log_obj", None)
+        set_dfm_state("dfm_industry_map_obj", None)
+        set_dfm_state("dfm_removed_vars_log_obj", None)
+        set_dfm_state("dfm_var_type_map_obj", None)
 
-            current_file = get_dfm_state('dfm_training_data_file')
-            if current_file is None:
-                st.error("错误：请先上传训练数据集！")
-            # 优化：批量获取所有需要的参数
-            processing_params = {
-                'export_base_name': dfm_manager.get_dfm_state('data_prep', 'dfm_export_base_name', None),
-                'data_start_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', None),
-                'data_end_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', None),
-                'target_freq': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_freq', None),
-                'target_sheet_name': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_sheet_name', None),
-                'target_variable': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_variable', None),
-                'remove_consecutive_nans': dfm_manager.get_dfm_state('data_prep', 'dfm_param_remove_consecutive_nans', None),
-                'consecutive_nan_threshold': dfm_manager.get_dfm_state('data_prep', 'dfm_param_consecutive_nan_threshold', None),
-                'type_mapping_sheet': dfm_manager.get_dfm_state('data_prep', 'dfm_param_type_mapping_sheet', None)
-            }
+        current_file = get_dfm_state('dfm_training_data_file')
+        if current_file is None:
+            st.error("错误：请先上传训练数据集！")
+        # 优化：批量获取所有需要的参数
+        processing_params = {
+            'export_base_name': dfm_manager.get_dfm_state('data_prep', 'dfm_export_base_name', None),
+            'data_start_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', None),
+            'data_end_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', None),
+            'target_freq': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_freq', None),
+            'target_sheet_name': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_sheet_name', None),
+            'target_variable': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_variable', None),
+            'remove_consecutive_nans': dfm_manager.get_dfm_state('data_prep', 'dfm_param_remove_consecutive_nans', None),
+            'consecutive_nan_threshold': dfm_manager.get_dfm_state('data_prep', 'dfm_param_consecutive_nan_threshold', None),
+            'type_mapping_sheet': dfm_manager.get_dfm_state('data_prep', 'dfm_param_type_mapping_sheet', None)
+        }
 
-            if not processing_params['export_base_name']:
-                st.error("错误：请指定有效的文件基础名称！")
-            else:
+        if not processing_params['export_base_name']:
+            st.error("错误：请指定有效的文件基础名称！")
+        else:
+            try:
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
                 try:
-                    progress_bar = st.progress(0)
-                    status_text = st.empty()
+                    status_text.text("[LOADING] 正在准备数据...")
+                    progress_bar.progress(10)
+
+                    # 检查文件是否存在
+                    if current_file is None:
+                        st.error("未找到上传的文件，请重新上传数据文件。")
+                        return
+
+                    uploaded_file_bytes = current_file.getvalue()
+                    excel_file_like_object = io.BytesIO(uploaded_file_bytes)
+
+                    # 使用批量获取的参数
+                    start_date = processing_params['data_start_date']
+                    end_date = processing_params['data_end_date']
+
+                    # 从状态中读取检测到的有效日期范围
+                    detected_start_from_state = get_dfm_state("dfm_detected_start_date")
+                    detected_end_from_state = get_dfm_state("dfm_detected_end_date")
+
+                    # 调试信息：打印所有日期值
+                    print(f"[日期检查] start_date: {start_date}, 类型: {type(start_date)}")
+                    print(f"[日期检查] end_date: {end_date}, 类型: {type(end_date)}")
+                    print(f"[日期检查] detected_start_from_state: {detected_start_from_state}, 类型: {type(detected_start_from_state)}")
+                    print(f"[日期检查] detected_end_from_state: {detected_end_from_state}, 类型: {type(detected_end_from_state)}")
+
+                    # 使用检测到的有效日期范围进行验证和修正
+                    cutoff_date = date(2000, 1, 1)
+                    future_date = date(2030, 12, 31)
+
+                    # 强制使用检测到的日期，如果用户选择的日期异常
+                    if detected_start_from_state:
+                        if start_date and start_date < cutoff_date:
+                            print(f"[日期修正] 用户选择的开始日期 {start_date} 早于2000年，使用检测到的日期 {detected_start_from_state}")
+                            start_date = detected_start_from_state
+                        elif not start_date:
+                            print(f"[日期修正] 开始日期为空，使用检测到的日期 {detected_start_from_state}")
+                            start_date = detected_start_from_state
+
+                    if detected_end_from_state:
+                        if end_date and end_date > future_date:
+                            print(f"[日期修正] 用户选择的结束日期 {end_date} 过于遥远，使用检测到的日期 {detected_end_from_state}")
+                            end_date = detected_end_from_state
+                        elif not end_date:
+                            print(f"[日期修正] 结束日期为空，使用检测到的日期 {detected_end_from_state}")
+                            end_date = detected_end_from_state
+
+                    start_date_str = start_date.strftime('%Y-%m-%d') if start_date else None
+                    end_date_str = end_date.strftime('%Y-%m-%d') if end_date else None
+
+                    status_text.text("[DATA] 正在读取数据文件...")
+                    progress_bar.progress(20)
+
+                    # [CONFIG] 修复：只有在启用移除连续NaN功能时才传递阈值
+                    nan_threshold_int = None
+                    remove_consecutive_nans = processing_params['remove_consecutive_nans']
+                    if remove_consecutive_nans:
+                        nan_threshold = processing_params['consecutive_nan_threshold']
+                        if not pd.isna(nan_threshold):
+                            try:
+                                nan_threshold_int = int(nan_threshold)
+                            except ValueError:
+                                st.warning(f"连续NaN阈值 '{nan_threshold}' 不是一个有效的整数。将忽略此阈值。")
+                                nan_threshold_int = None
+
+                    # 数据预处理参数
+                    status_text.text("[CONFIG] 正在执行数据预处理...")
+                    progress_bar.progress(30)
+
+                    # 调用真正的数据预处理函数
+                    from dashboard.DFM.data_prep.data_preparation import prepare_data
 
                     try:
-                        status_text.text("[LOADING] 正在准备数据...")
-                        progress_bar.progress(10)
+                        # 打印调试信息
+                        print(f"[DEBUG] 调用prepare_data参数:")
+                        print(f"  - target_freq: {processing_params['target_freq']}")
+                        print(f"  - target_sheet_name: {processing_params['target_sheet_name']}")
+                        print(f"  - target_variable_name: {processing_params['target_variable']}")
+                        print(f"  - consecutive_nan_threshold: {nan_threshold_int}")
+                        print(f"  - data_start_date: {start_date_str}")
+                        print(f"  - data_end_date: {end_date_str}")
+                        print(f"  - reference_sheet_name: {processing_params['type_mapping_sheet']}")
+                        
+                        results = prepare_data(
+                            excel_path=excel_file_like_object,
+                            target_freq=processing_params['target_freq'],
+                            target_sheet_name=processing_params['target_sheet_name'],
+                            target_variable_name=processing_params['target_variable'],
+                            consecutive_nan_threshold=nan_threshold_int,
+                            data_start_date=start_date_str,
+                            data_end_date=end_date_str,
+                            reference_sheet_name=processing_params['type_mapping_sheet']
+                        )
 
-                        # 检查文件是否存在
-                        if current_file is None:
-                            st.error("未找到上传的文件，请重新上传数据文件。")
-                            return
+                        status_text.text("[SUCCESS] 数据预处理完成，正在生成结果...")
+                        progress_bar.progress(70)
 
-                        uploaded_file_bytes = current_file.getvalue()
-                        excel_file_like_object = io.BytesIO(uploaded_file_bytes)
-
-                        # 使用批量获取的参数
-                        start_date = processing_params['data_start_date']
-                        start_date_str = start_date.strftime('%Y-%m-%d') if start_date else None
-
-                        end_date = processing_params['data_end_date']
-                        end_date_str = end_date.strftime('%Y-%m-%d') if end_date else None
-
-                        status_text.text("[DATA] 正在读取数据文件...")
-                        progress_bar.progress(20)
-
-                        # [CONFIG] 修复：只有在启用移除连续NaN功能时才传递阈值
-                        nan_threshold_int = None
-                        remove_consecutive_nans = processing_params['remove_consecutive_nans']
-                        if remove_consecutive_nans:
-                            nan_threshold = processing_params['consecutive_nan_threshold']
-                            if not pd.isna(nan_threshold):
-                                try:
-                                    nan_threshold_int = int(nan_threshold)
-                                except ValueError:
-                                    st.warning(f"连续NaN阈值 '{nan_threshold}' 不是一个有效的整数。将忽略此阈值。")
-                                    nan_threshold_int = None
-
-                        # 数据预处理参数
-                        status_text.text("[CONFIG] 正在执行数据预处理...")
-                        progress_bar.progress(30)
-
-                        # 调用真正的数据预处理函数
-                        from dashboard.DFM.data_prep.data_preparation import prepare_data
-
-                        try:
-                            # 打印调试信息
-                            print(f"[DEBUG] 调用prepare_data参数:")
-                            print(f"  - target_freq: {processing_params['target_freq']}")
-                            print(f"  - target_sheet_name: {processing_params['target_sheet_name']}")
-                            print(f"  - target_variable_name: {processing_params['target_variable']}")
-                            print(f"  - consecutive_nan_threshold: {nan_threshold_int}")
-                            print(f"  - data_start_date: {start_date_str}")
-                            print(f"  - data_end_date: {end_date_str}")
-                            print(f"  - reference_sheet_name: {processing_params['type_mapping_sheet']}")
-                            
-                            results = prepare_data(
-                                excel_path=excel_file_like_object,
-                                target_freq=processing_params['target_freq'],
-                                target_sheet_name=processing_params['target_sheet_name'],
-                                target_variable_name=processing_params['target_variable'],
-                                consecutive_nan_threshold=nan_threshold_int,
-                                data_start_date=start_date_str,
-                                data_end_date=end_date_str,
-                                reference_sheet_name=processing_params['type_mapping_sheet']
-                            )
-
-                            status_text.text("[SUCCESS] 数据预处理完成，正在生成结果...")
-                            progress_bar.progress(70)
-
-                            # 打印返回结果调试信息
-                            print(f"[DEBUG] prepare_data返回结果:")
-                            print(f"  - results类型: {type(results)}")
-                            print(f"  - results长度: {len(results) if results else 'None'}")
-                            
-                            # 解包结果
-                            if results and len(results) >= 4:
-                                prepared_data, industry_map, transform_log, removed_variables_detailed_log = results
-                                print(f"[DEBUG] 解包后的结果:")
-                                print(f"  - prepared_data: {type(prepared_data)}, shape: {prepared_data.shape if prepared_data is not None else 'None'}")
-                                print(f"  - industry_map: {type(industry_map)}")
-                                print(f"  - transform_log: {type(transform_log)}")
-                                print(f"  - removed_log长度: {len(removed_variables_detailed_log) if removed_variables_detailed_log else 0}")
-                            else:
-                                prepared_data = None
-                                print(f"[DEBUG] results不满足条件，prepared_data设置为None")
-                                industry_map = {}
-                                transform_log = {}
-                                removed_variables_detailed_log = []
-                                st.warning("数据预处理返回的结果格式不正确")
-
-                        except Exception as prep_e:
-                            st.error(f"数据预处理失败: {prep_e}")
-                            import traceback
-                            st.text_area("预处理错误详情:", traceback.format_exc(), height=150)
+                        # 打印返回结果调试信息
+                        print(f"[DEBUG] prepare_data返回结果:")
+                        print(f"  - results类型: {type(results)}")
+                        print(f"  - results长度: {len(results) if results else 'None'}")
+                        
+                        # 解包结果
+                        if results and len(results) >= 4:
+                            prepared_data, industry_map, transform_log, removed_variables_detailed_log = results
+                            print(f"[DEBUG] 解包后的结果:")
+                            print(f"  - prepared_data: {type(prepared_data)}, shape: {prepared_data.shape if prepared_data is not None else 'None'}")
+                            print(f"  - industry_map: {type(industry_map)}")
+                            print(f"  - transform_log: {type(transform_log)}")
+                            print(f"  - removed_log长度: {len(removed_variables_detailed_log) if removed_variables_detailed_log else 0}")
+                        else:
                             prepared_data = None
+                            print(f"[DEBUG] results不满足条件，prepared_data设置为None")
                             industry_map = {}
                             transform_log = {}
                             removed_variables_detailed_log = []
+                            st.warning("数据预处理返回的结果格式不正确")
+
+                    except Exception as prep_e:
+                        st.error(f"数据预处理失败: {prep_e}")
+                        import traceback
+                        st.text_area("预处理错误详情:", traceback.format_exc(), height=150)
+                        prepared_data = None
+                        industry_map = {}
+                        transform_log = {}
+                        removed_variables_detailed_log = []
+
+                    if prepared_data is not None:
+                        status_text.text("[INFO] 正在处理结果数据...")
+                        progress_bar.progress(80)
+
+                        # 保存数据对象到统一状态管理器
+                        print(f"[DEBUG] 保存removed_variables_detailed_log到状态: {len(removed_variables_detailed_log) if removed_variables_detailed_log else 0} 条记录")
+                        set_dfm_state("dfm_prepared_data_df", prepared_data)
+                        set_dfm_state("dfm_transform_log_obj", transform_log)
+                        set_dfm_state("dfm_industry_map_obj", industry_map)
+                        set_dfm_state("dfm_removed_vars_log_obj", removed_variables_detailed_log)
+                        set_dfm_state("dfm_var_type_map_obj", {})
+
+                        # 验证保存是否成功
+                        saved_log = get_dfm_state("dfm_removed_vars_log_obj")
+                        print(f"[DEBUG] 验证保存后的removed_vars_log: {len(saved_log) if saved_log else 0} 条记录")
+
+                        st.success("数据预处理完成！结果已准备就绪，可用于模型训练模块。")
+                        st.info(f"[DATA] 预处理后数据形状: {prepared_data.shape}")
+
+                        # Prepare for download (existing logic)
+                        export_base_name = processing_params['export_base_name']
+                        processed_outputs = {
+                            'base_name': export_base_name,
+                            'data': None, 'industry_map': None, 'transform_log': None, 'removed_vars_log': None
+                        }
 
                         if prepared_data is not None:
-                            status_text.text("[INFO] 正在处理结果数据...")
-                            progress_bar.progress(80)
+                            processed_outputs['data'] = prepared_data.to_csv(index=True, index_label='Date', encoding='utf-8-sig').encode('utf-8-sig')
 
-                            # 保存数据对象到统一状态管理器
-                            set_dfm_state("dfm_prepared_data_df", prepared_data)
-                            set_dfm_state("dfm_transform_log_obj", transform_log)
-                            set_dfm_state("dfm_industry_map_obj", industry_map)
-                            set_dfm_state("dfm_removed_vars_log_obj", removed_variables_detailed_log)
-                            set_dfm_state("dfm_var_type_map_obj", {})
+                        if industry_map:
+                            try:
+                                df_industry_map = pd.DataFrame(list(industry_map.items()), columns=['Indicator', 'Industry'])
+                                processed_outputs['industry_map'] = df_industry_map.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                            except Exception as e_im:
+                                st.warning(f"行业映射转换到CSV时出错: {e_im}")
+                                processed_outputs['industry_map'] = None
 
-                            st.success("数据预处理完成！结果已准备就绪，可用于模型训练模块。")
-                            st.info(f"[DATA] 预处理后数据形状: {prepared_data.shape}")
+                        # 保存处理结果到统一状态管理器
+                        set_dfm_state("dfm_processed_outputs", processed_outputs)
 
-                            # Prepare for download (existing logic)
-                            export_base_name = processing_params['export_base_name']
-                            processed_outputs = {
-                                'base_name': export_base_name,
-                                'data': None, 'industry_map': None, 'transform_log': None, 'removed_vars_log': None
-                            }
-
-                            if prepared_data is not None:
-                                processed_outputs['data'] = prepared_data.to_csv(index=True, index_label='Date', encoding='utf-8-sig').encode('utf-8-sig')
-
-                            if industry_map:
-                                try:
-                                    df_industry_map = pd.DataFrame(list(industry_map.items()), columns=['Indicator', 'Industry'])
-                                    processed_outputs['industry_map'] = df_industry_map.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-                                except Exception as e_im:
-                                    st.warning(f"行业映射转换到CSV时出错: {e_im}")
-                                    processed_outputs['industry_map'] = None
-
-                            # 保存处理结果到统一状态管理器
-                            set_dfm_state("dfm_processed_outputs", processed_outputs)
-
-                        else:
-                            progress_bar.progress(100)
-                            status_text.text("[ERROR] 处理失败")
-                            st.error("数据预处理失败或未返回数据。请检查控制台日志获取更多信息。")
-                            set_dfm_state("dfm_processed_outputs", None)
-
-                        if 'progress_bar' in locals():
-                            progress_bar.progress(100)
-                            status_text.text("[SUCCESS] 处理完成！")
-                            time.sleep(1)
-                            progress_bar.empty()
-                            status_text.empty()
-
-                    except Exception as e:
-                        st.error(f"运行数据预处理时发生错误: {e}")
-                        import traceback
-                        st.text_area("详细错误信息:", traceback.format_exc(), height=200)
+                    else:
+                        progress_bar.progress(100)
+                        status_text.text("[ERROR] 处理失败")
+                        st.error("数据预处理失败或未返回数据。请检查控制台日志获取更多信息。")
                         set_dfm_state("dfm_processed_outputs", None)
 
-                except Exception as outer_e:
-                    st.error(f"数据预处理过程中发生未预期的错误: {outer_e}")
+                    if 'progress_bar' in locals():
+                        progress_bar.progress(100)
+                        status_text.text("[SUCCESS] 处理完成！")
+                        time.sleep(1)
+                        progress_bar.empty()
+                        status_text.empty()
+
+                except Exception as e:
+                    st.error(f"运行数据预处理时发生错误: {e}")
                     import traceback
                     st.text_area("详细错误信息:", traceback.format_exc(), height=200)
+                    set_dfm_state("dfm_processed_outputs", None)
 
-        # Render download buttons if data is available
-        processed_outputs = get_dfm_state("dfm_processed_outputs")
-        if processed_outputs:
-            outputs = processed_outputs
-            base_name = outputs['base_name']
+            except Exception as outer_e:
+                st.error(f"数据预处理过程中发生未预期的错误: {outer_e}")
+                import traceback
+                st.text_area("详细错误信息:", traceback.format_exc(), height=200)
 
-            # 创建三列布局用于水平排列下载按钮
-            col1, col2, col3 = st.columns(3)
+    # 在右侧列显示移除变量的信息
+    with right_col:
+        removed_vars_log = get_dfm_state("dfm_removed_vars_log_obj")
+        if removed_vars_log and len(removed_vars_log) > 0:
+            # 按原因分组统计，并保留完整的entry信息
+            reason_groups = {}
+            for entry in removed_vars_log:
+                reason = entry.get('Reason', '未知原因')
+                variable = entry.get('Variable', '未知变量')
+                if reason not in reason_groups:
+                    reason_groups[reason] = []
+                reason_groups[reason].append(entry)
 
-            with col1:
-                if outputs.get('data'):
-                    st.download_button(
-                        label="下载处理后的数据",
-                        data=outputs['data'],
-                        file_name=f"{base_name}.csv",
-                        mime='text/csv',
-                        key='download_data_csv'
-                    )
+            # 显示统计信息
+            st.info(f"共有 {len(removed_vars_log)} 个变量被移除")
 
-            with col2:
-                if outputs.get('industry_map'):
-                    st.download_button(
-                        label="下载行业映射",
-                        data=outputs['industry_map'],
-                        file_name=f"{base_name}_industry_map.csv",
-                        mime='text/csv',
-                        key='download_industry_map_csv'
-                    )
+            # 使用expander显示详细信息
+            with st.expander("查看详细信息", expanded=True):
+                for reason, entries in reason_groups.items():
+                    st.markdown(f"**{reason}** ({len(entries)}个变量)")
+                    for entry in entries:
+                        variable = entry.get('Variable', '未知变量')
+                        details = entry.get('Details', {})
 
-            with col3:
-                if outputs.get('transform_log'):
-                    st.download_button(
-                        label="下载转换日志",
-                        data=outputs['transform_log'],
-                        file_name=f"{base_name}_transform_log.csv",
-                        mime='text/csv',
-                        key='download_transform_log_csv'
-                    )
+                        # 显示缺失时间段信息（去掉汉字标签）
+                        if details and 'nan_period' in details:
+                            nan_period = details.get('nan_period', '未知')
+                            max_consecutive = details.get('max_consecutive_nan', 'N/A')
+                            st.markdown(f"- {variable} ({nan_period}, {max_consecutive})")
+                        else:
+                            st.markdown(f"- {variable}")
+                    st.markdown("---")
+        elif removed_vars_log is not None and len(removed_vars_log) == 0:
+            st.success("所有变量都通过了筛选，没有变量被移除")
 
-            if outputs.get('removed_vars_log'):
+    # Render download buttons if data is available - 放在左侧列的占位符中
+    processed_outputs = get_dfm_state("dfm_processed_outputs")
+    if processed_outputs:
+        outputs = processed_outputs
+        base_name = outputs['base_name']
+
+        # 在左侧列的占位符中显示下载按钮
+        with download_data_placeholder.container():
+            if outputs.get('data'):
                 st.download_button(
-                    label=f"下载移除变量日志 ({base_name}_removed_log.csv)",
-                    data=outputs['removed_vars_log'],
-                    file_name=f"{base_name}_removed_log.csv",
+                    label="下载数据",
+                    data=outputs['data'],
+                    file_name=f"{base_name}.csv",
                     mime='text/csv',
-                    key='download_removed_log_csv'
+                    key='download_data_csv',
+                    use_container_width=True
+                )
+
+        with download_map_placeholder.container():
+            if outputs.get('industry_map'):
+                st.download_button(
+                    label="下载映射",
+                    data=outputs['industry_map'],
+                    file_name=f"{base_name}_industry_map.csv",
+                    mime='text/csv',
+                    key='download_industry_map_csv',
+                    use_container_width=True
                 )
 
 

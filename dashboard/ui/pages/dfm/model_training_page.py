@@ -902,9 +902,6 @@ def render_dfm_train_model_tab(st_instance):
     # 2. 选择行业变量 (复选框形式，默认全选)（兼容新旧状态管理）
     st_instance.markdown("**选择行业**")
 
-
-    st_instance.markdown("---")
-
     current_checkbox_states = get_dfm_state('dfm_industry_checkbox_states', None)
 
     # 如果状态为None、空字典，或者行业列表发生变化，则重新初始化

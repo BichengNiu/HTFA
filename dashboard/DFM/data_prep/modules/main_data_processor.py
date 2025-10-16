@@ -206,6 +206,12 @@ def _finalize_data_processing(
     print(f"  最终周度数据对齐完成. Shape: {all_data_aligned_weekly.shape}")
     print(f"  最终索引频率: {all_data_aligned_weekly.index.freq}")
 
+    # 添加调试信息：检查数据的实际时间范围和NaN情况
+    print(f"  [DEBUG] 最终数据索引范围: {all_data_aligned_weekly.index.min()} 到 {all_data_aligned_weekly.index.max()}")
+    print(f"  [DEBUG] 指定的data_start_date: {data_start_date}, data_end_date: {data_end_date}")
+    non_nan_counts = all_data_aligned_weekly.notna().sum()
+    print(f"  [DEBUG] 前5列的非NaN计数: {dict(non_nan_counts.head())}")
+
     # 移除全NaN列（但保留全NaN行以匹配原始版本行为）
     all_data_aligned_weekly, final_clean_log = clean_dataframe(
         all_data_aligned_weekly,
@@ -219,6 +225,7 @@ def _finalize_data_processing(
 
     if all_data_aligned_weekly is None or all_data_aligned_weekly.empty:
         print("错误: [Data Prep] 最终合并和对齐后的数据为空。")
+        print(f"  [DEBUG] 最终清理移除了 {len(final_clean_log)} 个变量")
         return None, None, None, None
 
     # 继续到平稳性检查
