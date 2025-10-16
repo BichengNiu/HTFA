@@ -139,21 +139,24 @@ def _prepare_periodic_data_generic(series, current_year, previous_year, x_range,
         plot_df = pd.DataFrame({
             'value': series_clean,
             'year': series_clean.index.year,
-            period_key: period_extractor(series_clean.index)
+            period_key: period_extractor(series_clean.index),
+            'date': series_clean.index
         })
     elif period_key == 'week':
         # weekly特殊处理：使用isocalendar()
         plot_df = pd.DataFrame({
             'value': series_clean,
             'year': series_clean.index.year,
-            period_key: series_clean.index.isocalendar().week
+            period_key: series_clean.index.isocalendar().week,
+            'date': series_clean.index
         })
     else:
         # monthly使用标准属性
         plot_df = pd.DataFrame({
             'value': series_clean,
             'year': series_clean.index.year,
-            period_key: series_clean.index.month
+            period_key: series_clean.index.month,
+            'date': series_clean.index
         })
 
     # 计算历史统计
@@ -176,17 +179,85 @@ def _prepare_periodic_data_generic(series, current_year, previous_year, x_range,
         historical_stats.loc[period_stats.index, 'hist_mean'] = period_stats['mean']
 
     # 对齐当年和去年数据
-    current_period = plot_df[plot_df['year'] == current_year].set_index(period_key)['value'].reindex(x_range)
-    previous_period = plot_df[plot_df['year'] == previous_year].set_index(period_key)['value'].reindex(x_range)
+    current_period_df = plot_df[plot_df['year'] == current_year].set_index(period_key)
+    previous_period_df = plot_df[plot_df['year'] == previous_year].set_index(period_key)
+
+    current_period = current_period_df['value'].reindex(x_range)
+    previous_period = previous_period_df['value'].reindex(x_range)
+
+    # 为当年和去年数据生成对应周期的日期
+    current_dates = []
+    previous_dates = []
+    x_labels_list = []
+
+    if period_key == 'week':
+        # 周度数据：为每周计算对应年份的日期（使用周一作为代表日期）
+        # 先确定当前年份实际有多少周
+        valid_weeks = []
+        for p in x_range:
+            try:
+                current_week_date = pd.Timestamp.fromisocalendar(current_year, p, 1)
+                valid_weeks.append(p)
+            except:
+                # 跳过不存在的周（如第53周在某些年份不存在）
+                continue
+
+        # 只处理有效的周
+        for p in valid_weeks:
+            # 计算当前年份该周的日期
+            current_week_date = pd.Timestamp.fromisocalendar(current_year, p, 1)
+            current_dates.append(current_week_date.strftime('%Y-%m-%d'))
+            x_labels_list.append(current_week_date.strftime('%Y-%m-%d'))
+
+            # 计算去年该周的日期
+            try:
+                previous_week_date = pd.Timestamp.fromisocalendar(previous_year, p, 1)
+                previous_dates.append(previous_week_date.strftime('%Y-%m-%d'))
+            except:
+                previous_dates.append(None)
+
+        # 更新x_range为有效的周
+        x_range = valid_weeks
+        # 重新对齐数据
+        current_period = current_period.reindex(valid_weeks)
+        previous_period = previous_period.reindex(valid_weeks)
+    else:
+        # 其他频率：使用实际数据的日期
+        for p in x_range:
+            if p in current_period_df.index:
+                date_val = current_period_df.loc[p, 'date']
+                if isinstance(date_val, pd.Timestamp):
+                    current_dates.append(date_val.strftime('%Y-%m-%d'))
+                else:
+                    current_dates.append(None)
+            else:
+                current_dates.append(None)
+
+        for p in x_range:
+            if p in previous_period_df.index:
+                date_val = previous_period_df.loc[p, 'date']
+                if isinstance(date_val, pd.Timestamp):
+                    previous_dates.append(date_val.strftime('%Y-%m-%d'))
+                else:
+                    previous_dates.append(None)
+            else:
+                previous_dates.append(None)
+
+        x_labels_list = [label_formatter(p) for p in x_range]
+
+    x_labels = x_labels_list
 
     return {
         'x': list(x_range),
-        'x_labels': [label_formatter(p) for p in x_range],
+        'x_labels': x_labels,
         'hist_min': historical_stats['hist_min'].values,
         'hist_max': historical_stats['hist_max'].values,
         'hist_mean': historical_stats['hist_mean'].values,
         f'{current_year}年': current_period.values,
-        f'{previous_year}年': previous_period.values
+        f'{previous_year}年': previous_period.values,
+        'current_dates': current_dates,
+        'previous_dates': previous_dates,
+        'is_weekly': period_key == 'week'
     }
 
 
@@ -304,25 +375,49 @@ def _add_year_data(fig, plot_data, year, frequency, color_key, x_key=None, y_key
                 hovertemplate=f'{year}年 (%{{customdata}}): %{{y:.2f}}<extra></extra>'
             ))
     elif year_key in plot_data:
-        fig.add_trace(go.Scatter(
-            x=plot_data['x'],
-            y=plot_data[year_key],
-            mode='lines+markers',
-            name=year_key,
-            line=dict(color=COLORS[color_key])
-        ))
+        # 检查是否为周度数据且有日期信息
+        is_weekly = plot_data.get('is_weekly', False)
+
+        if is_weekly and dates_key in plot_data:
+            # 周度数据使用日期作为hover信息
+            fig.add_trace(go.Scatter(
+                x=plot_data['x'],
+                y=plot_data[year_key],
+                mode='lines+markers',
+                name=year_key,
+                line=dict(color=COLORS[color_key]),
+                customdata=plot_data[dates_key],
+                hovertemplate=f'{year}年 (%{{customdata}}): %{{y:.2f}}<extra></extra>'
+            ))
+        else:
+            # 其他频率保持原样
+            fig.add_trace(go.Scatter(
+                x=plot_data['x'],
+                y=plot_data[year_key],
+                mode='lines+markers',
+                name=year_key,
+                line=dict(color=COLORS[color_key])
+            ))
 
 
 def _add_previous_year(fig, plot_data, year, frequency):
     """添加去年数据"""
-    _add_year_data(fig, plot_data, year, frequency, 'previous_year',
-                   x_key='previous_x', y_key='previous_y', dates_key='previous_dates')
+    if frequency == 'daily':
+        _add_year_data(fig, plot_data, year, frequency, 'previous_year',
+                       x_key='previous_x', y_key='previous_y', dates_key='previous_dates')
+    else:
+        _add_year_data(fig, plot_data, year, frequency, 'previous_year',
+                       dates_key='previous_dates')
 
 
 def _add_current_year(fig, plot_data, year, frequency):
     """添加今年数据"""
-    _add_year_data(fig, plot_data, year, frequency, 'current_year',
-                   x_key='current_x', y_key='current_y', dates_key='current_dates')
+    if frequency == 'daily':
+        _add_year_data(fig, plot_data, year, frequency, 'current_year',
+                       x_key='current_x', y_key='current_y', dates_key='current_dates')
+    else:
+        _add_year_data(fig, plot_data, year, frequency, 'current_year',
+                       dates_key='current_dates')
 
 
 def _apply_layout(fig, name, unit, config, plot_data):

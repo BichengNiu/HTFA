@@ -210,18 +210,18 @@ class DataAligner:
     def align_weekly_data(self, weekly_data_list: List[pd.DataFrame]) -> pd.DataFrame:
         """
         对齐周度数据（使用最后值）
-        
+
         Args:
             weekly_data_list: 周度数据DataFrame列表
-            
+
         Returns:
             pd.DataFrame: 对齐后的周度数据
         """
         if not weekly_data_list:
             return pd.DataFrame()
-        
+
         print("  处理周度数据 -> 周度 (最后值)...")
-        
+
         # 首先确保每个DataFrame的索引是唯一的
         cleaned_weekly_list = []
         for i, df in enumerate(weekly_data_list):
@@ -230,13 +230,13 @@ class DataAligner:
                 print(f"    警告：周度数据 {i} 有重复索引，正在清理...")
                 df = df[~df.index.duplicated(keep='first')]
             cleaned_weekly_list.append(df)
-        
+
         # 合并所有周度数据
         df_weekly_full = pd.concat(cleaned_weekly_list, axis=1, join='outer', sort=True)
-        
+
         # 处理重复列
         df_weekly_full = self.cleaner.remove_duplicate_columns(df_weekly_full, "[周度对齐] ")
-        
+
         if not df_weekly_full.empty:
             # 对齐到目标频率
             df_weekly_aligned = df_weekly_full.resample(self.target_freq).last()
@@ -244,6 +244,84 @@ class DataAligner:
             return df_weekly_aligned
         else:
             print("    合并后的周度数据为空，无法进行周度转换。")
+            return pd.DataFrame()
+
+    def convert_dekad_to_weekly(self, dekad_data_list: List[pd.DataFrame]) -> pd.DataFrame:
+        """
+        将旬度数据转换为周度数据（旬日：10、20、30日对应到所在周的周五）
+
+        Args:
+            dekad_data_list: 旬度数据DataFrame列表
+
+        Returns:
+            pd.DataFrame: 转换后的周度数据
+        """
+        if not dekad_data_list:
+            return pd.DataFrame()
+
+        print("  处理旬度数据 -> 周度 (旬日合并到所在周的周五)...")
+
+        # 首先确保每个DataFrame的索引是唯一的
+        cleaned_dekad_list = []
+        for i, df in enumerate(dekad_data_list):
+            # 移除重复的索引（保留第一个）
+            if df.index.duplicated().any():
+                print(f"    警告：旬度数据 {i} 有重复索引，正在清理...")
+                df = df[~df.index.duplicated(keep='first')]
+            cleaned_dekad_list.append(df)
+
+        # 合并所有旬度数据
+        df_dekad_full = pd.concat(cleaned_dekad_list, axis=1, join='outer', sort=True)
+
+        # 处理重复列
+        df_dekad_full = self.cleaner.remove_duplicate_columns(df_dekad_full, "[旬度转周度] ")
+
+        if not df_dekad_full.empty:
+            # 过滤出旬日（10、20、30日）的数据
+            # 添加调试信息
+            print(f"    旬度数据原始索引范围: {df_dekad_full.index.min()} 到 {df_dekad_full.index.max()}")
+            print(f"    旬度数据原始行数: {len(df_dekad_full)}")
+
+            # 检查是否是旬日（10、20、30）
+            dekad_days = df_dekad_full.index.day
+            is_dekad_day = dekad_days.isin([10, 20, 30])
+
+            if not is_dekad_day.any():
+                print(f"    警告：数据中没有旬日（10、20、30日），将使用所有数据点")
+                df_dekad_filtered = df_dekad_full
+            else:
+                df_dekad_filtered = df_dekad_full[is_dekad_day]
+                print(f"    过滤后旬日数据行数: {len(df_dekad_filtered)}")
+
+            # 将旬日映射到所在周的周五
+            # 对于每个旬日，找到它所在周的周五
+            df_temp = df_dekad_filtered.copy()
+
+            # 计算每个日期对应的周五
+            # 如果当前日期是周一到周五，对应到本周的周五
+            # 如果是周六日，对应到下周的周五
+            def get_week_friday(date):
+                weekday = date.weekday()  # 周一=0, ..., 周五=4, 周六=5, 周日=6
+                if weekday <= 4:  # 周一到周五
+                    days_to_friday = 4 - weekday
+                else:  # 周六日
+                    days_to_friday = (7 - weekday) + 4
+                return date + pd.Timedelta(days=days_to_friday)
+
+            df_temp['target_friday'] = df_temp.index.map(get_week_friday)
+
+            # 按目标周五分组，保留最后一个值（如果一周内有多个旬日）
+            df_dekad_weekly = df_temp.groupby('target_friday').last()
+            df_dekad_weekly.index.name = 'Date'
+
+            # 对齐到目标频率
+            df_dekad_weekly = df_dekad_weekly.resample(self.target_freq).last()
+
+            print(f"    旬度->周度 完成. Shape: {df_dekad_weekly.shape}")
+            print(f"    转换后周度数据索引范围: {df_dekad_weekly.index.min()} 到 {df_dekad_weekly.index.max()}")
+            return df_dekad_weekly
+        else:
+            print("    合并后的旬度数据为空，无法进行周度转换。")
             return pd.DataFrame()
     
     def create_full_date_range(self, all_indices: List[pd.DatetimeIndex], start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DatetimeIndex:

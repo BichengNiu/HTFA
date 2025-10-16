@@ -211,6 +211,73 @@ class DataLoader:
             print(f"      加载或处理 {freq_type} Sheet '{sheet_name}' 时出错: {e}. 跳过。")
             return None
 
+    def load_dekad_sheet(
+        self,
+        excel_file,
+        sheet_name: str,
+        industry_name: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        加载旬度数据表格（10日、20日、30日为旬日）
+
+        Args:
+            excel_file: Excel文件对象
+            sheet_name: 表格名称
+            industry_name: 行业名称
+
+        Returns:
+            Optional[pd.DataFrame]: 加载的数据，如果失败返回None
+        """
+        print(f"      检测到旬度预测变量 Sheet (行业: '{industry_name}')...")
+
+        try:
+            # 使用统一格式读取数据
+            print(f"        [使用统一格式] 第一行为列名，第一列为时间列")
+
+            # 统一格式读取：第一行是列名，第一列是时间
+            df = pd.read_excel(excel_file, sheet_name=sheet_name, header=0, index_col=0, parse_dates=True)
+
+            # 清理数据
+            df = self.cleaner.clean_zero_values(df, f"[旬度] ")
+            df = self.cleaner.remove_unnamed_columns(df, f"[旬度] ")
+
+            # 强制索引转换为日期时间
+            print(f"      尝试将 '{sheet_name}' 的索引转换为日期时间...")
+            original_index_len = len(df.index)
+            df.index = pd.to_datetime(df.index, errors='coerce')
+
+            if df is None or df.empty:
+                return None
+
+            df = df.loc[df.index.notna()]  # 过滤索引转换失败的行
+            filtered_index_len = len(df.index)
+
+            if filtered_index_len < original_index_len:
+                print(f"      警告: 在 '{sheet_name}' 中移除了 {original_index_len - filtered_index_len} 行，因为它们的索引无法解析为有效日期。")
+
+            df = df.dropna(axis=1, how='all')
+            if df.empty:
+                return None
+
+            df_numeric = df.apply(pd.to_numeric, errors='coerce')
+            if df_numeric.empty or df_numeric.isnull().all().all():
+                return None
+
+            print(f"      Sheet '{sheet_name}' ({industry_name}, dekad) 加载完成。 Shape: {df_numeric.shape}")
+
+            # 更新映射
+            for col in df_numeric.columns:
+                norm_col = normalize_text(col)
+                if norm_col:
+                    self.var_industry_map[norm_col] = industry_name
+                    self.raw_columns_across_all_sheets.add(norm_col)
+
+            return df_numeric
+
+        except Exception as e:
+            print(f"      加载或处理旬度 Sheet '{sheet_name}' 时出错: {e}. 跳过。")
+            return None
+
     def load_monthly_predictor_sheet(
         self,
         excel_file,

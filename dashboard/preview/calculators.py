@@ -13,7 +13,12 @@ from dashboard.preview.config import SUMMARY_CONFIGS
 
 
 @st.cache_data(show_spinner=False, max_entries=30, ttl=3600)
-def calculate_summary(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
+def calculate_summary(
+    df: pd.DataFrame,
+    frequency: str,
+    indicator_unit_map: Dict[str, str] = None,
+    indicator_type_map: Dict[str, str] = None
+) -> pd.DataFrame:
     """通用摘要计算函数
 
     根据频率自动选择合适的计算策略
@@ -21,6 +26,8 @@ def calculate_summary(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
     Args:
         df: 数据DataFrame
         frequency: 数据频率 ('weekly'/'monthly'/'daily'/'ten_day'/'yearly')
+        indicator_unit_map: 指标单位映射字典
+        indicator_type_map: 指标类型映射字典
 
     Returns:
         摘要DataFrame
@@ -34,6 +41,11 @@ def calculate_summary(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
 
     df = df.sort_index()
     config = SUMMARY_CONFIGS[frequency]
+
+    if indicator_unit_map is None:
+        indicator_unit_map = {}
+    if indicator_type_map is None:
+        indicator_type_map = {}
 
     summary_data = []
 
@@ -51,9 +63,11 @@ def calculate_summary(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
             df, series, current_date, frequency
         )
 
-        # 3. 计算增长率
+        # 3. 计算增长率(传入单位和类型信息)
+        indicator_unit = indicator_unit_map.get(indicator, '')
+        indicator_type = indicator_type_map.get(indicator, '')
         growth_rates = _calculate_growth_rates(
-            current_value, reference_values, frequency
+            current_value, reference_values, frequency, indicator_unit, indicator_type
         )
 
         # 4. 计算历史统计
@@ -64,6 +78,8 @@ def calculate_summary(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
         # 5. 构建行数据
         row_data = {
             config['indicator_name_column']: indicator,
+            '单位': indicator_unit,  # 添加单位列,用于显示时格式化判断
+            '类型': indicator_type,  # 添加类型列,用于显示时格式化判断
             '最新值': current_value,
             config['date_column']: (
                 current_date.strftime('%Y-%m-%d') if frequency != 'yearly'
@@ -76,10 +92,21 @@ def calculate_summary(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
 
         summary_data.append(row_data)
 
-    # 构建DataFrame并排序列
+    # 构建DataFrame并排序列(添加单位和类型到列顺序中)
     summary_df = pd.DataFrame(summary_data)
-    existing_cols = [c for c in config['column_order'] if c in summary_df.columns]
-    return summary_df[existing_cols]
+    # 确保单位和类型列在指标名称后面
+    column_order_with_meta = []
+    for col in config['column_order']:
+        if col in summary_df.columns:
+            column_order_with_meta.append(col)
+            # 在指标名称列后面插入单位和类型
+            if col == config['indicator_name_column']:
+                if '单位' in summary_df.columns:
+                    column_order_with_meta.append('单位')
+                if '类型' in summary_df.columns:
+                    column_order_with_meta.append('类型')
+
+    return summary_df[column_order_with_meta]
 
 
 def _calculate_reference_values(
@@ -159,10 +186,27 @@ def _calculate_reference_values(
 def _calculate_growth_rates(
     current_value: Any,
     reference_values: Dict[str, Any],
-    frequency: str
+    frequency: str,
+    indicator_unit: str = '',
+    indicator_type: str = ''
 ) -> Dict[str, float]:
-    """计算增长率(所有频率通用)"""
+    """计算增长率(所有频率通用)
+
+    Args:
+        current_value: 当前值
+        reference_values: 参考值字典
+        frequency: 数据频率
+        indicator_unit: 指标单位
+        indicator_type: 指标类型
+
+    Returns:
+        增长率字典
+    """
     growth_rates = {}
+
+    # 判断是否使用差值计算
+    # 规则：单位为"%"且类型不是"开工率"时,使用差值而不是比率
+    use_difference = (indicator_unit == '%' and indicator_type != '开工率')
 
     # 根据频率选择use_abs参数
     use_abs = frequency != 'monthly'
@@ -172,43 +216,43 @@ def _calculate_growth_rates(
         # 日度数据：计算环比昨日、环比上周、环比上月
         if '昨日值' in reference_values:
             growth_rates['环比昨日'] = _growth_rate(
-                current_value, reference_values['昨日值'], True
+                current_value, reference_values['昨日值'], True, use_difference
             )
         if '上周值' in reference_values:
             growth_rates['环比上周'] = _growth_rate(
-                current_value, reference_values['上周值'], True
+                current_value, reference_values['上周值'], True, use_difference
             )
         if '上月值' in reference_values:
             growth_rates['环比上月'] = _growth_rate(
-                current_value, reference_values['上月值'], True
+                current_value, reference_values['上月值'], True, use_difference
             )
     elif frequency == 'weekly':
         # 周度数据：只计算环比上周
         if '上周值' in reference_values:
             growth_rates['环比上周'] = _growth_rate(
-                current_value, reference_values['上周值'], True
+                current_value, reference_values['上周值'], True, use_difference
             )
     elif frequency == 'monthly':
         # 月度数据：只计算环比上月
         if '上月值' in reference_values:
             growth_rates['环比上月'] = _growth_rate(
-                current_value, reference_values['上月值'], False
+                current_value, reference_values['上月值'], False, use_difference
             )
     elif frequency == 'ten_day':
         # 旬度数据：只计算环比上旬
         if '上旬值' in reference_values:
             growth_rates['环比上旬'] = _growth_rate(
-                current_value, reference_values['上旬值'], True
+                current_value, reference_values['上旬值'], True, use_difference
             )
 
     # 同比增长率
     if '上年同月值' in reference_values:
         growth_rates['同比上年'] = _growth_rate(
-            current_value, reference_values['上年同月值'], False
+            current_value, reference_values['上年同月值'], False, use_difference
         )
     elif '上年值' in reference_values and frequency in ('daily', 'yearly'):
         growth_rates['同比上年'] = _growth_rate(
-            current_value, reference_values['上年值'], True
+            current_value, reference_values['上年值'], True, use_difference
         )
 
     return growth_rates
@@ -286,9 +330,24 @@ def _calculate_period_mean(
     return period_data.mean() if not period_data.empty else np.nan
 
 
-def _growth_rate(current: Any, reference: Any, use_abs: bool = True) -> float:
-    """计算增长率"""
-    if pd.notna(current) and pd.notna(reference) and reference != 0:
-        denominator = abs(reference) if use_abs else reference
-        return (current - reference) / denominator
+def _growth_rate(current: Any, reference: Any, use_abs: bool = True, use_difference: bool = False) -> float:
+    """计算增长率或差值
+
+    Args:
+        current: 当前值
+        reference: 参考值
+        use_abs: 是否使用绝对值作为分母
+        use_difference: 是否使用差值而不是比率
+
+    Returns:
+        增长率或差值
+    """
+    if pd.notna(current) and pd.notna(reference):
+        if use_difference:
+            # 使用差值计算
+            return current - reference
+        elif reference != 0:
+            # 使用比率计算
+            denominator = abs(reference) if use_abs else reference
+            return (current - reference) / denominator
     return np.nan

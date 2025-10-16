@@ -156,6 +156,12 @@ def load_all_sheets(
             if df_loaded is not None:
                 data_parts[freq_type].append(df_loaded)
 
+        elif freq_type == 'dekad':
+            # 处理旬度数据
+            df_loaded = data_loader.load_dekad_sheet(excel_file, sheet_name, industry_name)
+            if df_loaded is not None:
+                data_parts[freq_type].append(df_loaded)
+
         elif freq_type == 'monthly_predictor':
             # 处理其他月度预测变量
             df_monthly = data_loader.load_monthly_predictor_sheet(excel_file, sheet_name, industry_name)
@@ -190,6 +196,7 @@ def load_all_sheets(
     print(f"  其他月度预测变量: {df_other_monthly_predictors_pubdate.shape[1]} 个")
     print(f"  日度数据表格: {len(data_parts['daily'])} 个")
     print(f"  周度数据表格: {len(data_parts['weekly'])} 个")
+    print(f"  旬度数据表格: {len(data_parts['dekad'])} 个")
 
     return LoadedData(
         raw_target_values=raw_target_values,
@@ -260,7 +267,15 @@ def align_all_frequencies(
 
     df_daily_weekly = data_aligner.convert_daily_to_weekly(loaded_data.data_parts_by_freq['daily'])
 
-    # 2e: 周度数据对齐
+    # 2e: 旬度数据转换为周度
+    if loaded_data.data_parts_by_freq['dekad']:
+        for df in loaded_data.data_parts_by_freq['dekad']:
+            if not df.empty:
+                all_indices_for_range.append(df.index)
+
+    df_dekad_weekly = data_aligner.convert_dekad_to_weekly(loaded_data.data_parts_by_freq['dekad'])
+
+    # 2f: 周度数据对齐
     if loaded_data.data_parts_by_freq['weekly']:
         for df in loaded_data.data_parts_by_freq['weekly']:
             if not df.empty:
@@ -276,21 +291,23 @@ def align_all_frequencies(
         all_indices=all_indices_for_range,
         monthly_transform_log=monthly_transform_log,
         removed_variables_log=removed_variables_log
-    ), df_daily_weekly, df_weekly_aligned
+    ), df_daily_weekly, df_dekad_weekly, df_weekly_aligned
 
 
 def combine_daily_weekly_data(
     df_daily_weekly: pd.DataFrame,
+    df_dekad_weekly: pd.DataFrame,
     df_weekly_aligned: pd.DataFrame,
     consecutive_nan_threshold: Optional[int],
     data_start_date: Optional[str],
     data_end_date: Optional[str]
 ) -> Tuple[pd.DataFrame, List[Dict]]:
     """
-    合并日度和周度数据并进行清理
+    合并日度、旬度和周度数据并进行清理
 
     Args:
         df_daily_weekly: 日度转周度后的数据
+        df_dekad_weekly: 旬度转周度后的数据
         df_weekly_aligned: 周度对齐后的数据
         consecutive_nan_threshold: 连续NaN阈值
         data_start_date: 数据开始日期
@@ -299,13 +316,18 @@ def combine_daily_weekly_data(
     Returns:
         Tuple[pd.DataFrame, List[Dict]]: (合并后的数据, 移除变量日志)
     """
-    print("\n--- [Data Prep V3 ] 步骤 3: 合并日度/周度数据 ---")
+    print("\n--- [Data Prep V3 ] 步骤 3: 合并日度/旬度/周度数据 ---")
 
     parts_to_combine = []
     if not df_daily_weekly.empty:
         parts_to_combine.append(df_daily_weekly)
+        print(f"    添加日度转周度数据: Shape {df_daily_weekly.shape}")
+    if not df_dekad_weekly.empty:
+        parts_to_combine.append(df_dekad_weekly)
+        print(f"    添加旬度转周度数据: Shape {df_dekad_weekly.shape}")
     if not df_weekly_aligned.empty:
         parts_to_combine.append(df_weekly_aligned)
+        print(f"    添加周度对齐数据: Shape {df_weekly_aligned.shape}")
 
     if not parts_to_combine:
         return pd.DataFrame(), []
@@ -316,10 +338,10 @@ def combine_daily_weekly_data(
         consecutive_nan_threshold=consecutive_nan_threshold,
         data_start_date=data_start_date,
         data_end_date=data_end_date,
-        log_prefix="[日度/周度合并] "
+        log_prefix="[日度/旬度/周度合并] "
     )
 
-    print(f"    合并后日度/周度数据 Shape: {df_combined.shape}")
+    print(f"    合并后日度/旬度/周度数据 Shape: {df_combined.shape}")
 
     return df_combined, removed_log
 

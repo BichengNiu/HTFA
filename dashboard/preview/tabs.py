@@ -517,7 +517,15 @@ def display_time_series_tab(st_module, frequency):
     with st_module.spinner(f"正在计算 '{display_name}' 的{config['display_name']}摘要..."):
         filtered_df = df[filtered_indicators]
         try:
-            summary_table = calculate_summary(filtered_df, frequency)
+            # 获取单位和类型映射
+            indicator_unit_map = preview_data.get('indicator_unit_map', {})
+            # 调用calculate_summary时传入映射字典
+            summary_table = calculate_summary(
+                filtered_df,
+                frequency,
+                indicator_unit_map,
+                indicator_type_map
+            )
         except Exception as e:
             st_module.error(f"计算{config['display_name']}摘要时出错 ({display_name}): {e}")
             summary_table = pd.DataFrame()

@@ -69,7 +69,7 @@ def parse_sheet_info(sheet_name: str, target_sheet_name: str) -> Dict[str, Optio
     Returns:
         Dict[str, Optional[str]]: 包含以下键的字典
             - industry: 行业信息
-            - freq_type: 频率类型 ('daily', 'weekly', 'monthly', 'monthly_target', 'monthly_predictor')
+            - freq_type: 频率类型 ('daily', 'weekly', 'dekad', 'monthly', 'monthly_target', 'monthly_predictor')
             - source: 数据源
     """
     info: Dict[str, Optional[str]] = {'industry': None, 'freq_type': None, 'source': None}
@@ -105,6 +105,8 @@ def parse_sheet_info(sheet_name: str, target_sheet_name: str) -> Dict[str, Optio
             info['freq_type'] = 'daily'
         elif freq_part == '周度':
             info['freq_type'] = 'weekly'
+        elif freq_part == '旬度':
+            info['freq_type'] = 'dekad'
         elif freq_part == '月度':
             # 其他月度预测变量表格
             info['freq_type'] = 'monthly_predictor'

@@ -47,7 +47,8 @@ if %errorlevel% equ 0 (
 echo.
 echo [3/4] 启动应用程序...
 echo.
-streamlit run dashboard/app.py --server.headless=false --server.port=8501
+REM 自动输入空邮箱(直接回车)跳过邮箱提示
+echo. | py -m streamlit run dashboard/app.py --server.port=8501
 
 echo.
 echo [4/4] 应用程序已退出

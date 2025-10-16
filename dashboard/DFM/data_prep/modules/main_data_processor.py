@@ -119,14 +119,14 @@ def prepare_data(
         removed_variables_detailed_log.extend(loaded_data.removed_variables_log)
 
         # 步骤3: 对齐所有频率的数据
-        aligned_data, df_daily_weekly, df_weekly_aligned = align_all_frequencies(
+        aligned_data, df_daily_weekly, df_dekad_weekly, df_weekly_aligned = align_all_frequencies(
             data_aligner, loaded_data, all_indices_for_range
         )
         removed_variables_detailed_log.extend(aligned_data.removed_variables_log)
 
-        # 步骤4: 合并日度/周度数据
+        # 步骤4: 合并日度/旬度/周度数据
         df_combined_dw_weekly, dw_removed_log = combine_daily_weekly_data(
-            df_daily_weekly, df_weekly_aligned,
+            df_daily_weekly, df_dekad_weekly, df_weekly_aligned,
             consecutive_nan_threshold, data_start_date, data_end_date
         )
         removed_variables_detailed_log.extend(dw_removed_log)

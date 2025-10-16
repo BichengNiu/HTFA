@@ -165,29 +165,66 @@ def display_summary_table(
 
     # 应用样式
     try:
-        format_dict = {}
+        # 如果有单位和类型列，需要进行条件格式化
+        has_metadata = ('单位' in summary_sorted.columns and '类型' in summary_sorted.columns)
 
-        # 默认数值列保留两位小数
-        for col in summary_sorted.select_dtypes(include=np.number).columns:
-            format_dict[col] = '{:.2f}'
+        if has_metadata:
+            # 创建一个完全字符串化的副本用于显示（避免Arrow序列化问题）
+            display_df = summary_sorted.copy()
 
-        # 百分比格式列
-        for col in percentage_columns:
-            if col in summary_sorted.columns:
-                format_dict[col] = '{:.2%}'
+            # 先获取所有数值列的列表
+            numeric_cols = list(display_df.select_dtypes(include=np.number).columns)
 
-        styled_table = summary_sorted.style.format(format_dict)
+            # 遍历每一行，根据单位和类型格式化数值列
+            for idx in display_df.index:
+                unit = display_df.loc[idx, '单位']
+                indicator_type = display_df.loc[idx, '类型']
+                use_difference = (unit == '%' and indicator_type != '开工率')
 
-        # 应用高亮
-        if highlight_columns:
-            styled_table = styled_table.apply(
-                lambda x: x.map(_highlight_positive_negative),
-                subset=highlight_columns
-            )
+                # 格式化每个数值列（使用之前保存的列表）
+                for col in numeric_cols:
+                    val = summary_sorted.loc[idx, col]  # 从原始数据读取，避免已转换的字符串
+                    if pd.notna(val):
+                        if col in percentage_columns:
+                            # 环比同比列
+                            if use_difference:
+                                # 差值：显示为百分点
+                                display_df.at[idx, col] = f"{val:.2f}%"
+                            else:
+                                # 比率：显示为百分比
+                                display_df.at[idx, col] = f"{val:.2%}"
+                        elif unit == '%':
+                            # 原始值列（单位为%）
+                            display_df.at[idx, col] = f"{val:.2f}%"
+                        else:
+                            # 其他数值列
+                            display_df.at[idx, col] = f"{val:.2f}"
+                    else:
+                        display_df.at[idx, col] = 'N/A'
 
-        st.dataframe(styled_table, hide_index=True)
+            # 直接显示（已经是字符串，不再使用styler）
+            st.dataframe(display_df, hide_index=True)
+        else:
+            # 没有元数据：使用标准格式化和高亮
+            format_dict = {}
+            for col in summary_sorted.select_dtypes(include=np.number).columns:
+                if col in percentage_columns:
+                    format_dict[col] = '{:.2%}'
+                else:
+                    format_dict[col] = '{:.2f}'
 
-        # 下载按钮
+            styled_table = summary_sorted.style.format(format_dict, na_rep='N/A')
+
+            # 应用高亮
+            if highlight_columns:
+                styled_table = styled_table.apply(
+                    lambda x: x.map(_highlight_positive_negative),
+                    subset=highlight_columns
+                )
+
+            st.dataframe(styled_table, hide_index=True)
+
+        # 下载按钮（使用原始数据，包含单位和类型）
         csv_string = summary_sorted.to_csv(index=False, encoding='utf-8-sig')
         csv_data = csv_string.encode('utf-8-sig')
         st.download_button(
