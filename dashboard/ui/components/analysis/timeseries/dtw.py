@@ -121,147 +121,9 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
         return results
 
-    def render_frequency_alignment_options(self, st_obj, data: pd.DataFrame, data_name: str):
-        """渲染频率对齐选项"""
-              
-        # 启用频率对齐
-        enable_alignment = st_obj.checkbox(
-            "启用频率对齐", 
-            value=True,
-            key=f"dtw_{data_name}_enable_freq_align",
-            help="当不同频率的时间序列进行DTW分析时，自动将高频数据对齐到低频"
-        )
-        
-        if enable_alignment:
-            col1, col2 = st_obj.columns(2)
-            
-            with col1:
-                # 对齐模式
-                alignment_mode = st_obj.selectbox(
-                    "对齐模式:",
-                    options=["stat_align", "value_align"],
-                    format_func=lambda x: {
-                        "stat_align": "统计对齐 (聚合方法)",
-                        "value_align": "值对齐 (保持原值)"
-                    }[x],
-                    key=f"dtw_{data_name}_freq_align_mode",
-                    help="统计对齐使用聚合方法，值对齐保持原始数值特征"
-                )
-            
-            with col2:
-                # 聚合方法
-                if alignment_mode == "stat_align":
-                    agg_method = st_obj.selectbox(
-                        "聚合方法:",
-                        options=["mean", "last", "first", "sum", "median"],
-                        format_func=lambda x: {
-                            "mean": "平均值",
-                            "last": "最后值", 
-                            "first": "首个值",
-                            "sum": "求和",
-                            "median": "中位数"
-                        }[x],
-                        key=f"dtw_{data_name}_freq_agg_method"
-                    )
-                else:
-                    agg_method = "last"  # value_align模式的默认值
-                    st_obj.write("值对齐模式")
-            
-            # 显示说明
-            with st_obj.expander("频率对齐说明"):
-                st_obj.markdown("""
-                **为什么需要频率对齐？**
-                
-                不同频率的时间序列直接进行DTW分析可能产生不合理的结果：
-                - 日度数据 vs 月度数据：长度不匹配，对齐困难
-                - 高频数据包含更多噪声，影响相似性判断
-                
-                **对齐策略：**
-                - **统计对齐**：将高频数据按时间窗口聚合（如取平均值）
-                - **值对齐**：保持数据原始特征，按时间对应关系对齐
-                
-                **聚合方法选择：**
-                - **平均值**：适合大多数经济指标，平滑噪声
-                - **最后值**：适合股价等以期末值为准的指标  
-                - **求和**：适合流量型指标如销售额
-                """)
-            
-            return {
-                'enable_alignment': True,
-                'alignment_mode': alignment_mode, 
-                'agg_method': agg_method
-            }
-        
-        return {'enable_alignment': False}
-    
-    def render_standardization_options(self, st_obj, data: pd.DataFrame, data_name: str):
-        """渲染数据标准化选项"""
-      
-        # 启用数据标准化
-        enable_standardization = st_obj.checkbox(
-            "启用数据标准化", 
-            value=True,
-            key=f"dtw_{data_name}_enable_standardization",
-            help="对数据进行标准化处理，消除不同量纲的影响，提高DTW相似性分析的准确性"
-        )
-        
-        if enable_standardization:
-            col1, col2 = st_obj.columns(2)
-            
-            with col1:
-                # 标准化方法
-                standardization_method = st_obj.selectbox(
-                    "标准化方法:",
-                    options=["zscore", "minmax", "none"],
-                    format_func=lambda x: {
-                        "zscore": "Z-Score标准化 (推荐)",
-                        "minmax": "Min-Max归一化",
-                        "none": "不标准化"
-                    }[x],
-                    key=f"dtw_{data_name}_standardization_method",
-                    help="选择数据标准化方法"
-                )
-            
-            with col2:
-                # 显示标准化方法说明
-                if standardization_method == "zscore":
-                    st_obj.info("将数据转换为均值0、标准差1的分布")
-                elif standardization_method == "minmax":
-                    st_obj.info("将数据缩放到[0,1]区间")
-                else:
-                    st_obj.warning("不进行标准化，保持原始数据")
-            
-            # 显示说明
-            with st_obj.expander("数据标准化说明"):
-                st_obj.markdown("""
-                **为什么需要数据标准化？**
-                
-                不同量纲的时间序列直接进行DTW分析会产生问题：
-                - 数值量级大的序列主导DTW距离计算
-                - 例如：GDP(万亿级) vs 通胀率(个位数)，DTW距离主要反映GDP变化
-                - 导致相似性分析结果不客观
-                
-                **标准化方法对比：**
-                - **Z-Score标准化**：(x-μ)/σ，适合正态分布数据，保持数据分布形状
-                - **Min-Max归一化**：(x-min)/(max-min)，适合有界数据，保持数据相对关系
-                - **不标准化**：保持原始数据，适合同量纲数据比较
-                
-                **推荐使用场景：**
-                - **经济指标分析**：推荐Z-Score，消除量纲影响同时保持波动特征
-                - **技术指标分析**：可使用Min-Max，关注相对变化趋势
-                - **同类指标分析**：可选择不标准化，保持原始差异
-                """)
-            
-            return {
-                'enable_standardization': True,
-                'standardization_method': standardization_method
-            }
-        
-        return {'enable_standardization': False, 'standardization_method': 'none'}
-
     def render_analysis_parameters(self, st_obj, data: pd.DataFrame, data_name: str):
         """
-        渲染分析参数设置界面（仅自动模式）
+        渲染分析参数设置界面
 
         Args:
             st_obj: Streamlit对象
@@ -269,7 +131,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             data_name: 数据名称
 
         Returns:
-            自动模式参数
+            分析参数字典
         """
         numeric_cols = [col for col in data.columns if pd.api.types.is_numeric_dtype(data[col])]
 
@@ -277,19 +139,9 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             st_obj.warning("DTW分析需要至少两个数值列")
             return None
 
-        # 添加频率对齐选项
-        freq_options = self.render_frequency_alignment_options(st_obj, data, data_name)
-        
-        # 添加数据标准化选项
-        std_options = self.render_standardization_options(st_obj, data, data_name)
-        
-        # 自动模式参数（移除模式选择）
+        # 直接调用自动模式参数渲染（现在包含所有参数）
         params = self.render_auto_mode_parameters(st_obj, data, data_name, numeric_cols)
-        
-        if params:
-            params.update(freq_options)
-            params.update(std_options)
-        
+
         return params
 
     def collect_analysis_parameters(self, st_obj, data: pd.DataFrame, data_name: str) -> dict:
@@ -312,18 +164,31 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # 因为Streamlit控件使用key参数时，值会自动保存到st.session_state
             target_series = st.session_state.get(f"dtw_{data_name}_auto_target_series")
 
-            # 获取窗口约束参数
-            enable_window_constraint = st.session_state.get(f"dtw_{data_name}_enable_window_constraint", True)
+            # 获取窗口约束参数（从下拉菜单读取）
+            window_constraint_choice = st.session_state.get(f"dtw_{data_name}_window_constraint_choice", "是")
+            enable_window_constraint = (window_constraint_choice == "是")
             radius = st.session_state.get(f"dtw_{data_name}_radius", 10)
 
-            # 获取频率对齐参数
-            enable_alignment = st.session_state.get(f"dtw_{data_name}_enable_freq_align", True)
-            alignment_mode = st.session_state.get(f"dtw_{data_name}_freq_align_mode", 'stat_align')
+            # 获取对齐模式选择
+            alignment_mode_choice = st.session_state.get(f"dtw_{data_name}_alignment_mode_choice", 'freq_align_strict')
+
+            # 解析对齐模式
+            if alignment_mode_choice == "freq_align_strict":
+                enable_alignment = True
+                strict_alignment = True
+            elif alignment_mode_choice == "freq_align_loose":
+                enable_alignment = True
+                strict_alignment = False
+            else:  # no_align
+                enable_alignment = False
+                strict_alignment = False
+
+            alignment_mode = 'stat_align'  # 固定为统计对齐
             agg_method = st.session_state.get(f"dtw_{data_name}_freq_agg_method", 'mean')
 
             # 获取标准化参数
-            enable_standardization = st.session_state.get(f"dtw_{data_name}_enable_standardization", True)
             standardization_method = st.session_state.get(f"dtw_{data_name}_standardization_method", 'zscore')
+            enable_standardization = (standardization_method != 'none')
 
             # 距离度量在后端固定为euclidean，界面上无需设置
             # dist_metric_key = f"dtw_{data_name}_distance_metric"
@@ -340,6 +205,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 'enable_alignment': enable_alignment,
                 'alignment_mode': alignment_mode,
                 'agg_method': agg_method,
+                'strict_alignment': strict_alignment,
                 'enable_standardization': enable_standardization,
                 'standardization_method': standardization_method
                 # 'distance_metric': distance_metric  # 移除：界面上不存在此参数
@@ -351,44 +217,85 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             return {}
     
     def render_auto_mode_parameters(self, st_obj, data: pd.DataFrame, data_name: str, numeric_cols: list):
-        """渲染自动模式参数"""
-        st_obj.markdown("**DTW批量分析**: 选择目标序列和DTW参数，自动计算所有对比序列")
+        """渲染自动模式参数（新3列布局）"""
 
-        col1, col2 = st_obj.columns(2)
+        # ========== 第一排：3列布局 ==========
+        row1_col1, row1_col2, row1_col3 = st_obj.columns(3)
 
-        with col1:
-            # 目标序列选择
+        # 第一排第一列：目标序列选择
+        with row1_col1:
             target_series = st_obj.selectbox(
                 "选择目标序列:",
                 options=numeric_cols,
                 key=f"dtw_{data_name}_auto_target_series"
             )
 
-            # 窗口约束选择
-            enable_window_constraint = st_obj.checkbox(
-                "启用窗口约束",
-                value=True,
-                key=f"dtw_{data_name}_enable_window_constraint",
+        # 第一排第二列：对齐模式
+        with row1_col2:
+            alignment_mode_choice = st_obj.selectbox(
+                "对齐模式:",
+                options=["freq_align_strict", "freq_align_loose", "no_align"],
+                format_func=lambda x: {
+                    "freq_align_strict": "频率对齐 + 严格对齐",
+                    "freq_align_loose": "仅频率对齐",
+                    "no_align": "不对齐"
+                }[x],
+                index=0,
+                key=f"dtw_{data_name}_alignment_mode_choice",
+                help="选择序列对齐方式"
+            )
+
+        # 第一排第三列：启用窗口约束
+        with row1_col3:
+            window_constraint_choice = st_obj.selectbox(
+                "启用窗口约束:",
+                options=["是", "否"],
+                index=0,
+                key=f"dtw_{data_name}_window_constraint_choice",
                 help="限制DTW对齐路径在对角线附近，提高计算效率"
             )
 
-            # 窗口约束说明
-            with st_obj.expander("窗口约束说明"):
-                st_obj.markdown("""
-                **无约束**: 允许对齐路径自由移动，计算最精确但速度较慢
-                
-                **有约束**: 限制对齐路径在主对角线附近的带状区域内
-                - 提高计算效率，适合大数据集
-                - Radius参数决定约束强度
-                - 例如：Radius=5 表示序列1的第i个点只能与序列2的第(i-5)到(i+5)个点对齐
-                """)
-                st_obj.info("提示：小的radius值计算更快但可能错过最优对齐；大的radius值更灵活但计算更慢")
+        # ========== 第二排：3列布局 ==========
+        row2_col1, row2_col2, row2_col3 = st_obj.columns(3)
 
-        with col2:
-            # 显示将要分析的序列
-            comparison_series = [col for col in numeric_cols if col != target_series]
+        # 第二排第一列：聚合方法（条件显示）
+        with row2_col1:
+            if alignment_mode_choice in ["freq_align_strict", "freq_align_loose"]:
+                agg_method = st_obj.selectbox(
+                    "聚合方法:",
+                    options=["mean", "last", "first", "sum", "median"],
+                    format_func=lambda x: {
+                        "mean": "平均值",
+                        "last": "最后值",
+                        "first": "首个值",
+                        "sum": "求和",
+                        "median": "中位数"
+                    }[x],
+                    key=f"dtw_{data_name}_freq_agg_method",
+                    help="将高频数据聚合到低频时使用的方法"
+                )
+            else:
+                agg_method = "mean"  # 不对齐时使用默认值
 
-            # Radius参数设置
+        # 第二排第二列：标准化方法
+        with row2_col2:
+            standardization_method = st_obj.selectbox(
+                "标准化方法:",
+                options=["zscore", "minmax", "none"],
+                format_func=lambda x: {
+                    "zscore": "Z-Score标准化 (推荐)",
+                    "minmax": "Min-Max归一化",
+                    "none": "不标准化"
+                }[x],
+                index=0,
+                key=f"dtw_{data_name}_standardization_method",
+                help="选择数据标准化方法"
+            )
+
+        # 第二排第三列：Radius设置（条件显示）
+        enable_window_constraint = (window_constraint_choice == "是")
+
+        with row2_col3:
             if enable_window_constraint:
                 radius = st_obj.number_input(
                     "Radius (窗口大小):",
@@ -398,55 +305,49 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     key=f"dtw_{data_name}_radius",
                     help="限制对齐路径在主对角线上下各radius个单位内"
                 )
-                
-                # Radius选择指导
-                with st_obj.expander("Radius参数说明"):
-                    series_length = len(data)
-                    current_percentage = (radius / series_length) * 100
-                    
-                    st_obj.markdown(f"""
-                    **当前数据长度**: {series_length} 个时间点
-                    **当前设置**: Radius = {radius} (约{current_percentage:.1f}%序列长度)
-
-                    **Radius意义**:
-                    - Radius = {radius} 表示序列1的第i个点只能与序列2的第(i-{radius})到(i+{radius})个点对齐
-                    - 越小的radius: 计算更快，但对齐更严格
-                    - 越大的radius: 对齐更灵活，但计算更慢
-
-                    **推荐值**:
-                    - **小数据集** (<50点): 5-10
-                    - **中等数据集** (50-200点): 10-20 
-                    - **大数据集** (>200点): 20-50
-                    """)
-                    
-                    # 根据当前设置给出评价
-                    if current_percentage < 3:
-                        st_obj.warning("当前Radius较小，可能限制对齐灵活性")
-                    elif current_percentage > 30:
-                        st_obj.warning("当前Radius较大，计算时间可能较长")
-                    else:
-                        st_obj.success("当前Radius设置合理")
             else:
                 radius = None
-                st_obj.info("无约束模式: 允许任意对齐，计算时间较长")
+
+        # 解析对齐模式
+        if alignment_mode_choice == "freq_align_strict":
+            enable_alignment = True
+            strict_alignment = True
+        elif alignment_mode_choice == "freq_align_loose":
+            enable_alignment = True
+            strict_alignment = False
+        else:  # no_align
+            enable_alignment = False
+            strict_alignment = False
+
+        # 计算比较序列
+        comparison_series = [col for col in numeric_cols if col != target_series]
+
+        # 计算是否启用标准化
+        enable_standardization = (standardization_method != 'none')
 
         return {
             'mode': 'auto',
             'target_series': target_series,
             'comparison_series': comparison_series,
             'enable_window_constraint': enable_window_constraint,
-            'radius': radius
+            'radius': radius,
+            'enable_alignment': enable_alignment,
+            'alignment_mode': 'stat_align',
+            'agg_method': agg_method,
+            'strict_alignment': strict_alignment,
+            'enable_standardization': enable_standardization,
+            'standardization_method': standardization_method
         }
 
 
     def perform_auto_dtw_analysis(self, st_obj, data: pd.DataFrame, target_series: str, comparison_series: list, enable_window_constraint: bool, radius: int = None, freq_options: dict = None, std_options: dict = None):
         """执行自动DTW分析，包含频率处理"""
         results = []
-        
+
         # 设置默认频率选项
         if freq_options is None:
-            freq_options = {'enable_alignment': True, 'alignment_mode': 'stat_align', 'agg_method': 'mean'}
-        
+            freq_options = {'enable_alignment': True, 'alignment_mode': 'stat_align', 'agg_method': 'mean', 'strict_alignment': True}
+
         # 设置默认标准化选项
         if std_options is None:
             std_options = {'enable_standardization': True, 'standardization_method': 'zscore'}
@@ -475,6 +376,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             enable_freq_alignment=freq_options.get('enable_alignment', True),
             freq_alignment_mode=freq_options.get('alignment_mode', 'stat_align'),
             freq_agg_method=freq_options.get('agg_method', 'mean'),
+            strict_alignment=freq_options.get('strict_alignment', True),
             standardization_method=std_options.get('standardization_method', 'zscore')
         )
 
@@ -554,6 +456,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     data=csv_data.encode('utf-8-sig'),
                     file_name=filename,
                     mime="text/csv",
+                    type="primary",  # 与开始分析按钮颜色样式相同
                     key=f"dtw_download_auto_{data_name}_{len(results)}",  # 添加结果长度确保唯一性
                     help="下载DTW批量分析结果为CSV文件"
                 )
@@ -564,6 +467,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     data="",
                     file_name="no_results.csv",
                     mime="text/csv",
+                    type="primary",  # 与开始分析按钮颜色样式相同
                     key=f"dtw_download_auto_disabled_{data_name}",
                     help="暂无分析结果可下载",
                     disabled=True
@@ -573,7 +477,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             logger.error(f"生成下载按钮失败: {e}")
             st_obj.error(f"下载功能暂时不可用: {str(e)}")
 
-    def render_auto_results(self, st_obj, results: list, target_series: str):
+    def render_auto_results(self, st_obj, results: list, target_series: str, params: dict = None, data_name: str = None):
         """渲染自动模式结果"""
         if not results:
             st_obj.warning("没有分析结果")
@@ -618,6 +522,10 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             use_container_width=True,
             hide_index=True
         )
+
+        # 在表格下方添加下载按钮（与开始分析按钮颜色样式相同）
+        if params and data_name:
+            self.render_download_button(st_obj, results, params, data_name)
 
     def render_comparison_selection_and_plot(self, st_obj, data: pd.DataFrame, results: list, target_series: str, comparison_series: list, data_name: str):
         """
@@ -684,19 +592,35 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         # 绘制DTW对比图
         # 重新读取当前界面参数（使用实时参数而不是保存的旧参数）
         # 直接从st.session_state读取当前界面的窗口约束设置
-        enable_constraint = st.session_state.get(f"dtw_{data_name}_enable_window_constraint", True)
+        window_constraint_choice = st.session_state.get(f"dtw_{data_name}_window_constraint_choice", "是")
+        enable_constraint = (window_constraint_choice == "是")
         radius = st.session_state.get(f"dtw_{data_name}_radius", 10)
 
         # 直接从st.session_state读取频率和标准化参数
+        alignment_mode_choice = st.session_state.get(f"dtw_{data_name}_alignment_mode_choice", 'freq_align_strict')
+
+        # 解析对齐模式
+        if alignment_mode_choice == "freq_align_strict":
+            enable_alignment = True
+            strict_alignment = True
+        elif alignment_mode_choice == "freq_align_loose":
+            enable_alignment = True
+            strict_alignment = False
+        else:  # no_align
+            enable_alignment = False
+            strict_alignment = False
+
         freq_options = {
-            'enable_alignment': st.session_state.get(f"dtw_{data_name}_enable_freq_align", True),
-            'alignment_mode': st.session_state.get(f"dtw_{data_name}_freq_align_mode", 'stat_align'),
-            'agg_method': st.session_state.get(f"dtw_{data_name}_freq_agg_method", 'mean')
+            'enable_alignment': enable_alignment,
+            'alignment_mode': 'stat_align',
+            'agg_method': st.session_state.get(f"dtw_{data_name}_freq_agg_method", 'mean'),
+            'strict_alignment': strict_alignment
         }
 
+        standardization_method = st.session_state.get(f"dtw_{data_name}_standardization_method", 'zscore')
         std_options = {
-            'enable_standardization': st.session_state.get(f"dtw_{data_name}_enable_standardization", True),
-            'standardization_method': st.session_state.get(f"dtw_{data_name}_standardization_method", 'zscore')
+            'enable_standardization': (standardization_method != 'none'),
+            'standardization_method': standardization_method
         }
 
         # 设置窗口约束参数
@@ -719,6 +643,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             enable_freq_alignment=freq_options.get('enable_alignment', True),
             freq_alignment_mode=freq_options.get('alignment_mode', 'stat_align'),
             freq_agg_method=freq_options.get('agg_method', 'mean'),
+            strict_alignment=freq_options.get('strict_alignment', True),
             standardization_method=std_options.get('standardization_method', 'zscore')
         )
 
@@ -743,6 +668,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
     def plot_dtw_path(self, st_obj, s1_np, s2_np, path, s1_name, s2_name):
         """绘制DTW路径图"""
+        logger.info(f"[DTW绘图] {s1_name} 长度={len(s1_np)}, {s2_name} 长度={len(s2_np)}, 路径长度={len(path)}")
+
         fig, ax = plt.subplots(figsize=(10, 5))
 
         ax.plot(np.arange(len(s1_np)), s1_np, "o-", label=s1_name, markersize=4, linewidth=1.5)
@@ -774,18 +701,95 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             if params is None:
                 return None
 
-            # 分析按钮和下载按钮并排显示
-            col1, col2, col3 = st_obj.columns([1, 1, 2])
+            # 分析按钮
+            analysis_key = f"dtw_analyze_btn_{data_name}"
+            analyze_clicked = st_obj.button("开始分析", key=analysis_key, type="primary")
 
-            with col1:
-                analysis_key = f"dtw_analyze_btn_{data_name}"
-                analyze_clicked = st_obj.button("开始分析", key=analysis_key, type="primary")
+            # 统一的参数说明expander
+            with st_obj.expander("参数说明"):
+                # 使用3列布局展示所有参数说明
+                exp_col1, exp_col2, exp_col3 = st_obj.columns(3)
 
-            with col2:
-                # 检查是否有结果可下载
-                download_results = self.get_state('auto_results')
-                # 始终显示下载按钮，根据是否有结果来决定是否禁用
-                self.render_download_button(st_obj, download_results, params, data_name)
+                with exp_col1:
+                    st_obj.markdown("""
+                    **对齐模式**
+
+                    1. **频率对齐 + 严格对齐 (推荐)**
+                    - 流程：统一频率 → 成对删除NA值
+                    - 适用：精确时间点对应，数据完整性要求高
+                    - 优缺点：数据质量高 / 可能损失数据点
+
+                    2. **仅频率对齐**
+                    - 流程：统一频率 → 独立删除NA值
+                    - 适用：保留更多数据点，NA分布不均匀
+                    - 优缺点：保留更多数据 / 时间点对应不严格
+
+                    3. **不对齐**
+                    - 流程：直接使用原始频率数据
+                    - 适用：所有序列已经是相同频率
+                    - 警告：不同频率可能产生不合理结果
+
+                    ---
+
+                    **聚合方法**
+
+                    - **平均值**: 平滑噪声，适合大多数经济指标
+                    - **最后值**: 适合期末值指标（股价、汇率）
+                    - **首个值**: 适合期初值指标
+                    - **求和**: 适合流量型指标（销售额、产量）
+                    - **中位数**: 对异常值不敏感，适合有离群点数据
+                    """)
+
+                with exp_col2:
+                    st_obj.markdown("""
+                    **标准化方法**
+
+                    **为什么需要标准化？**
+                    - 不同量纲序列会使大数值主导DTW距离
+                    - 例：GDP(万亿级) vs 通胀率(个位数)
+                    - 导致相似性分析结果不客观
+
+                    **Z-Score标准化 (推荐)**
+                    - 公式：(x-μ)/σ
+                    - 转换为均值0、标准差1的分布
+                    - 适合正态分布数据
+                    - 推荐用于经济指标分析
+
+                    **Min-Max归一化**
+                    - 公式：(x-min)/(max-min)
+                    - 缩放到[0,1]区间
+                    - 适合有界数据
+                    - 可用于技术指标分析
+
+                    **不标准化**
+                    - 保持原始数据
+                    - 适合同量纲数据比较
+                    - 警告：不同量纲可能导致不合理距离
+                    """)
+
+                with exp_col3:
+                    st_obj.markdown("""
+                    **窗口约束**
+
+                    限制DTW对齐路径在对角线附近
+                    - **启用**: 提高计算效率，适合序列长度接近
+                    - **禁用**: 完全灵活对齐，适合序列长度差异大
+
+                    **Radius参数**
+
+                    表示序列1的第i个点只能与序列2的第(i-radius)到(i+radius)个点对齐
+
+                    **推荐值**:
+                    - 小数据集 (<50点): 5-10
+                    - 中等数据集 (50-200点): 10-20
+                    - 大数据集 (>200点): 20-50
+
+                    **权衡**:
+                    - 越小：计算更快，对齐更严格
+                    - 越大：对齐更灵活，计算更慢
+
+                    **建议**: 一般设置为序列长度的5-15%
+                    """)
 
             # 初始化分析结果变量
             current_results = None
@@ -795,9 +799,10 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 freq_options = {
                     'enable_alignment': params.get('enable_alignment', True),
                     'alignment_mode': params.get('alignment_mode', 'stat_align'),
-                    'agg_method': params.get('agg_method', 'mean')
+                    'agg_method': params.get('agg_method', 'mean'),
+                    'strict_alignment': params.get('strict_alignment', True)
                 }
-                
+
                 # 提取标准化选项
                 std_options = {
                     'enable_standardization': params.get('enable_standardization', True),
@@ -821,8 +826,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                         current_results = results
 
                         # 显示结果
-                        self.render_auto_results(st_obj, results, params['target_series'])
-                        
+                        self.render_auto_results(st_obj, results, params['target_series'], params, data_name)
+
                         # 添加比较序列选择和DTW图显示
                         self.render_comparison_selection_and_plot(st_obj, data, results, params['target_series'], params['comparison_series'], data_name)
 
@@ -854,9 +859,11 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     logger.info("DTW参数检查 - 之前无参数记录，判定为参数已变化")
                 else:
                     # 检查影响DTW计算的关键参数
+                    # alignment_mode_choice已经包含了enable_alignment和strict_alignment的信息
+                    # enable_standardization是从standardization_method派生的，只需检查standardization_method
                     key_params = ['target_series', 'enable_window_constraint', 'radius',
-                                'enable_standardization', 'standardization_method',
-                                'enable_alignment', 'alignment_mode', 'agg_method']
+                                'standardization_method',
+                                'enable_alignment', 'strict_alignment', 'agg_method']
 
                     # 检查关键参数是否变化
                     for param in key_params:
@@ -889,8 +896,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     # 参数未变化，显示之前的结果
                     logger.info("DTW参数未变化 - 显示之前的分析结果")
                     st_obj.markdown("---")
-                    st_obj.markdown("#### 批量分析结果")
-                    self.render_auto_results(st_obj, previous_auto_results, previous_target)
+                    st_obj.markdown("#### 分析结果")
+                    self.render_auto_results(st_obj, previous_auto_results, previous_target, previous_params, data_name)
 
                     # 添加比较序列选择和DTW图显示（使用当前界面参数）
                     self.render_comparison_selection_and_plot(st_obj, data, previous_auto_results, previous_target, previous_comparison_series, data_name)

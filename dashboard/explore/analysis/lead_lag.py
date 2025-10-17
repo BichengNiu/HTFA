@@ -214,7 +214,8 @@ def calculate_lead_lag_for_pair(
         result['full_correlogram_df'] = correlogram_df
 
         if not correlogram_df.empty and correlogram_df['Correlation'].notna().any():
-            opt_lag, opt_corr = find_optimal_lag(correlogram_df, lag_range='all')
+            # 限制最优滞后搜索范围到±5
+            opt_lag, opt_corr = find_optimal_lag(correlogram_df, lag_range='all', max_lag_range=5)
             if opt_lag is not None:
                 result['k_corr'] = opt_lag
                 result['corr_at_k_corr'] = opt_corr
@@ -233,18 +234,25 @@ def calculate_lead_lag_for_pair(
         standardization_method
     )
 
-    # 找到最优KL散度
+    # 找到最优KL散度（限制在±5范围内）
     if result['full_kl_divergence_df']['KL_Divergence'].notna().any():
-        kl_series = result['full_kl_divergence_df']['KL_Divergence']
-        non_nan_kl = kl_series.dropna()
+        # 先过滤到±5范围内
+        kl_df_filtered = result['full_kl_divergence_df'][
+            (result['full_kl_divergence_df']['Lag'] >= -5) &
+            (result['full_kl_divergence_df']['Lag'] <= 5)
+        ].copy()
 
-        if not non_nan_kl.empty:
-            # 找最小值（不包括inf）
-            finite_kl = non_nan_kl[np.isfinite(non_nan_kl)]
-            if not finite_kl.empty:
-                optimal_idx = finite_kl.idxmin()
-                result['k_kl'] = result['full_kl_divergence_df'].loc[optimal_idx, 'Lag']
-                result['kl_at_k_kl'] = finite_kl.loc[optimal_idx]
+        if not kl_df_filtered.empty:
+            kl_series = kl_df_filtered['KL_Divergence']
+            non_nan_kl = kl_series.dropna()
+
+            if not non_nan_kl.empty:
+                # 找最小值（不包括inf）
+                finite_kl = non_nan_kl[np.isfinite(non_nan_kl)]
+                if not finite_kl.empty:
+                    optimal_idx = finite_kl.idxmin()
+                    result['k_kl'] = kl_df_filtered.loc[optimal_idx, 'Lag']
+                    result['kl_at_k_kl'] = finite_kl.loc[optimal_idx]
 
     logger.debug(f"领先滞后分析完成: {series_candidate.name}, k_corr={result['k_corr']}, k_kl={result['k_kl']}")
     return result

@@ -31,6 +31,7 @@ def perform_batch_dtw_calculation(
     enable_freq_alignment: bool = True,
     freq_alignment_mode: str = 'stat_align',
     freq_agg_method: str = 'mean',
+    strict_alignment: bool = True,
     standardization_method: str = 'zscore'
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Dict[str, Any]], List[str], List[str]]:
     """
@@ -49,6 +50,7 @@ def perform_batch_dtw_calculation(
         enable_freq_alignment: 是否启用频率对齐
         freq_alignment_mode: 频率对齐模式 ('stat_align' 或 'value_align')
         freq_agg_method: 聚合方法 ('mean', 'last', 'first', 'sum', 'median')
+        strict_alignment: 是否严格对齐（成对删除NA值）
         standardization_method: 标准化方法 ('zscore', 'minmax', 'none')
 
     Returns:
@@ -73,67 +75,29 @@ def perform_batch_dtw_calculation(
         error_messages.append(f"目标序列 '{target_series_name}' 不存在于数据中")
         return results_list, paths_dict, error_messages, warning_messages
 
-    # 验证并清洗目标序列
-    target_series = df[target_series_name]
-    target_validation = validate_series(target_series, min_samples=10, series_name=target_series_name)
-
-    if not target_validation.is_valid:
-        error_messages.append(f"目标序列 '{target_series_name}' 无效: {target_validation.error_message}")
-        return results_list, paths_dict, error_messages, warning_messages
-
-    # 准备目标序列数据
-    target_data_clean = target_validation.cleaned_data
-
-    # 频率对齐（如果启用）
+    # 频率对齐（如果启用）- 修复：必须在验证目标序列之前执行
     if enable_freq_alignment:
         logger.info(f"执行频率对齐: 模式={freq_alignment_mode}, 聚合方法={freq_agg_method}")
         try:
             # 构建包含目标序列和所有对比序列的DataFrame
             all_series_names = [target_series_name] + comparison_series_names
 
-            # 修复：检查df是否已经有DatetimeIndex
+            # 简化逻辑：数据第一列固定是Date(日期格式)
             if isinstance(df.index, pd.DatetimeIndex):
                 # 如果已经是DatetimeIndex，直接使用
-                logger.info("[频率对齐] 输入数据已有DatetimeIndex")
                 df_for_alignment = df[all_series_names].copy()
+            elif 'Date' in df.columns:
+                # 数据第一列是Date，将其设为索引
+                df_for_alignment = df[['Date'] + all_series_names].copy()
+                df_for_alignment['Date'] = pd.to_datetime(df_for_alignment['Date'])
+                df_for_alignment = df_for_alignment.set_index('Date')
+                logger.info("[频率对齐] 使用Date列作为时间索引")
             else:
-                # 如果不是DatetimeIndex，需要保留时间列
-                logger.info("[频率对齐] 输入数据没有DatetimeIndex，尝试查找时间列")
-                time_col = None
+                # 找不到Date列，跳过对齐
+                df_for_alignment = None
+                warning_messages.append("数据中没有Date列，频率对齐已跳过")
+                logger.warning("[频率对齐] 未找到Date列")
 
-                # 方法1: 检查已经是datetime类型的列
-                for col in df.columns:
-                    if pd.api.types.is_datetime64_any_dtype(df[col]):
-                        time_col = col
-                        logger.info(f"[频率对齐] 找到datetime类型时间列: {time_col}")
-                        break
-
-                # 方法2: 如果方法1失败，尝试找能转换为datetime的字符串列
-                if time_col is None:
-                    for col in df.columns:
-                        try:
-                            pd.to_datetime(df[col], errors='raise')
-                            time_col = col
-                            logger.info(f"[频率对齐] 找到可转换为datetime的列: {time_col}")
-                            break
-                        except:
-                            continue
-
-                if time_col:
-                    # 包含时间列和数值列
-                    df_for_alignment = df[[time_col] + all_series_names].copy()
-                    # 确保时间列是datetime类型
-                    if not pd.api.types.is_datetime64_any_dtype(df_for_alignment[time_col]):
-                        df_for_alignment[time_col] = pd.to_datetime(df_for_alignment[time_col])
-                        logger.info("[频率对齐] 已将时间列转换为datetime类型")
-                    # 设置时间列为索引
-                    df_for_alignment = df_for_alignment.set_index(time_col)
-                    logger.info("[频率对齐] 已设置时间列为索引")
-                else:
-                    # 如果找不到时间列，记录警告并跳过对齐
-                    warning_messages.append("无法找到时间列，频率对齐已跳过")
-                    logger.warning("[频率对齐] 失败: 无法找到时间列")
-                    df_for_alignment = None
 
             if df_for_alignment is not None:
                 logger.info(f"[频率对齐] 调用align_multiple_series_frequencies，输入形状: {df_for_alignment.shape}")
@@ -145,12 +109,9 @@ def perform_batch_dtw_calculation(
                     agg_method=freq_agg_method
                 )
 
-                # 更新数据
+                # 更新数据（不对所有列一起dropna，而是在计算每对DTW时单独处理）
                 df = df_aligned
-                target_data_clean = df[target_series_name].dropna()
-
                 logger.info(f"[频率对齐] 完成: 数据形状 {df.shape}")
-                logger.info(f"[频率对齐] 对齐后目标序列长度: {len(target_data_clean)}")
             else:
                 logger.warning("[频率对齐] 跳过对齐，继续使用原始数据")
 
@@ -158,16 +119,18 @@ def perform_batch_dtw_calculation(
             warning_messages.append(f"频率对齐失败: {str(e)}，使用原始数据")
             logger.warning(f"[频率对齐] 异常: {e}")
 
-    # 标准化目标序列（如果需要）
-    if standardization_method and standardization_method != 'none':
-        try:
-            target_data_clean = standardize_series(target_data_clean, method=standardization_method)
-            logger.info(f"目标序列已标准化: 方法={standardization_method}")
-        except Exception as e:
-            warning_messages.append(f"目标序列标准化失败: {str(e)}")
-            logger.warning(f"标准化失败: {e}")
+    # 验证并清洗目标序列（在频率对齐之后）
+    # 注意：不在这里标准化，因为需要针对每对序列单独对齐后再标准化
+    target_series = df[target_series_name]
+    target_validation = validate_series(target_series, min_samples=10, series_name=target_series_name)
 
-    target_np = target_data_clean.to_numpy()
+    if not target_validation.is_valid:
+        error_messages.append(f"目标序列 '{target_series_name}' 无效: {target_validation.error_message}")
+        return results_list, paths_dict, error_messages, warning_messages
+
+    # 准备目标序列数据（保留原始数据，每对序列计算时单独处理）
+    target_data_clean = target_validation.cleaned_data
+    logger.info(f"目标序列准备完成: 长度={len(target_data_clean)}")
 
     # 批量处理对比序列
     for compare_name in comparison_series_names:
@@ -200,14 +163,55 @@ def perform_batch_dtw_calculation(
         # 准备对比序列数据
         compare_data_clean = compare_validation.cleaned_data
 
-        # 标准化对比序列（如果需要）
+        # 严格对齐模式：成对删除NA值
+        if strict_alignment:
+            # 创建包含目标序列和对比序列的DataFrame
+            pair_df = pd.DataFrame({
+                'target': target_data_clean,
+                'compare': compare_data_clean
+            })
+
+            # 同时删除两列中任一有NA的行
+            pair_df_clean = pair_df.dropna()
+
+            # 提取清洗后的序列
+            target_data_for_dtw = pair_df_clean['target']
+            compare_data_for_dtw = pair_df_clean['compare']
+
+            logger.debug(f"[严格对齐] {target_series_name} vs {compare_name}: "
+                        f"对齐前=({len(target_data_clean)}, {len(compare_data_clean)}), "
+                        f"对齐后={len(pair_df_clean)}")
+        else:
+            # 非严格对齐模式：DTW可以比较不同长度的序列，每个序列分别去除NaN
+            target_data_for_dtw = target_data_clean.dropna()
+            compare_data_for_dtw = compare_data_clean.dropna()
+
+            logger.debug(f"[非严格对齐] {target_series_name} vs {compare_name}: "
+                        f"序列长度=({len(target_data_for_dtw)}, {len(compare_data_for_dtw)})")
+
+        # 检查序列是否有足够的样本
+        if len(target_data_for_dtw) < 10:
+            warning_messages.append(f"目标序列 '{target_series_name}' 有效样本不足10个 ({len(target_data_for_dtw)})")
+            current_result['原因'] = f'目标序列样本不足: {len(target_data_for_dtw)}'
+            results_list.append(current_result)
+            continue
+
+        if len(compare_data_for_dtw) < 10:
+            warning_messages.append(f"对比序列 '{compare_name}' 有效样本不足10个 ({len(compare_data_for_dtw)})")
+            current_result['原因'] = f'对比序列样本不足: {len(compare_data_for_dtw)}'
+            results_list.append(current_result)
+            continue
+
+        # 标准化（各自独立标准化）
         if standardization_method and standardization_method != 'none':
             try:
-                compare_data_clean = standardize_series(compare_data_clean, method=standardization_method)
+                target_data_for_dtw = standardize_series(target_data_for_dtw, method=standardization_method)
+                compare_data_for_dtw = standardize_series(compare_data_for_dtw, method=standardization_method)
             except Exception as e:
-                warning_messages.append(f"对比序列 '{compare_name}' 标准化失败: {str(e)}")
+                warning_messages.append(f"序列对 '{target_series_name}' vs '{compare_name}' 标准化失败: {str(e)}")
 
-        compare_np = compare_data_clean.to_numpy()
+        target_np = target_data_for_dtw.to_numpy()
+        compare_np = compare_data_for_dtw.to_numpy()
 
         # 计算DTW距离
         try:
@@ -218,9 +222,11 @@ def perform_batch_dtw_calculation(
                 else:
                     radius = 10
                     warning_messages.append(f"窗口大小参数无效 ({window_size_param})，已默认为10")
+
+                logger.debug(f"[DTW计算] 启用窗口约束: radius={radius}")
             else:  # "无限制"
-                radius = max(len(target_np), len(compare_np))
-                radius = max(radius, 1)  # 确保至少为1
+                radius = None  # 修复: 无约束时radius应为None,而非序列最大长度
+                logger.debug(f"[DTW计算] 无窗口约束模式")
 
             # 调用DTW计算（使用explore模块的metrics.dtw）
             distance, path = calculate_dtw_path(

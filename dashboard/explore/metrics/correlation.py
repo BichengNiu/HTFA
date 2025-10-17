@@ -152,7 +152,8 @@ def _calculate_correlation(s1: pd.Series, s2: pd.Series) -> float:
 
 def find_optimal_lag(
     correlogram_df: pd.DataFrame,
-    lag_range: str = 'all'
+    lag_range: str = 'all',
+    max_lag_range: Optional[int] = None
 ) -> Tuple[Optional[int], Optional[float]]:
     """
     从相关图中找到最优滞后阶数
@@ -163,6 +164,7 @@ def find_optimal_lag(
                    'all' - 所有滞后
                    'positive' - 仅正滞后（series2领先）
                    'negative' - 仅负滞后（series1领先）
+        max_lag_range: 最大滞后范围限制，如果设置，只在[-max_lag_range, max_lag_range]范围内搜索
 
     Returns:
         Tuple[最优滞后阶数, 对应的相关系数]
@@ -180,6 +182,13 @@ def find_optimal_lag(
         filtered_df = correlogram_df[correlogram_df['Lag'] < 0].copy()
     else:
         filtered_df = correlogram_df.copy()
+
+    # 应用最大滞后范围限制
+    if max_lag_range is not None:
+        filtered_df = filtered_df[
+            (filtered_df['Lag'] >= -max_lag_range) &
+            (filtered_df['Lag'] <= max_lag_range)
+        ].copy()
 
     if filtered_df.empty or not filtered_df['Correlation'].notna().any():
         return None, None

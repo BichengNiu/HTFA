@@ -100,12 +100,15 @@ def calculate_dtw_path(
     try:
         # 计算DTW距离
         if actual_window is not None and actual_window > 0:
+            logger.debug(f"[DTW] 使用窗口约束: window={actual_window}, 序列长度=({len(series1)}, {len(series2)})")
             distance = dtaidist_dtw.distance(series1, series2, window=actual_window)
             path = dtaidist_dtw.warping_path(series1, series2, window=actual_window)
         else:
+            logger.debug(f"[DTW] 无窗口约束模式, 序列长度=({len(series1)}, {len(series2)})")
             distance = dtaidist_dtw.distance(series1, series2)
             path = dtaidist_dtw.warping_path(series1, series2)
 
+        logger.debug(f"[DTW] 计算完成: distance={distance:.4f}, path_length={len(path) if path else 0}")
         return float(distance), path
 
     except Exception as e:
