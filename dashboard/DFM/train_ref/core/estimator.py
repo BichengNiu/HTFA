@@ -1,0 +1,278 @@
+# -*- coding: utf-8 -*-
+"""
+参数估计模块
+
+实现DFM模型的参数估计算法
+参考: dashboard/DFM/train_model/DiscreteKalmanFilter.py
+"""
+
+import numpy as np
+import pandas as pd
+from typing import Tuple, Optional
+from sklearn.linear_model import LinearRegression
+from dashboard.DFM.train_ref.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
+
+
+def estimate_loadings(
+    observables: pd.DataFrame,
+    factors: pd.DataFrame
+) -> np.ndarray:
+    """估计因子载荷矩阵
+
+    使用OLS回归估计每个观测变量对因子的载荷
+
+    Args:
+        observables: 观测变量 (n_time, n_obs)
+        factors: 共同因子 (n_time, n_factors)
+
+    Returns:
+        np.ndarray: 载荷矩阵 Lambda (n_obs, n_factors)
+    """
+    n_obs = observables.shape[1]
+    n_factors = factors.shape[1]
+
+    Lambda = np.zeros((n_obs, n_factors))
+
+    for i in range(n_obs):
+        y = observables.iloc[:, i].values
+        X = factors.values
+
+        valid_idx = ~(np.isnan(y) | np.isnan(X).any(axis=1))
+
+        if valid_idx.sum() < n_factors:
+            logger.warning(f"变量{observables.columns[i]}: 有效样本({valid_idx.sum()}) < 因子数({n_factors})")
+            Lambda[i, :] = np.nan
+            continue
+
+        y_valid = y[valid_idx]
+        X_valid = X[valid_idx]
+
+        reg = LinearRegression(fit_intercept=False)
+        reg.fit(X_valid, y_valid)
+
+        Lambda[i, :] = reg.coef_
+
+    logger.debug(f"载荷矩阵估计完成: {Lambda.shape}")
+
+    return Lambda
+
+
+def estimate_target_loading(
+    target: pd.Series,
+    factors: pd.DataFrame,
+    train_end: Optional[str] = None
+) -> np.ndarray:
+    """估计目标变量的因子载荷
+
+    Args:
+        target: 目标变量序列
+        factors: 共同因子
+        train_end: 训练集结束日期（避免信息泄漏）
+
+    Returns:
+        np.ndarray: 目标变量载荷向量 (n_factors,)
+    """
+    factors_data = factors.copy()
+    target_data = target.copy()
+
+    if train_end:
+        try:
+            factors_data = factors_data.loc[:train_end]
+            target_data = target_data.loc[:train_end]
+            logger.debug(f"使用训练期数据估计目标载荷: {len(factors_data)}个样本")
+        except KeyError:
+            logger.warning(f"训练期结束日期{train_end}无效，使用全部数据")
+
+    valid_idx = ~(target_data.isna() | factors_data.isna().any(axis=1))
+
+    if valid_idx.sum() < factors_data.shape[1]:
+        raise ValueError(
+            f"有效样本数({valid_idx.sum()}) < 因子数({factors_data.shape[1]})"
+        )
+
+    y_valid = target_data[valid_idx].values
+    X_valid = factors_data[valid_idx].values
+
+    reg = LinearRegression(fit_intercept=False)
+    reg.fit(X_valid, y_valid)
+
+    r2 = reg.score(X_valid, y_valid)
+    logger.info(f"目标变量载荷估计完成, R² = {r2:.4f}")
+
+    return reg.coef_
+
+
+def estimate_transition_matrix(
+    factors: np.ndarray,
+    max_lags: int = 1
+) -> np.ndarray:
+    """估计状态转移矩阵（匹配老代码_calculate_prediction_matrix）
+
+    使用最小二乘法估计：A = (F_t' F_{t-1})(F_{t-1}' F_{t-1})^-1
+
+    Args:
+        factors: 因子序列 (n_time, n_factors)
+        max_lags: 最大滞后阶数
+
+    Returns:
+        np.ndarray: 转移矩阵 A (n_states, n_states)
+            其中 n_states = n_factors * max_lags
+    """
+    import scipy.linalg
+
+    n_time, n_factors = factors.shape
+
+    try:
+        if max_lags == 1:
+            # 匹配老代码：A = (F_t' F_{t-1})(F_{t-1}' F_{t-1} + epsilon*I)^-1
+            F_t = factors[1:, :]      # Shape (n_time-1, n_factors)
+            F_tm1 = factors[:-1, :]   # Shape (n_time-1, n_factors)
+
+            Ft_Ftm1 = F_t.T @ F_tm1     # (n_factors, n_factors)
+            Ftm1_Ftm1 = F_tm1.T @ F_tm1  # (n_factors, n_factors)
+
+            # 添加小的正则化项确保数值稳定性（匹配老代码）
+            A = scipy.linalg.solve(
+                (Ftm1_Ftm1 + np.eye(n_factors) * 1e-7).T,
+                Ft_Ftm1.T,
+                assume_a='pos'
+            ).T
+        else:
+            # 对于max_lags > 1，使用statsmodels VAR
+            from statsmodels.tsa.api import VAR
+            var_model = VAR(factors)
+            var_result = var_model.fit(maxlags=max_lags, ic=None, trend='n')
+            coef_matrices = var_result.params.T
+
+            n_states = n_factors * max_lags
+            A = np.zeros((n_states, n_states))
+            A[:n_factors, :] = coef_matrices.reshape(n_factors, -1)
+            if max_lags > 1:
+                A[n_factors:, :-n_factors] = np.eye(n_factors * (max_lags - 1))
+
+        logger.debug(f"状态转移矩阵估计完成: {A.shape}")
+
+    except Exception as e:
+        logger.warning(f"A矩阵估计失败: {e}，使用单位矩阵")
+        n_states = n_factors * max_lags
+        A = np.eye(n_states) * 0.95
+
+    return A
+
+
+def estimate_covariance_matrices(
+    smoothed_result,
+    observables: pd.DataFrame,
+    Lambda: np.ndarray,
+    n_factors: int,
+    A: np.ndarray = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """估计协方差矩阵Q和R（匹配老代码_calculate_shock_matrix）
+
+    Args:
+        smoothed_result: 卡尔曼平滑结果
+        observables: 观测变量
+        Lambda: 载荷矩阵
+        n_factors: 因子数量
+        A: 状态转移矩阵（用于Q矩阵计算）
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray]: (Q, R)
+    """
+    n_time = observables.shape[0]
+    n_obs = observables.shape[1]
+
+    x_smooth = smoothed_result.x_smoothed
+
+    # Q矩阵计算（完全匹配老代码_calculate_shock_matrix）
+    # Q = E[F_t F_t'] - A E[F_{t-1} F_{t-1}'] A'
+    F = x_smooth[:n_factors, :].T  # (n_time, n_factors)
+
+    # Calculate F_{t-1}' F_{t-1}
+    F_tm1 = F[:-1, :]  # Shape (n_time-1, n_factors)
+    temp = F_tm1.T @ F_tm1  # Shape (n_factors, n_factors)
+
+    # Calculate F_t' F_t
+    F_t = F[1:, :]  # Shape (n_time-1, n_factors)
+    term1 = F_t.T @ F_t  # Shape (n_factors, n_factors)
+    term1 = term1 / (n_time - 1)
+
+    # Calculate Q = E[F_t F_t'] - A E[F_{t-1} F_{t-1}'] A'
+    if A is not None:
+        term2 = A @ (temp / (n_time - 1)) @ A.T
+        Q = term1 - term2
+    else:
+        # 如果没有传入A，使用简单估计
+        Q = term1
+
+    # 确保正定性（匹配老代码，使用epsilon=1e-7）
+    Q = _ensure_positive_definite(Q, epsilon=1e-7)
+
+    # 计算残差和R矩阵（匹配老代码EMstep的实现）
+    # 中心化数据：y_np
+    # 重构数据：Lambda @ f.T
+    Z = observables.values  # (n_time, n_obs) 中心化数据
+    predicted_Z = (Lambda @ x_smooth[:n_factors, :]).T  # (n_time, n_obs)
+    residuals = Z - predicted_Z  # (n_time, n_obs)
+
+    # R矩阵：残差的方差（每个变量的方差）
+    R_diag = np.nanvar(residuals, axis=0)  # (n_obs,)
+    R_diag = np.maximum(R_diag, 1e-7)  # 确保正定性
+    R = np.diag(R_diag)
+
+    logger.debug(f"协方差矩阵估计完成: Q {Q.shape}, R {R.shape}")
+
+    return Q, R
+
+
+def _ensure_positive_definite(matrix: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:
+    """确保矩阵正定（完全匹配老代码_calculate_shock_matrix的实现）
+
+    Args:
+        matrix: 输入矩阵
+        epsilon: 最小特征值
+
+    Returns:
+        np.ndarray: 正定矩阵
+    """
+    # 不对称化，完全匹配老代码行为
+    # 老代码line 115-121没有对称化步骤
+
+    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+    eigenvalues = np.maximum(eigenvalues, epsilon)
+
+    return eigenvectors @ np.diag(eigenvalues) @ eigenvectors.T
+
+
+def estimate_parameters(
+    observables: pd.DataFrame,
+    initial_factors: pd.DataFrame,
+    n_factors: int,
+    max_lags: int = 1
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """估计所有DFM参数
+
+    Args:
+        observables: 观测变量
+        initial_factors: 初始因子估计
+        n_factors: 因子数量
+        max_lags: 最大滞后阶数
+
+    Returns:
+        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: (Lambda, A, Q, R)
+    """
+    Lambda = estimate_loadings(observables, initial_factors)
+
+    factors_array = initial_factors.values
+    A = estimate_transition_matrix(factors_array, max_lags)
+
+    n_states = n_factors * max_lags
+    Q = np.eye(n_states) * 0.1
+    R = np.eye(observables.shape[1]) * 0.1
+
+    logger.info(f"参数估计完成: Lambda{Lambda.shape}, A{A.shape}, Q{Q.shape}, R{R.shape}")
+
+    return Lambda, A, Q, R

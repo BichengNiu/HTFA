@@ -863,7 +863,6 @@ class TrainingStatusComponent(DFMComponent):
             var_type_map = self._get_state('dfm_var_type_map_obj', None)
             if var_type_map is None:
                 # 尝试从data_prep模块获取
-                from dashboard.core import get_global_dfm_manager
                 dfm_manager = get_global_dfm_manager()
                 if dfm_manager:
                     var_type_map = dfm_manager.get_dfm_state('data_prep', 'dfm_var_type_map_obj', None)
@@ -884,7 +883,6 @@ class TrainingStatusComponent(DFMComponent):
             var_industry_map = self._get_state('dfm_industry_map_obj', None)
             if var_industry_map is None:
                 # 尝试从data_prep模块获取
-                from dashboard.core import get_global_dfm_manager
                 dfm_manager = get_global_dfm_manager()
                 if dfm_manager:
                     var_industry_map = dfm_manager.get_dfm_state('data_prep', 'dfm_industry_map_obj', None)

@@ -125,27 +125,24 @@ class VariableSelectionComponent(DFMComponent):
                 st_obj, available_target_vars
             )
 
-            # 2. 行业选择 - 与老代码第910行完全一致
+            # 2. 获取行业映射数据
             industry_to_vars = self._get_industry_mapping_from_state()
-            unique_industries = list(industry_to_vars.keys()) if industry_to_vars else []
+            all_industries = list(industry_to_vars.keys()) if industry_to_vars else []
 
-            # 渲染行业选择标题
-            st_obj.markdown("**选择行业**")
-
-
-            st_obj.markdown("---")
-
-            # 渲染行业复选框和按钮 - 与老代码第934-1016行完全一致
-            selected_industries = self._render_industry_selection_legacy(
-                st_obj, unique_industries
-            )
-
-            # 3. 预测指标选择 - 与老代码第1032行完全一致
+            # 3. 预测指标选择 - 直接显示所有行业的指标供用户选择
             selected_indicators = self._render_indicator_selection_legacy(
-                st_obj, selected_industries, industry_to_vars
+                st_obj, all_industries, industry_to_vars
             )
 
-            # 4. 显示汇总信息 - 与老代码第1108行完全一致
+            # 4. 从选择的指标自动推断实际使用的行业
+            actual_industries = []
+            for industry, indicators in industry_to_vars.items():
+                if any(ind in selected_indicators for ind in indicators):
+                    actual_industries.append(industry)
+
+            selected_industries = actual_industries
+
+            # 5. 显示汇总信息 - 与老代码第1108行完全一致
             self._render_selection_summary_legacy(st_obj, selected_target_var,
                                                 selected_industries, selected_indicators)
 
@@ -588,7 +585,8 @@ class VariableSelectionComponent(DFMComponent):
             self._set_state('dfm_target_variable', None)
             return None
 
-    def _render_industry_selection_legacy(self, st_obj, unique_industries: List[str]) -> List[str]:
+    def _render_industry_selection_legacy(self, st_obj, unique_industries: List[str],
+                                        industry_to_vars: Dict[str, List[str]]) -> List[str]:
         """渲染行业选择 - 与老代码第934-1030行完全一致"""
         # 检查复选框状态是否需要初始化
         current_checkbox_states = self._get_state('dfm_industry_checkbox_states', None)
@@ -642,10 +640,11 @@ class VariableSelectionComponent(DFMComponent):
                     # 获取当前状态：从统一状态管理器获取，默认为True
                     current_value = current_checkbox_states.get(industry_name, True)
 
-                    # 不使用key参数，避免session_state冲突
+                    # 使用唯一的key参数，确保Streamlit能正确追踪复选框状态
                     new_state = st_obj.checkbox(
                         industry_name,
-                        value=current_value
+                        value=current_value,
+                        key=f"dfm_legacy_industry_checkbox_{industry_name}"
                     )
                     current_checkbox_states[industry_name] = new_state
                 col_idx += 1
@@ -660,8 +659,20 @@ class VariableSelectionComponent(DFMComponent):
                                 key='btn_dfm_deselect_all_industries',
                                 help="点击取消所有已选中的行业",
                                 use_container_width=True):
-                    # 只更新统一状态管理器中的状态
-                    self._set_state('dfm_industry_checkbox_states', {industry: False for industry in filtered_industries})
+                    # 记录旧状态
+                    old_states = self._get_state('dfm_industry_checkbox_states', {})
+                    new_states = {industry: False for industry in filtered_industries}
+
+                    # 更新统一状态管理器中的状态
+                    self._set_state('dfm_industry_checkbox_states', new_states)
+
+                    # 调试信息
+                    logger.info(f"取消全行业按钮点击 - 旧状态: {sum(old_states.values())} 个行业已选")
+                    logger.info(f"取消全行业按钮点击 - 新状态: 0 个行业已选")
+                    logger.info(f"行业复选框状态已更新: {len(filtered_industries)} 个行业全部设为 False")
+                    logger.info(f"过滤后的行业列表: {filtered_industries}")
+                    logger.info(f"industry_to_vars内容: {list(industry_to_vars.keys())}")
+
                     # 强制刷新页面以更新UI
                     st_obj.rerun()
 
@@ -670,8 +681,18 @@ class VariableSelectionComponent(DFMComponent):
                                 key='btn_dfm_select_all_industries',
                                 help="点击选择所有行业",
                                 use_container_width=True):
-                    # 只更新统一状态管理器中的状态
-                    self._set_state('dfm_industry_checkbox_states', {industry: True for industry in filtered_industries})
+                    # 记录旧状态
+                    old_states = self._get_state('dfm_industry_checkbox_states', {})
+                    new_states = {industry: True for industry in filtered_industries}
+
+                    # 更新统一状态管理器中的状态
+                    self._set_state('dfm_industry_checkbox_states', new_states)
+
+                    # 调试信息
+                    logger.info(f"选择全行业按钮点击 - 旧状态: {sum(old_states.values())} 个行业已选")
+                    logger.info(f"选择全行业按钮点击 - 新状态: {len(filtered_industries)} 个行业已选")
+                    logger.info(f"行业复选框状态已更新: {len(filtered_industries)} 个行业全部设为 True")
+
                     # 强制刷新页面以更新UI
                     st_obj.rerun()
 
@@ -680,9 +701,18 @@ class VariableSelectionComponent(DFMComponent):
                                 key='btn_dfm_reset_industries',
                                 help="重置为默认状态（全选）",
                                 use_container_width=True):
-                    # 直接设置为全选状态，而不是清空
+                    # 记录旧状态
+                    old_states = self._get_state('dfm_industry_checkbox_states', {})
                     reset_states = {industry: True for industry in filtered_industries}
+
+                    # 直接设置为全选状态，而不是清空
                     self._set_state('dfm_industry_checkbox_states', reset_states)
+
+                    # 调试信息
+                    logger.info(f"重置行业按钮点击 - 旧状态: {sum(old_states.values())} 个行业已选")
+                    logger.info(f"重置行业按钮点击 - 新状态: {len(filtered_industries)} 个行业已选")
+                    logger.info(f"行业复选框状态已重置: {len(filtered_industries)} 个行业全部设为 True")
+
                     # 强制刷新页面以更新UI
                     st_obj.rerun()
 
@@ -775,9 +805,10 @@ class VariableSelectionComponent(DFMComponent):
                 if not valid_default and indicators_for_this_industry: # 如果之前存的默认值无效了，且当前有可选指标，则全选
                     valid_default = indicators_for_this_industry
 
-                # 取消全选复选框（不使用session_state）
+                # 取消全选复选框，使用key确保状态追踪
                 deselect_all_checked = st_obj.checkbox(
                     f"取消全选 {industry_name} 指标",
+                    key=f"dfm_legacy_deselect_all_{industry_name}",
                     help=f"勾选此框将取消所有已为 '{industry_name}' 选中的指标。"
                 )
 

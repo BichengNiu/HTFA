@@ -898,140 +898,25 @@ def render_dfm_train_model_tab(st_instance):
         st_instance.error("[ERROR] 无法找到任何可用的目标变量")
         set_dfm_state('dfm_target_variable', None)
 
-
-    # 2. 选择行业变量 (复选框形式，默认全选)（兼容新旧状态管理）
-    st_instance.markdown("**选择行业**")
-
-    current_checkbox_states = get_dfm_state('dfm_industry_checkbox_states', None)
-
-    # 如果状态为None、空字典，或者行业列表发生变化，则重新初始化
-    needs_initialization = (
-        current_checkbox_states is None or
-        not current_checkbox_states or  # 空字典
-        (unique_industries and set(current_checkbox_states.keys()) != set(unique_industries))  # 行业列表变化
-    )
-
-    if needs_initialization and unique_industries:
-        initial_states = {industry: True for industry in unique_industries}
-        set_dfm_state('dfm_industry_checkbox_states', initial_states)
-    elif not unique_industries:
-        set_dfm_state('dfm_industry_checkbox_states', {})
-
-    # 为了避免在没有行业时出错，检查 unique_industries
-    if not unique_industries:
-        st_instance.info("没有可用的行业数据。")
-    else:
-        # 创建列以更好地布局复选框
-        if CONFIG_AVAILABLE:
-            num_cols_industry = UIDefaults.NUM_COLS_INDUSTRY
-        else:
-            num_cols_industry = 3
-
-        industry_cols = st_instance.columns(num_cols_industry)
-        col_idx = 0
-        current_checkbox_states = get_dfm_state('dfm_industry_checkbox_states', {})
-
-        # 修复：过滤掉包含目标变量的行业
-        current_target_var = get_dfm_state('dfm_target_variable', None)
-        filtered_industries = []
-        
-        for industry_name in unique_industries:
-            # 检查这个行业是否包含目标变量
-            industry_indicators = var_to_indicators_map_by_industry.get(industry_name, [])
-            if current_target_var and current_target_var in industry_indicators:
-                # 如果该行业包含目标变量，检查是否还有其他指标
-                non_target_indicators = [ind for ind in industry_indicators if ind != current_target_var]
-                if non_target_indicators:
-                    # 该行业除了目标变量还有其他指标，保留该行业
-                    filtered_industries.append(industry_name)
-                # 如果该行业只有目标变量，则排除该行业
-            else:
-                # 该行业不包含目标变量，保留
-                filtered_industries.append(industry_name)
-
-        # 创建复选框并收集状态（纯统一状态管理器实现）
-        for industry_name in filtered_industries:
-            with industry_cols[col_idx % num_cols_industry]:
-                # 获取当前状态：从统一状态管理器获取，默认为True
-                current_value = current_checkbox_states.get(industry_name, True)
-
-                # 不使用key参数，避免session_state冲突
-                new_state = st_instance.checkbox(
-                    industry_name,
-                    value=current_value
-                )
-                current_checkbox_states[industry_name] = new_state
-            col_idx += 1
-
-        # 更新状态管理器
-        set_dfm_state('dfm_industry_checkbox_states', current_checkbox_states)
-
-        # 使用按钮控制行业选择，通过统一状态管理器同步
-        col_deselect, col_select, col_reset = st_instance.columns(3)
-        with col_deselect:
-            if st_instance.button("取消全行业",
-                                key='btn_dfm_deselect_all_industries',
-                                help="点击取消所有已选中的行业",
-                                use_container_width=True):
-                # 只更新统一状态管理器中的状态
-                set_dfm_state('dfm_industry_checkbox_states', {industry: False for industry in filtered_industries})
-                # 强制刷新页面以更新UI
-                st_instance.rerun()
-
-        with col_select:
-            if st_instance.button("选择全行业",
-                                key='btn_dfm_select_all_industries',
-                                help="点击选择所有行业",
-                                use_container_width=True):
-                # 只更新统一状态管理器中的状态
-                set_dfm_state('dfm_industry_checkbox_states', {industry: True for industry in filtered_industries})
-                # 强制刷新页面以更新UI
-                st_instance.rerun()
-
-        with col_reset:
-            if st_instance.button("[LOADING] 重置",
-                                key='btn_dfm_reset_industries',
-                                help="重置为默认状态（全选）",
-                                use_container_width=True):
-                # 直接设置为全选状态，而不是清空
-                reset_states = {industry: True for industry in filtered_industries}
-                set_dfm_state('dfm_industry_checkbox_states', reset_states)
-                # 强制刷新页面以更新UI
-                st_instance.rerun()
-
-        # 显示当前选择状态
-        selected_count = sum(1 for industry, checked in current_checkbox_states.items() if checked and industry in filtered_industries)
-        st_instance.info(f"[DATA] 当前状态：已选择 {selected_count} 个行业（共 {len(filtered_industries)} 个可选）")
-        
-        if len(filtered_industries) < len(unique_industries):
-            excluded_count = len(unique_industries) - len(filtered_industries)
-            st_instance.text(f"已自动排除 {excluded_count} 个仅包含目标变量的行业")
-
-    # 更新当前选中的行业列表（兼容新旧状态管理）
-    current_checkbox_states = get_dfm_state('dfm_industry_checkbox_states', {})
-
-    # 如果复选框状态为空但有行业数据，使用默认全选状态
-    # 重新计算过滤后的行业列表 (为了在这个作用域中访问)
+    # 2. 过滤行业：移除仅包含目标变量的行业
     current_target_var = get_dfm_state('dfm_target_variable', None)
-    filtered_industries_for_state = []
+    filtered_industries = []
+
     for industry_name in unique_industries:
         industry_indicators = var_to_indicators_map_by_industry.get(industry_name, [])
         if current_target_var and current_target_var in industry_indicators:
             non_target_indicators = [ind for ind in industry_indicators if ind != current_target_var]
             if non_target_indicators:
-                filtered_industries_for_state.append(industry_name)
+                filtered_industries.append(industry_name)
         else:
-            filtered_industries_for_state.append(industry_name)
-    
-    if not current_checkbox_states and filtered_industries_for_state:
-        current_checkbox_states = {industry: True for industry in filtered_industries_for_state}
-        set_dfm_state('dfm_industry_checkbox_states', current_checkbox_states)
+            filtered_industries.append(industry_name)
 
-    selected_industries = [
-        industry for industry, checked in current_checkbox_states.items() if checked
-    ]
-
-    set_dfm_state('dfm_selected_industries', selected_industries)
+    # 暂时存储过滤后的行业，以供后续步骤3中使用
+    if not filtered_industries:
+        st_instance.info("没有可用的行业数据。")
+        set_dfm_state('dfm_selected_industries', [])
+    else:
+        pass  # 继续进行到步骤3，用户将直接选择指标
 
     # 3. 根据选定行业选择预测指标 (每个行业一个多选下拉菜单，默认全选)
     st_instance.markdown("**选择预测指标**")
@@ -1040,10 +925,10 @@ def render_dfm_train_model_tab(st_instance):
         set_dfm_state('dfm_selected_indicators_per_industry', {})
 
     final_selected_indicators_flat = []
-    current_selected_industries = get_dfm_state('dfm_selected_industries', [])
+    current_selected_industries = filtered_industries  # 直接使用过滤后的所有行业
 
     if not current_selected_industries:
-        st_instance.info("请先在上方选择至少一个行业。")
+        st_instance.info("没有可用的行业数据。")
     else:
         current_selection = get_dfm_state('dfm_selected_indicators_per_industry', {})
 
@@ -1085,9 +970,10 @@ def render_dfm_train_model_tab(st_instance):
 
             # 移除回调函数，改为直接逻辑处理
 
-            # 取消全选复选框（不使用session_state）
+            # 取消全选复选框，使用key确保状态追踪
             deselect_all_checked = st_instance.checkbox(
                 f"取消全选 {industry_name} 指标",
+                key=f"dfm_deselect_all_indicators_{industry_name}",
                 help=f"勾选此框将取消所有已为 '{industry_name}' 选中的指标。"
             )
 
@@ -1117,6 +1003,15 @@ def render_dfm_train_model_tab(st_instance):
     # 更新最终的扁平化预测指标列表 (去重)
     final_indicators = sorted(list(set(final_selected_indicators_flat)))
     set_dfm_state('dfm_selected_indicators', final_indicators)
+
+    # 从选择的指标自动推断实际使用的行业（只有当该行业有指标被选中时）
+    inferred_industries = []
+    selected_indicators_per_industry = get_dfm_state('dfm_selected_indicators_per_industry', {})
+    for industry, indicators in selected_indicators_per_industry.items():
+        if indicators and len(indicators) > 0:  # 如果该行业有选中的指标
+            inferred_industries.append(industry)
+
+    set_dfm_state('dfm_selected_industries', inferred_industries)
 
     # 变量选择完成
 
