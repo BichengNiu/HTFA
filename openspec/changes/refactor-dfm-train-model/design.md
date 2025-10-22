@@ -12,7 +12,17 @@
 - 分析输出层（analysis/）- 3,300行缺失
 - 预计算引擎（optimization/precompute.py）- 800行缺失
 
-**采用完全重构**：直接删除train_model，重新实现所有缺失模块，彻底解决架构问题。
+**采用完全重构**：重新实现所有缺失模块，彻底解决架构问题。
+
+**train_model处理策略**：
+- ⚠️ 在所有重构工作、一致性验证、用户测试完成前，**不得删除**train_model模块
+- 📖 train_model代码仅作为**参考**，不得被调用或修改
+- ✅ 只有在生产环境稳定运行后，才在Phase 9删除train_model
+
+**分支管理策略**：
+- 🌿 所有重构工作在`feature/refactor-train-model`分支进行
+- 🚫 重构期间不得合并到main分支
+- ✅ 只有在Phase 9（清理与合并）完全完成后，才合并到main
 
 ## Goals / Non-Goals
 
@@ -27,7 +37,7 @@
 
 ### Non-Goals
 
-1. **保留兼容**：不保留train_model代码，不提供回退机制
+1. **保留兼容**：不提供train_model与train_ref的兼容层或回退机制
 2. **性能优化**：不引入超出train_model的新优化（如GPU加速）
 3. **功能扩展**：不添加train_model不支持的新功能（如增量训练）
 4. **更改数据格式**：保持输入输出格式与train_model一致
@@ -450,11 +460,19 @@ results = trainer.train(progress_callback=lambda msg: update_progress(msg))
 3. 用户验收测试
 4. 部署到生产环境
 
-### Phase 5：清理（1周）
+### Phase 5：清理与合并（1周）
 
-1. 删除train_model目录
+**前置条件**：
+- Phase 4所有测试和部署已完成
+- 用户验收测试通过
+- 生产环境稳定运行至少1周
+
+**任务**：
+1. 删除train_model目录（满足前置条件后）
 2. 更新文档（CLAUDE.md）
 3. 发布变更日志
+4. 合并feature分支到main
+5. 创建发布标签v2.0.0-train-ref
 
 **总计**：22周
 

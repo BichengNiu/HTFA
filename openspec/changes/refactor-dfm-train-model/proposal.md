@@ -151,11 +151,22 @@
 
 ### 影响的代码
 
+**新增代码**：
 - `dashboard/DFM/train_ref/`：完整实现所有模块，新增约11,000行代码 + 4,000行测试
-- `dashboard/DFM/train_model/`：**完全删除**（15,049行）
+
+**修改代码**：
 - `dashboard/ui/pages/dfm/model_training_page.py`：直接使用train_ref（约50行修改）
 - `dashboard/ui/components/dfm/train_model/`：适配train_ref接口（约50行修改）
 - `CLAUDE.md`：更新DFM架构说明为train_ref（约30行修改）
+
+**删除代码**（仅在所有验证完成后）：
+- `dashboard/DFM/train_model/`：**在Phase 9完全删除**（15,049行）
+- ⚠️ 在Phase 1-8期间，train_model模块保持完整，仅作参考，不被调用或修改
+
+**分支管理**：
+- 所有开发工作在`feature/refactor-train-model`分支进行
+- main分支保持train_model作为稳定参考
+- 只有在Phase 9（清理与合并）完成后才合并到main
 
 ### 代码量对比
 
