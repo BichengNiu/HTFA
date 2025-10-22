@@ -265,11 +265,13 @@
   - test_precompute.py: 23个测试, precompute.py覆盖率83%
   - test_data_utils.py: 29个测试, data_utils.py覆盖率88%
 
-## 5. 数值一致性验证（Week 12-15）⏱️ 依赖Phase 2.3完成
+## 5. 数值一致性验证（Week 12-15）⏱️ 部分完成
 
 **注意**: 本阶段必须在Phase 2.3（核心算法层）完全实现后才能开始，否则端到端测试无法运行。
 
-### 5.1 对比测试框架
+**Phase 5.1 已完成**：端到端基础功能测试框架搭建完毕，4/4测试通过（100%）
+
+### 5.1 对比测试框架 ✅ 已完成
 
 - [x] 5.1.1 创建对比测试基类（tests/consistency/base.py）
   - 加载baseline结果工具函数
@@ -283,8 +285,13 @@
   - 测试变量选择流程
   - 测试不同因子数配置
   - 测试可重现性
-  - **已完成**: 实现4个基础测试，但因Phase 2.3未完成而无法通过
-  - **待补充**: Phase 2.3完成后需重新验证
+  - **已完成**: 实现4个基础测试（261行）
+  - **已完成**: 修复变量选择测试（BackwardSelector分数比较逻辑）
+  - **测试结果**: 4/4测试通过（100%）
+    - test_minimal_training_flow PASSED
+    - test_variable_selection_flow PASSED
+    - test_different_factor_numbers PASSED
+    - test_reproducibility PASSED
 
 ### 5.2 核心算法对比
 
