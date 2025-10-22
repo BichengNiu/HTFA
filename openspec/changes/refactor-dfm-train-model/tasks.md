@@ -79,10 +79,17 @@
   - 完善ModelConfig（factor_selection_method等字段）
   - 添加配置验证方法
 
-- [ ] 2.2.3 编写训练流程单元测试（tests/training/）
+- [ ] 2.2.3 实现环境初始化和可重现性控制（training/trainer.py）
+  - 多线程BLAS配置（OMP_NUM_THREADS, MKL_NUM_THREADS等）
+  - 全局静默模式控制（_SILENT_MODE, _TRAINING_SILENT_MODE）
+  - 随机种子设置（numpy, random, sklearn）
+  - 全局回调函数管理（_global_progress_callback）
+
+- [ ] 2.2.4 编写训练流程单元测试（tests/training/）
   - 测试两阶段流程正确性
   - 测试各种因子选择方法
   - 验证配置验证逻辑
+  - 测试可重现性（相同种子相同结果）
   - 覆盖率 > 80%
 
 ## 3. 分析输出层实现（Week 8-11）
@@ -96,10 +103,14 @@
   - Excel多Sheet报告生成
 
 - [ ] 3.1.2 实现分析工具函数（analysis/analysis_utils.py）
-  - calculate_metrics_with_lagged_target()
-  - calculate_factor_contributions()
-  - calculate_individual_variable_r2()
-  - calculate_industry_r2()
+  - calculate_metrics_with_lagged_target(): 带滞后目标的指标计算
+  - calculate_factor_contributions(): 因子贡献度分解
+  - calculate_individual_variable_r2(): 个体变量R²
+  - calculate_industry_r2(): 行业聚合R²
+  - calculate_monthly_friday_metrics(): 月度周五指标计算
+  - calculate_factor_industry_r2(): 因子-行业交叉R²
+  - calculate_factor_type_r2(): 因子-类型R²
+  - calculate_pca_variance(): PCA方差贡献计算
 
 - [ ] 3.1.3 实现报告生成器（analysis/generate_report.py）
   - generate_report_with_params()
@@ -113,6 +124,9 @@
   - plot_residuals(): 残差分析图
   - plot_pca_variance(): PCA方差贡献图
   - plot_factor_loadings(): 因子载荷热力图
+  - plot_industry_vs_driving_factor(): 行业vs驱动因子对比图
+  - plot_aligned_loading_comparison(): 因子载荷对比图
+  - plot_factor_loading_clustermap(): 因子载荷聚类图
   - 支持Plotly和Matplotlib两种后端
 
 - [ ] 3.2.2 编写分析输出单元测试（tests/analysis/）
@@ -135,7 +149,13 @@
   - 批量优化评估
   - 内存优化版本
 
-- [ ] 4.1.3 编写优化层单元测试（tests/optimization/）
+- [ ] 4.1.3 实现辅助工具模块（utils/）
+  - interfaces.py: Protocol类定义，接口规范
+  - interface_wrapper.py: 接口包装器实现
+  - suppress_prints.py: 打印抑制上下文管理器
+  - verify_alignment.py: 数据对齐验证工具
+
+- [ ] 4.1.4 编写优化层单元测试（tests/optimization/）
   - 验证预计算结果正确性
   - 测试缓存命中逻辑
   - 性能基准测试
@@ -182,6 +202,13 @@
   - 对比执行时间（目标：差异 < 10%）
   - 对比内存占用
   - 生成性能报告
+
+- [ ] 5.3.4 实现简化版性能分析工具（可选，utils/performance.py）
+  - 基本性能指标收集（PerformanceMetrics）
+  - 执行时间统计
+  - 内存占用统计
+  - 性能对比报告生成
+  - **注意**: 仅实现必要功能，不需要完整复现train_model的performance_benchmark.py
 
 ## 6. UI层迁移（Week 17-18）
 
