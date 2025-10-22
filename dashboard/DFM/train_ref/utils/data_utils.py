@@ -205,3 +205,169 @@ def apply_seasonal_mask(
     logger.info(f"对目标变量应用季节性掩码: {months_to_mask}月，掩码数量: {masked_count}")
 
     return masked_data
+
+
+def verify_alignment(
+    data: pd.DataFrame,
+    variables: List[str],
+    strict: bool = True
+) -> Tuple[bool, Dict]:
+    """验证数据对齐情况
+
+    检查指定变量的数据是否在时间维度上对齐，
+    包括索引一致性、缺失值分布等。
+
+    Args:
+        data: 输入数据
+        variables: 要验证的变量列表
+        strict: 是否严格模式（要求完全无缺失值）
+
+    Returns:
+        Tuple[bool, Dict]: (是否对齐, 诊断信息)
+    """
+    diagnosis = {
+        'aligned': True,
+        'missing_variables': [],
+        'missing_counts': {},
+        'coverage': {},
+        'common_dates': 0,
+        'issues': []
+    }
+
+    # 检查变量是否存在
+    missing_vars = [v for v in variables if v not in data.columns]
+    if missing_vars:
+        diagnosis['aligned'] = False
+        diagnosis['missing_variables'] = missing_vars
+        diagnosis['issues'].append(f"缺失变量: {missing_vars}")
+        return False, diagnosis
+
+    # 选择相关变量
+    subset = data[variables]
+
+    # 统计每个变量的缺失值
+    for var in variables:
+        missing_count = subset[var].isna().sum()
+        total_count = len(subset)
+        coverage = (total_count - missing_count) / total_count * 100
+
+        diagnosis['missing_counts'][var] = int(missing_count)
+        diagnosis['coverage'][var] = round(coverage, 2)
+
+        if strict and missing_count > 0:
+            diagnosis['aligned'] = False
+            diagnosis['issues'].append(
+                f"变量 {var} 有 {missing_count} 个缺失值 (覆盖率: {coverage:.1f}%)"
+            )
+
+    # 统计共同有效日期数量
+    common_valid = subset.dropna()
+    diagnosis['common_dates'] = len(common_valid)
+
+    if diagnosis['common_dates'] == 0:
+        diagnosis['aligned'] = False
+        diagnosis['issues'].append("没有共同的完整观测点")
+    elif not strict and diagnosis['common_dates'] < len(subset) * 0.5:
+        diagnosis['aligned'] = False
+        diagnosis['issues'].append(
+            f"共同有效日期过少: {diagnosis['common_dates']}/{len(subset)} "
+            f"({diagnosis['common_dates']/len(subset)*100:.1f}%)"
+        )
+
+    # 记录日志
+    if diagnosis['aligned']:
+        logger.info(
+            f"数据对齐验证通过: {len(variables)}个变量, "
+            f"共同有效日期: {diagnosis['common_dates']}/{len(subset)}"
+        )
+    else:
+        logger.warning(
+            f"数据对齐验证失败: {', '.join(diagnosis['issues'])}"
+        )
+
+    return diagnosis['aligned'], diagnosis
+
+
+def check_data_quality(
+    data: pd.DataFrame,
+    variables: Optional[List[str]] = None,
+    max_missing_ratio: float = 0.3,
+    min_variance: float = 1e-8
+) -> Tuple[bool, List[str], Dict]:
+    """检查数据质量
+
+    检查数据的基本质量指标，包括缺失值比例、方差等。
+
+    Args:
+        data: 输入数据
+        variables: 要检查的变量列表，None表示检查所有列
+        max_missing_ratio: 最大允许缺失值比例
+        min_variance: 最小方差阈值（低于此值认为是常数）
+
+    Returns:
+        Tuple[bool, List[str], Dict]: (是否通过, 问题变量列表, 详细诊断)
+    """
+    if variables is None:
+        variables = data.columns.tolist()
+
+    diagnosis = {
+        'passed': True,
+        'total_variables': len(variables),
+        'problematic_variables': [],
+        'quality_metrics': {}
+    }
+
+    problematic = []
+
+    for var in variables:
+        if var not in data.columns:
+            problematic.append(var)
+            diagnosis['quality_metrics'][var] = {
+                'issue': 'variable_not_found'
+            }
+            continue
+
+        series = data[var]
+        metrics = {}
+
+        # 检查缺失值
+        missing_count = series.isna().sum()
+        missing_ratio = missing_count / len(series)
+        metrics['missing_count'] = int(missing_count)
+        metrics['missing_ratio'] = round(missing_ratio, 4)
+
+        # 检查方差
+        valid_data = series.dropna()
+        if len(valid_data) > 0:
+            variance = valid_data.var()
+            metrics['variance'] = float(variance)
+            metrics['is_constant'] = variance < min_variance
+        else:
+            metrics['variance'] = 0.0
+            metrics['is_constant'] = True
+
+        # 判断是否有问题
+        issues = []
+        if missing_ratio > max_missing_ratio:
+            issues.append(f"缺失值过多: {missing_ratio*100:.1f}%")
+        if metrics['is_constant']:
+            issues.append(f"方差过低: {metrics['variance']:.2e}")
+
+        if issues:
+            problematic.append(var)
+            metrics['issues'] = issues
+
+        diagnosis['quality_metrics'][var] = metrics
+
+    diagnosis['problematic_variables'] = problematic
+    diagnosis['passed'] = len(problematic) == 0
+
+    # 记录日志
+    if diagnosis['passed']:
+        logger.info(f"数据质量检查通过: {len(variables)}个变量均符合要求")
+    else:
+        logger.warning(
+            f"数据质量检查发现问题: {len(problematic)}个变量有问题 - {problematic}"
+        )
+
+    return diagnosis['passed'], problematic, diagnosis
