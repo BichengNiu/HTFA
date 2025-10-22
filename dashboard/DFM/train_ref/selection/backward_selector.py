@@ -157,14 +157,12 @@ class BackwardSelector:
             )
 
             if not np.isfinite(current_best_score[0]) or not np.isfinite(current_best_score[1]):
-                logger.error("初始基准评估未能计算有效分数")
-                return SelectionResult(
-                    selected_variables=initial_variables,
-                    selection_history=[],
-                    final_score=(-np.inf, np.inf),
-                    total_evaluations=total_evaluations,
-                    svd_error_count=svd_error_count
+                logger.warning(
+                    f"初始基准评估返回无效分数: HR={current_best_score[0]}, "
+                    f"RMSE={-current_best_score[1]}, 但仍继续尝试变量选择"
                 )
+                # 使用一个较差但有限的初始分数，而不是直接返回
+                current_best_score = (0.0, -999999.0)  # HR=0%, RMSE=999999
 
             logger.info(
                 f"初始基准得分 (HR={current_best_score[0]:.2f}%, "
@@ -173,13 +171,11 @@ class BackwardSelector:
 
         except Exception as e:
             logger.error(f"计算初始基准性能时出错: {e}")
-            return SelectionResult(
-                selected_variables=initial_variables,
-                selection_history=[],
-                final_score=(-np.inf, np.inf),
-                total_evaluations=total_evaluations,
-                svd_error_count=svd_error_count
-            )
+            import traceback
+            traceback.print_exc()
+            # 即使初始评估失败，也尝试继续（设置一个较差的初始分数）
+            logger.warning("初始基准评估失败，使用默认分数继续尝试变量选择")
+            current_best_score = (0.0, -999999.0)  # HR=0%, RMSE=999999
 
         # 3. 迭代移除变量
         iteration = 0
@@ -200,6 +196,7 @@ class BackwardSelector:
             for var_to_remove in current_predictors:
                 temp_predictors = [v for v in current_predictors if v != var_to_remove]
                 if not temp_predictors:
+                    logger.debug(f"跳过{var_to_remove}: 移除后无剩余变量")
                     continue
 
                 temp_variables = [target_variable] + temp_predictors
@@ -207,6 +204,10 @@ class BackwardSelector:
                 # 检查因子数是否仍然小于变量数(N > K)
                 k_factors = params.get('k_factors', 1)
                 if k_factors >= len(temp_variables):
+                    logger.debug(
+                        f"跳过{var_to_remove}: k_factors({k_factors}) >= "
+                        f"剩余变量数({len(temp_variables)})"
+                    )
                     continue
 
                 valid_removals += 1
@@ -254,7 +255,12 @@ class BackwardSelector:
 
             # 检查是否有改进
             if best_removal_var is None:
-                logger.info("本轮无可行的评估任务,筛选结束")
+                logger.info(
+                    f"本轮无可行的评估任务,筛选结束 "
+                    f"(valid_removals={valid_removals}, "
+                    f"current_predictors={len(current_predictors)}, "
+                    f"k_factors={params.get('k_factors', 1)})"
+                )
                 break
 
             # 检查是否有性能提升

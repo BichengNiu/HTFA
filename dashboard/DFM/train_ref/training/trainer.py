@@ -449,12 +449,52 @@ class DFMTrainer:
                 if v != self.config.target_variable
             ]
 
-        logger.info(f"数据加载完成: {data.shape}, 预测变量数: {len(predictor_vars)}")
+        # 数据质量检查和清理
+        initial_count = len(predictor_vars)
+        valid_predictor_vars = []
+        removed_vars = []
+
+        for var in predictor_vars:
+            var_data = data[var]
+            valid_count = var_data.notna().sum()
+
+            # 过滤全NaN或有效数据过少的列
+            if valid_count < 10:  # 至少需要10个有效数据点
+                removed_vars.append((var, valid_count))
+                logger.warning(
+                    f"移除变量'{var}': 有效数据点({valid_count}) < 最小要求(10)"
+                )
+            else:
+                valid_predictor_vars.append(var)
+
+        predictor_vars = valid_predictor_vars
+
+        if removed_vars:
+            logger.info(
+                f"数据清理: 移除了{len(removed_vars)}个无效变量, "
+                f"剩余{len(predictor_vars)}个有效变量"
+            )
+            if progress_callback:
+                progress_callback(
+                    f"[TRAIN] 数据清理: 移除{len(removed_vars)}个无效变量"
+                )
+
+        # 验证是否还有足够的预测变量
+        if len(predictor_vars) < 2:
+            raise ValueError(
+                f"有效预测变量不足({len(predictor_vars)}个), "
+                f"至少需要2个有效变量进行DFM建模"
+            )
+
+        logger.info(
+            f"数据加载完成: {data.shape}, "
+            f"有效预测变量数: {len(predictor_vars)}"
+        )
 
         if progress_callback:
             progress_callback(
                 f"[TRAIN] 数据加载完成: {data.shape[0]}行, "
-                f"{len(predictor_vars)}个预测变量"
+                f"{len(predictor_vars)}个有效预测变量"
             )
 
         return data, target_data, predictor_vars
@@ -498,11 +538,17 @@ class DFMTrainer:
 
         # 执行选择
         initial_vars = [self.config.target_variable] + predictor_vars
+
+        # 计算合理的k_factors: 应该小于变量数以允许变量移除
+        # 使用变量数的一半，或至少为2
+        k_for_selection = max(2, min(len(predictor_vars) // 2, len(predictor_vars) - 2))
+        logger.info(f"变量选择使用k_factors={k_for_selection} (变量数: {len(predictor_vars)})")
+
         selection_result = selector.select(
             initial_variables=initial_vars,
             target_variable=self.config.target_variable,
             full_data=data,
-            params={'k_factors': len(predictor_vars)},  # 固定k=块数
+            params={'k_factors': k_for_selection},  # 使用合理的k值
             validation_start=self.config.validation_start,
             validation_end=self.config.validation_end,
             target_freq=self.config.target_freq,
@@ -725,17 +771,33 @@ class DFMTrainer:
             y = target_data.loc[common_index].values
             X = factors[:len(common_index), :]
 
-            # 移除NaN值
-            valid_mask = ~np.isnan(y)
+            # 移除NaN值（同时移除y和X中对应的行）
+            # 处理因子矩阵中可能存在的NaN
+            y_isnan = np.isnan(y)
+            X_has_nan = np.any(np.isnan(X), axis=1)
+            valid_mask = ~(y_isnan | X_has_nan)
+
+            if not valid_mask.any():
+                logger.error("没有找到有效的数据点用于回归")
+                raise ValueError("目标变量和因子都没有有效的对齐数据点")
+
             y_clean = y[valid_mask]
             X_clean = X[valid_mask, :]
+
+            logger.info(
+                f"回归数据准备: 总样本{len(y)}, "
+                f"有效样本{len(y_clean)} ({100*len(y_clean)/len(y):.1f}%)"
+            )
 
             # 回归：y = X @ beta + epsilon
             # 使用最小二乘法估计beta（目标变量的因子载荷）
             from numpy.linalg import lstsq
             beta, residuals, rank, s = lstsq(X_clean, y_clean, rcond=None)
 
-            logger.info(f"目标变量因子载荷: {beta}")
+            logger.info(
+                f"目标变量因子载荷: {beta}, "
+                f"回归残差: {np.sqrt(residuals[0]/len(y_clean)) if len(residuals) > 0 else 'N/A'}"
+            )
 
             # 生成完整预测（包含NaN位置）
             forecast_full = X @ beta
