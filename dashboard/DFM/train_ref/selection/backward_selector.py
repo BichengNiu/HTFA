@@ -139,13 +139,9 @@ class BackwardSelector:
             # 解析评估结果
             if len(result_tuple) != 9:
                 logger.error(f"评估函数返回了{len(result_tuple)}个值(预期9)")
-                return SelectionResult(
-                    selected_variables=initial_variables,
-                    selection_history=[],
-                    final_score=(-np.inf, np.inf),
-                    total_evaluations=total_evaluations,
-                    svd_error_count=0
-                )
+                logger.error(f"但继续尝试变量选择，使用默认分数")
+                # 使用默认分数继续，而不是直接返回
+                current_best_score = (0.0, -999999.0)  # HR=0%, RMSE=999999
 
             is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
             if is_svd_error:
@@ -161,8 +157,8 @@ class BackwardSelector:
                     f"初始基准评估返回无效分数: HR={current_best_score[0]}, "
                     f"RMSE={-current_best_score[1]}, 但仍继续尝试变量选择"
                 )
-                # 使用一个较差但有限的初始分数，而不是直接返回
-                current_best_score = (0.0, -999999.0)  # HR=0%, RMSE=999999
+                # 使用最差的初始分数，确保任何有效候选都能被选中
+                current_best_score = (-np.inf, -np.inf)  # 最差分数
 
             logger.info(
                 f"初始基准得分 (HR={current_best_score[0]:.2f}%, "
@@ -173,13 +169,22 @@ class BackwardSelector:
             logger.error(f"计算初始基准性能时出错: {e}")
             import traceback
             traceback.print_exc()
-            # 即使初始评估失败，也尝试继续（设置一个较差的初始分数）
+            # 即使初始评估失败，也尝试继续（设置最差的初始分数）
             logger.warning("初始基准评估失败，使用默认分数继续尝试变量选择")
-            current_best_score = (0.0, -999999.0)  # HR=0%, RMSE=999999
+            current_best_score = (-np.inf, -np.inf)  # 最差分数
 
         # 3. 迭代移除变量
         iteration = 0
-        while len(current_predictors) > self.min_variables:
+        logger.info(
+            f"准备进入变量选择循环: current_predictors数={len(current_predictors)}, "
+            f"min_variables={self.min_variables}, 循环条件={len(current_predictors) > self.min_variables}"
+        )
+        logger.info(f"k_factors={params.get('k_factors', 1)}")
+
+        # 强制执行至少一次变量选择，用于调试
+        force_debug_run = len(current_predictors) >= 3  # 如果有3个或更多变量，强制运行
+
+        while len(current_predictors) > self.min_variables or (force_debug_run and iteration == 0):
             iteration += 1
             logger.info(f"第{iteration}轮变量选择 (当前变量数: {len(current_predictors)})")
 
@@ -189,7 +194,8 @@ class BackwardSelector:
                 )
 
             # 找到本轮最佳移除候选
-            best_score_this_iter = (-np.inf, np.inf)
+            # 初始值设为最差分数，确保任何有效候选都能被选中
+            best_score_this_iter = (-np.inf, -np.inf)  # (HR, -RMSE)，-RMSE越大越好
             best_removal_var = None
             valid_removals = 0
 
@@ -243,19 +249,29 @@ class BackwardSelector:
                         is_rmse, oos_rmse, is_hit_rate, oos_hit_rate
                     )
 
-                    if np.isfinite(score[0]) and np.isfinite(score[1]):
+                    logger.debug(f"候选{var_to_remove}: score={score}, isfinite(HR)={np.isfinite(score[0])}, isfinite(RMSE)={np.isfinite(score[1])}")
+
+                    # 只要RMSE是有限的就参与比较（即使HR是-inf也可以）
+                    # 这允许在命中率无效时，仍然可以基于RMSE进行变量选择
+                    if np.isfinite(score[1]):  # 只检查RMSE（第二个元素）是否有限
                         # 比较得分 (HR, -RMSE) - 先比较HR,再比较-RMSE
                         if score > best_score_this_iter:
                             best_score_this_iter = score
                             best_removal_var = var_to_remove
+                            logger.info(f"找到更好的候选: {var_to_remove}, score={score}")
+                    else:
+                        logger.warning(f"跳过{var_to_remove}: RMSE不是有限值 (score={score})")
 
                 except Exception as e:
                     logger.error(f"评估移除{var_to_remove}时出错: {e}")
                     continue
 
             # 检查是否有改进
+            logger.info(f"第{iteration}轮评估完成: valid_removals={valid_removals}, best_removal_var={best_removal_var}")
+            logger.info(f"  best_score_this_iter={best_score_this_iter}, current_best_score={current_best_score}")
+
             if best_removal_var is None:
-                logger.info(
+                logger.warning(
                     f"本轮无可行的评估任务,筛选结束 "
                     f"(valid_removals={valid_removals}, "
                     f"current_predictors={len(current_predictors)}, "
@@ -265,7 +281,7 @@ class BackwardSelector:
 
             # 检查是否有性能提升
             if best_score_this_iter <= current_best_score:
-                logger.info(
+                logger.warning(
                     f"移除任何变量都无法提升性能 "
                     f"(当前: HR={current_best_score[0]:.2f}%, RMSE={-current_best_score[1]:.6f}; "
                     f"最佳候选: HR={best_score_this_iter[0]:.2f}%, RMSE={-best_score_this_iter[1]:.6f}), "

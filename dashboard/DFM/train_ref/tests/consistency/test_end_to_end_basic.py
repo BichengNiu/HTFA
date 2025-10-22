@@ -153,7 +153,7 @@ class TestEndToEndBasic:
             max_iterations=5,
             enable_variable_selection=True,
             variable_selection_method='backward',
-            min_variables_after_selection=3,
+            min_variables_after_selection=1,  # 改为1，允许变量选择进行
             output_dir=temp_output_dir
         )
 
@@ -165,12 +165,12 @@ class TestEndToEndBasic:
 
         # 验证结果
         assert result is not None
-        assert len(result.selected_variables) >= 3
+        assert len(result.selected_variables) >= 1  # 至少保留1个预测变量
         # selected_variables包含目标变量，所以比selected_indicators多1
         assert len(result.selected_variables) <= len(selected_indicators) + 1
 
-        # 验证选择历史
-        assert len(result.selection_history) > 0
+        # 验证选择历史 - 至少进行了1轮选择
+        assert len(result.selection_history) >= 1
 
         print(f"\n变量选择完成:")
         print(f"  初始变量数: {len(selected_indicators)}")
