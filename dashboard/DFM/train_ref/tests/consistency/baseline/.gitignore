@@ -1,0 +1,17 @@
+# Baseline生成的数据文件不应提交到版本控制
+# 这些文件是运行时生成的，可以通过generate_baseline.py重新生成
+
+# 案例输出目录
+case_*/
+
+# 预处理数据
+preprocessed_data.csv
+
+# Python缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 临时文件
+*.tmp
+*.log

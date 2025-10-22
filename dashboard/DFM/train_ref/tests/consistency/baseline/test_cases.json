@@ -1,0 +1,189 @@
+{
+  "description": "数值一致性验证测试案例配置",
+  "seed": 42,
+  "default_data_path": "data/经济数据库1017.xlsx",
+  "data_prep_config": {
+    "target_freq": "W-FRI",
+    "target_sheet_name": "工业增加值同比增速_月度_同花顺",
+    "target_variable_name": "规模以上工业增加值:当月同比",
+    "consecutive_nan_threshold": 10,
+    "data_start_date": "2020-01-01",
+    "data_end_date": "2025-07-03",
+    "reference_sheet_name": "指标体系",
+    "reference_column_name": "指标名称"
+  },
+  "cases": [
+    {
+      "id": "case_1",
+      "name": "基础配置（小规模）",
+      "description": "最小配置，快速验证基础功能",
+      "config": {
+        "target_variable": "工业增加值同比增速",
+        "selected_indicators": [
+          "PMI",
+          "出口增速",
+          "PPI",
+          "M2增速",
+          "社会融资规模增速"
+        ],
+        "train_start": "2020-01-01",
+        "train_end": "2022-12-31",
+        "validation_start": "2023-01-01",
+        "validation_end": "2023-06-30",
+        "k_factors": 2,
+        "max_iterations": 30,
+        "tolerance": 1e-6,
+        "enable_variable_selection": false
+      }
+    },
+    {
+      "id": "case_2",
+      "name": "中等规模",
+      "description": "中等复杂度，平衡性能和准确性",
+      "config": {
+        "target_variable": "工业增加值同比增速",
+        "selected_indicators": [
+          "PMI",
+          "出口增速",
+          "PPI",
+          "M2增速",
+          "社会融资规模增速",
+          "固定资产投资增速",
+          "房地产投资增速",
+          "制造业PMI",
+          "BDI指数",
+          "原油价格",
+          "铜价",
+          "煤炭价格",
+          "钢铁价格",
+          "水泥产量",
+          "发电量增速"
+        ],
+        "train_start": "2018-01-01",
+        "train_end": "2022-12-31",
+        "validation_start": "2023-01-01",
+        "validation_end": "2023-12-31",
+        "k_factors": 4,
+        "max_iterations": 30,
+        "tolerance": 1e-6,
+        "enable_variable_selection": false
+      }
+    },
+    {
+      "id": "case_3",
+      "name": "大规模配置",
+      "description": "高维数据，测试算法稳定性",
+      "config": {
+        "target_variable": "工业增加值同比增速",
+        "selected_indicators": [
+          "PMI",
+          "出口增速",
+          "PPI",
+          "M2增速",
+          "社会融资规模增速",
+          "固定资产投资增速",
+          "房地产投资增速",
+          "制造业PMI",
+          "BDI指数",
+          "原油价格",
+          "铜价",
+          "煤炭价格",
+          "钢铁价格",
+          "水泥产量",
+          "发电量增速",
+          "汽车产量",
+          "挖掘机销量",
+          "工业机器人产量",
+          "集成电路产量",
+          "化工产品价格指数",
+          "有色金属价格指数",
+          "黑色金属价格指数",
+          "建材价格指数",
+          "消费品零售总额增速",
+          "CPI",
+          "进口增速",
+          "FDI增速",
+          "汇率",
+          "股票指数",
+          "国债收益率"
+        ],
+        "train_start": "2015-01-01",
+        "train_end": "2022-12-31",
+        "validation_start": "2023-01-01",
+        "validation_end": "2023-12-31",
+        "k_factors": 6,
+        "max_iterations": 30,
+        "tolerance": 1e-6,
+        "enable_variable_selection": false
+      }
+    },
+    {
+      "id": "case_4",
+      "name": "变量选择场景",
+      "description": "测试变量选择逻辑",
+      "config": {
+        "target_variable": "工业增加值同比增速",
+        "selected_indicators": [
+          "PMI",
+          "出口增速",
+          "PPI",
+          "M2增速",
+          "社会融资规模增速",
+          "固定资产投资增速",
+          "房地产投资增速",
+          "制造业PMI",
+          "BDI指数",
+          "原油价格",
+          "铜价",
+          "煤炭价格",
+          "钢铁价格",
+          "水泥产量",
+          "发电量增速",
+          "汽车产量",
+          "挖掘机销量",
+          "工业机器人产量",
+          "集成电路产量",
+          "消费品零售总额增速"
+        ],
+        "train_start": "2019-01-01",
+        "train_end": "2022-12-31",
+        "validation_start": "2023-01-01",
+        "validation_end": "2023-06-30",
+        "k_factors": 3,
+        "max_iterations": 30,
+        "tolerance": 1e-6,
+        "enable_variable_selection": true,
+        "variable_selection_method": "backward",
+        "min_variables_after_selection": 5
+      }
+    },
+    {
+      "id": "case_5",
+      "name": "边界情况",
+      "description": "测试边界条件处理",
+      "config": {
+        "target_variable": "工业增加值同比增速",
+        "selected_indicators": [
+          "PMI",
+          "PPI",
+          "M2增速"
+        ],
+        "train_start": "2021-01-01",
+        "train_end": "2022-12-31",
+        "validation_start": "2023-01-01",
+        "validation_end": "2023-03-31",
+        "k_factors": 1,
+        "max_iterations": 30,
+        "tolerance": 1e-6,
+        "enable_variable_selection": false
+      }
+    }
+  ],
+  "validation_criteria": {
+    "parameter_tolerance": 1e-6,
+    "state_tolerance": 1e-6,
+    "rmse_tolerance": 1e-4,
+    "hit_rate_tolerance": 1.0,
+    "correlation_tolerance": 1e-4
+  }
+}
