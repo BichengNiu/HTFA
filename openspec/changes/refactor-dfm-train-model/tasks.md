@@ -164,23 +164,28 @@
 
 ### 4.1 工具模块（合并optimization到utils）
 
-- [ ] 4.1.1 实现PrecomputeEngine类（utils/precompute.py）
+- [x] 4.1.1 实现PrecomputeEngine类（utils/precompute.py）
   - 预计算协方差矩阵
   - 预计算数据标准化参数
   - 返回PrecomputedContext对象（简单dataclass）
   - **注意**: 移到utils/而非optimization/，简化目录结构
+  - **已完成**: 实现了PrecomputeEngine(270行)和PrecomputedContext数据类
 
-- [ ] 4.1.2 实现数据工具（utils/data_utils.py）
+- [x] 4.1.2 实现数据工具（utils/data_utils.py）
   - load_data(): Excel数据加载
   - preprocess_data(): 数据预处理和对齐
   - split_train_validation(): 数据集划分
   - verify_alignment(): 数据对齐验证（合并原verify_alignment.py）
+  - **已完成**: 扩展data_utils.py新增166行(verify_alignment, check_data_quality)
 
-- [ ] 4.1.3 编写工具层单元测试（tests/utils/）
+- [x] 4.1.3 编写工具层单元测试（tests/utils/）
   - 验证预计算结果正确性
   - 测试缓存命中逻辑（cache.py已实现）
   - 测试数据加载和预处理
   - 覆盖率 > 80%
+  - **已完成**: 编写了2个测试文件(52个测试), 覆盖率82%
+  - test_precompute.py: 23个测试, precompute.py覆盖率83%
+  - test_data_utils.py: 29个测试, data_utils.py覆盖率88%
 
 ## 5. 数值一致性验证（Week 11-13）⏱️ 时间提前
 
