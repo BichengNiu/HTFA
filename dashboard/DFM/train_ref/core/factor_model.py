@@ -242,28 +242,52 @@ class DFMModel:
         # 使用初始载荷矩阵
         Lambda = initial_loadings.copy()
 
-        # 使用VAR估计A矩阵和Q矩阵（完全匹配老代码）
-        from statsmodels.tsa.api import VAR
-        var_model = VAR(factors_current.dropna())
-        var_results = var_model.fit(self.max_lags)
+        # 估计A矩阵和Q矩阵
+        if self.n_factors == 1:
+            # 对于单因子情况，使用AR模型
+            from statsmodels.tsa.api import AutoReg
+            ar_model = AutoReg(factors_current.iloc[:, 0].dropna(), lags=self.max_lags, trend='n')
+            ar_results = ar_model.fit()
 
-        # 使用VAR系数初始化A矩阵（完全匹配老代码line 322）
-        if self.max_lags == 1:
-            A = var_results.coefs[0]
-        else:
-            # VAR(p): 构造companion form矩阵
-            n_factors_orig = factors_current.shape[1]
-            A = np.zeros((n_factors_orig * self.max_lags, n_factors_orig * self.max_lags))
-            # 填充VAR系数
-            for lag in range(self.max_lags):
-                A[:n_factors_orig, lag*n_factors_orig:(lag+1)*n_factors_orig] = var_results.coefs[lag]
-            # 构造companion form下半部分
+            if self.max_lags == 1:
+                A = np.array([[ar_results.params.iloc[0]]])  # (1, 1) 矩阵
+            else:
+                # 构造companion form
+                n_states = self.max_lags
+                A = np.zeros((n_states, n_states))
+                A[0, :] = ar_results.params.iloc[:self.max_lags].values
+                if self.max_lags > 1:
+                    A[1:, :-1] = np.eye(self.max_lags - 1)
+
+            # 使用AR残差计算Q矩阵
+            Q = np.array([[ar_results.sigma2]])
             if self.max_lags > 1:
-                A[n_factors_orig:, :-n_factors_orig] = np.eye(n_factors_orig * (self.max_lags - 1))
+                Q_full = np.zeros((self.max_lags, self.max_lags))
+                Q_full[0, 0] = ar_results.sigma2
+                Q = Q_full
+        else:
+            # 对于多因子情况，使用VAR模型（完全匹配老代码）
+            from statsmodels.tsa.api import VAR
+            var_model = VAR(factors_current.dropna())
+            var_results = var_model.fit(self.max_lags)
 
-        # 使用VAR残差计算初始Q矩阵（匹配老代码）
-        Q = np.cov(var_results.resid, rowvar=False)
-        Q = np.diag(np.maximum(np.diag(Q), 1e-6))
+            # 使用VAR系数初始化A矩阵（完全匹配老代码line 322）
+            if self.max_lags == 1:
+                A = var_results.coefs[0]
+            else:
+                # VAR(p): 构造companion form矩阵
+                n_factors_orig = factors_current.shape[1]
+                A = np.zeros((n_factors_orig * self.max_lags, n_factors_orig * self.max_lags))
+                # 填充VAR系数
+                for lag in range(self.max_lags):
+                    A[:n_factors_orig, lag*n_factors_orig:(lag+1)*n_factors_orig] = var_results.coefs[lag]
+                # 构造companion form下半部分
+                if self.max_lags > 1:
+                    A[n_factors_orig:, :-n_factors_orig] = np.eye(n_factors_orig * (self.max_lags - 1))
+
+            # 使用VAR残差计算初始Q矩阵（匹配老代码）
+            Q = np.cov(var_results.resid, rowvar=False)
+            Q = np.diag(np.maximum(np.diag(Q), 1e-6))
 
         # 计算R矩阵（匹配老代码：psi_diag * obs_std^2）
         # 只使用训练期数据计算R矩阵

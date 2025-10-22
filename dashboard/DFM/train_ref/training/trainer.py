@@ -644,26 +644,42 @@ class DFMTrainer:
         # 准备数据
         predictor_data = data[selected_vars]
 
-        # 创建EM估计器
-        from dashboard.DFM.train_ref.core.estimator import EMEstimator
-        estimator = EMEstimator()
+        # 使用DFMModel进行EM估计
+        from dashboard.DFM.train_ref.core.factor_model import DFMModel
 
-        # EM估计 - 简化实现
-        logger.info("开始EM参数估计...")
-
-        # 注意: 这里是简化实现,实际需要调用EMEstimator的完整方法
-        # 目前返回占位结果
-        model_result = DFMModelResult(
-            A=np.eye(k_factors),  # 占位
-            Q=np.eye(k_factors),  # 占位
-            H=np.random.randn(len(selected_vars), k_factors),  # 占位
-            R=np.eye(len(selected_vars)),  # 占位
-            converged=True,
-            iterations=self.config.max_iterations,
-            log_likelihood=0.0
+        dfm = DFMModel(
+            n_factors=k_factors,
+            max_lags=1,  # 使用1阶滞后（匹配train_model默认配置）
+            max_iter=self.config.max_iterations,
+            tolerance=self.config.tolerance
         )
 
-        logger.info(f"模型训练完成(简化版): 收敛={model_result.converged}")
+        logger.info("开始DFM模型EM参数估计...")
+
+        # 拟合模型
+        dfm_results = dfm.fit(
+            data=predictor_data,
+            train_end=self.config.train_end
+        )
+
+        # 转换为DFMModelResult格式
+        model_result = DFMModelResult(
+            A=dfm_results.transition_matrix,
+            Q=dfm_results.process_noise_cov,
+            H=dfm_results.loadings,  # 因子载荷即为观测矩阵
+            R=dfm_results.measurement_noise_cov,
+            factors=dfm_results.factors.values.T,  # (n_factors, n_time)
+            factors_smooth=dfm_results.factors.values.T,  # 平滑因子
+            converged=dfm_results.converged,
+            iterations=dfm_results.n_iter,
+            log_likelihood=dfm_results.loglikelihood
+        )
+
+        logger.info(
+            f"模型训练完成: 收敛={model_result.converged}, "
+            f"迭代={model_result.iterations}次, "
+            f"LogLik={model_result.log_likelihood:.2f}"
+        )
 
         return model_result
 
@@ -756,17 +772,78 @@ SVD错误: {result.svd_error_count}
         if progress_callback:
             progress_callback(f"[TRAIN] {summary}")
 
-    def _evaluate_dfm_for_selection(self, **kwargs) -> Tuple:
+    def _evaluate_dfm_for_selection(self, variables: List[str], **kwargs) -> Tuple:
         """
         为变量选择提供的评估函数
 
-        返回9元组格式,兼容BackwardSelector
+        Args:
+            variables: 变量列表（包含目标变量）
+            **kwargs: 其他参数（full_data, params等）
 
-        注意: 这是简化实现,实际需要完整的DFM训练和评估流程
+        Returns:
+            9元组: (is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _)
         """
-        # 简化实现: 返回占位值
-        # 实际应该: 训练DFM模型 -> 评估 -> 返回指标
-        return (np.inf, np.inf, None, None, -np.inf, -np.inf, False, None, None)
+        try:
+            # 提取参数
+            full_data = kwargs.get('full_data')
+            k_factors = kwargs.get('params', {}).get('k_factors', 2)
+            max_iter = kwargs.get('max_iter', self.config.max_iterations)
+
+            # 提取目标变量和预测变量
+            target_var = self.config.target_variable
+            predictor_vars = [v for v in variables if v != target_var]
+
+            if len(predictor_vars) == 0:
+                logger.warning("预测变量为空，返回无穷大RMSE")
+                return (np.inf, np.inf, None, None, -np.inf, -np.inf, False, None, None)
+
+            # 准备数据
+            predictor_data = full_data[predictor_vars]
+            target_data = full_data[target_var]
+
+            # 使用DFMModel训练
+            from dashboard.DFM.train_ref.core.factor_model import DFMModel
+
+            dfm = DFMModel(
+                n_factors=k_factors,
+                max_lags=1,
+                max_iter=max_iter,
+                tolerance=self.config.tolerance
+            )
+
+            dfm_results = dfm.fit(
+                data=predictor_data,
+                train_end=self.config.train_end
+            )
+
+            # 转换为DFMModelResult
+            model_result = DFMModelResult(
+                A=dfm_results.transition_matrix,
+                Q=dfm_results.process_noise_cov,
+                H=dfm_results.loadings,
+                R=dfm_results.measurement_noise_cov,
+                factors=dfm_results.factors.values.T,
+                factors_smooth=dfm_results.factors.values.T,
+                converged=dfm_results.converged,
+                iterations=dfm_results.n_iter,
+                log_likelihood=dfm_results.loglikelihood
+            )
+
+            # 评估模型
+            metrics = self.evaluator.evaluate(
+                model_result=model_result,
+                target_data=target_data,
+                train_end_date=self.config.train_end,
+                validation_start=self.config.validation_start,
+                validation_end=self.config.validation_end
+            )
+
+            # 返回9元组
+            return metrics.to_tuple()
+
+        except Exception as e:
+            logger.error(f"变量选择评估失败: {e}")
+            return (np.inf, np.inf, None, None, -np.inf, -np.inf, True, None, None)
 
     def train(
         self,

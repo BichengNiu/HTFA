@@ -166,7 +166,8 @@ class TestEndToEndBasic:
         # 验证结果
         assert result is not None
         assert len(result.selected_variables) >= 3
-        assert len(result.selected_variables) <= len(selected_indicators)
+        # selected_variables包含目标变量，所以比selected_indicators多1
+        assert len(result.selected_variables) <= len(selected_indicators) + 1
 
         # 验证选择历史
         assert len(result.selection_history) > 0
