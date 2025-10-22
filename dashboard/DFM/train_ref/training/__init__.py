@@ -3,25 +3,24 @@
 训练协调层
 
 训练流程管理和配置：
-- trainer: 训练协调器
-- pipeline: 训练流水线
-- config: 配置管理
+- trainer: DFMTrainer训练器（包含pipeline逻辑）
+- config: TrainingConfig配置管理（扁平化结构）
 """
 
-from dashboard.DFM.train_ref.training.trainer import Trainer
-from dashboard.DFM.train_ref.training.pipeline import TrainingPipeline
-from dashboard.DFM.train_ref.training.config import (
-    TrainingConfig,
-    ModelConfig,
-    SelectionConfig,
-    OptimizationConfig
+from dashboard.DFM.train_ref.training.trainer import (
+    DFMTrainer,
+    ModelEvaluator,
+    EvaluationMetrics,
+    DFMModelResult,
+    TrainingResult
 )
+from dashboard.DFM.train_ref.training.config import TrainingConfig
 
 __all__ = [
-    'Trainer',
-    'TrainingPipeline',
+    'DFMTrainer',
+    'ModelEvaluator',
+    'EvaluationMetrics',
+    'DFMModelResult',
+    'TrainingResult',
     'TrainingConfig',
-    'ModelConfig',
-    'SelectionConfig',
-    'OptimizationConfig',
 ]
