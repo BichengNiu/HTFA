@@ -2,17 +2,51 @@
 """
 分析输出层
 
-结果分析和报告生成：
-- reporter: 报告生成
-- visualizer: 可视化
+提供DFM模型结果的分析、报告生成和可视化功能
 """
 
-from dashboard.DFM.train_ref.analysis.reporter import Reporter, generate_report
-from dashboard.DFM.train_ref.analysis.visualizer import Visualizer, plot_results
+# 报告生成
+from dashboard.DFM.train_ref.analysis.reporter import (
+    AnalysisReporter,
+    generate_report
+)
+
+# 可视化
+from dashboard.DFM.train_ref.analysis.visualizer import (
+    ResultVisualizer,
+    plot_results
+)
+
+# 分析工具函数
+from dashboard.DFM.train_ref.analysis.analysis_utils import (
+    calculate_rmse,
+    calculate_hit_rate,
+    calculate_correlation,
+    calculate_metrics_with_lagged_target,
+    calculate_factor_contributions,
+    calculate_individual_variable_r2,
+    calculate_industry_r2,
+    calculate_pca_variance,
+    calculate_monthly_friday_metrics
+)
 
 __all__ = [
-    'Reporter',
+    # 报告生成
+    'AnalysisReporter',
     'generate_report',
-    'Visualizer',
+
+    # 可视化
+    'ResultVisualizer',
     'plot_results',
+
+    # 分析工具
+    'calculate_rmse',
+    'calculate_hit_rate',
+    'calculate_correlation',
+    'calculate_metrics_with_lagged_target',
+    'calculate_factor_contributions',
+    'calculate_individual_variable_r2',
+    'calculate_industry_r2',
+    'calculate_pca_variance',
+    'calculate_monthly_friday_metrics',
 ]
