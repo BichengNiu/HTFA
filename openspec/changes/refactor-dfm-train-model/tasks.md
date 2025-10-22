@@ -92,10 +92,13 @@
   - 随机种子设置（numpy, random, SEED=42）
   - **已完成**: _init_environment方法已实现
 
-- [ ] 2.2.3 补充配置管理（training/config.py）
+- [x] 2.2.3 补充配置管理（training/config.py）
   - TrainingConfig: 完整训练配置（包含selection和model参数）
   - 配置验证方法（validate()）
   - 参数默认值设置
+  - **已完成**: 重构TrainingConfig为扁平化结构,包含所有必要字段
+  - **已完成**: 添加完整的参数验证逻辑
+  - **已完成**: 更新trainer.py使用TrainingConfig类型注解
 
 - [ ] 2.2.4 编写训练层单元测试（tests/training/）
   - 测试两阶段流程正确性

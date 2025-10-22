@@ -356,12 +356,12 @@ class DFMTrainer:
     - 静默模式控制
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: 'TrainingConfig'):
         """
         初始化训练器
 
         Args:
-            config: 训练配置字典(临时使用dict,后续改为TrainingConfig对象)
+            config: 训练配置对象(TrainingConfig)
         """
         self.config = config
         self.evaluator = ModelEvaluator()
