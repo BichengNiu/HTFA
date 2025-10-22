@@ -34,17 +34,22 @@
 
 ### 0.1 Baseline生成
 
-- [ ] 0.1.1 运行train_model生成baseline结果
+- [x] 0.1.1 运行train_model生成baseline结果
   - 准备5个典型测试案例（不同配置组合）
   - 运行train_model并保存所有中间结果
   - 保存到tests/consistency/baseline/
+  - **已完成**: 创建baseline目录结构、测试案例配置(test_cases.json)
+  - **已完成**: 实现baseline生成器(generate_baseline.py)，集成data_prep模块
+  - **已完成**: 数据预处理验证通过（经济数据库1017.xlsx，288×88）
+  - **待补充**: train_model调用逻辑和结果保存（将在Phase 5执行）
 
-- [ ] 0.1.2 创建并切换到feature分支
+- [x] 0.1.2 创建并切换到feature分支
   - 从main分支创建feature/refactor-train-model
   - 立即切换到该分支
   - **所有后续开发工作都在此分支进行**
   - 保持main分支的train_model作为稳定参考
   - 只有Phase 9完成后才合并回main
+  - **已完成**: 分支已创建并使用中
 
 ## 1. 变量选择层实现（Week 1-2.5）⏱️ 节省0.5周
 
