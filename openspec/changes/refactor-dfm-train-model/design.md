@@ -44,26 +44,40 @@
 
 ## Decisions
 
-### 1. 分层架构保持不变
+### 1. 精简分层架构（方案B）
 
-采用train_ref已确立的分层设计：
+采用精简的5层架构设计，避免过度抽象：
 
 ```
 train_ref/
-├── core/           # 核心算法（卡尔曼滤波、DFM模型、EM估计）
-├── evaluation/     # 评估层（评估器、指标、验证器）
-├── selection/      # 变量选择层（后向选择器、选择引擎）
-├── optimization/   # 优化层（缓存、预计算）
-├── training/       # 训练协调层（训练器、流程编排、配置）
-├── analysis/       # 分析输出层（报告生成、可视化）
-├── utils/          # 工具层（数据工具、日志、可重现性）
+├── core/           # 核心算法层（卡尔曼滤波、DFM模型、EM估计）750行
+│   ├── kalman.py
+│   ├── factor_model.py
+│   └── estimator.py
+├── selection/      # 变量选择层（后向选择器）1,200行
+│   └── backward_selector.py
+├── training/       # 训练协调层（训练器+评估器+pipeline+配置）4,350行
+│   ├── trainer.py
+│   └── config.py
+├── analysis/       # 分析输出层（报告+分析+可视化）3,900行
+│   ├── reporter.py
+│   ├── analysis_utils.py
+│   └── visualizer.py
+├── utils/          # 工具层（数据+缓存+预计算）600行
+│   ├── data_utils.py
+│   ├── cache.py
+│   └── precompute.py
 └── facade.py       # 统一API入口
 ```
 
-**理由**：
-- 清晰的职责分离，降低耦合
-- 单向依赖关系，易于测试和维护
-- 已验证有效（核心层已稳定运行）
+**总计**: 10,800行，5个目录，12个文件（不含__init__.py）
+
+**精简原则**：
+- ✅ 删除过度抽象：interfaces, wrapper, selection_engine
+- ✅ 合并高度耦合模块：evaluation→training, pipeline→trainer
+- ✅ 符合KISS原则，代码减少28% (vs train_model)
+- ✅ 保留核心分层，职责清晰
+- ✅ 易于理解和维护（适合1-2人团队）
 
 ### 2. 变量选择实现策略
 
@@ -73,7 +87,12 @@ train_ref/
 ```python
 # selection/backward_selector.py
 class BackwardSelector:
-    def __init__(self, evaluator: ModelEvaluator, precompute_engine: PrecomputeEngine):
+    def __init__(self, evaluator, precompute_engine):
+        """
+        Args:
+            evaluator: ModelEvaluator实例（来自training.trainer）
+            precompute_engine: PrecomputeEngine实例（来自utils.precompute）
+        """
         self.evaluator = evaluator
         self.precompute = precompute_engine
 
@@ -150,142 +169,206 @@ class BackwardSelector:
 2. 支持RMSE和Hit Rate双目标优化
 3. 完整的单元测试（>85%覆盖率）
 
-### 3. 训练流程编排
+### 3. 训练流程编排（合并到DFMTrainer）
 
-**决策**：使用Pipeline设计模式实现两阶段训练流程
+**决策**：将Pipeline逻辑合并到DFMTrainer，避免不必要的抽象
 
 ```python
-# training/pipeline.py
-class TrainingPipeline:
-    def __init__(self, selection_engine, factor_model, evaluator):
-        self.selection_engine = selection_engine
-        self.factor_model = factor_model
-        self.evaluator = evaluator
+# training/trainer.py
 
-    def run(self, config: TrainingConfig, progress_callback=None) -> TrainingResult:
-        """完整两阶段训练流程"""
-        # 阶段1：变量选择
-        stage1_result = self._run_stage1(config, progress_callback)
+class ModelEvaluator:
+    """模型评估器（原evaluation/evaluator.py）"""
+    def calculate_rmse(self, predictions, actuals):
+        return np.sqrt(np.mean((predictions - actuals) ** 2))
 
-        # 阶段2：因子数选择
-        stage2_result = self._run_stage2(config, stage1_result, progress_callback)
+    def calculate_hit_rate(self, predictions, actuals, previous_values):
+        pred_direction = np.sign(predictions - previous_values)
+        actual_direction = np.sign(actuals - previous_values)
+        return np.mean(pred_direction == actual_direction)
+
+    def evaluate(self, model, data, train_end, validation_range):
+        # 样本内和样本外评估
+        ...
+
+
+class DFMTrainer:
+    """主训练器（包含原pipeline.py逻辑）"""
+    def __init__(self, config: TrainingConfig):
+        self.config = config
+        self.evaluator = ModelEvaluator()
+
+        # 环境初始化
+        self._init_environment()
+
+    def _init_environment(self):
+        """环境初始化和可重现性控制"""
+        import os, multiprocessing, random, numpy as np
+
+        # 多线程BLAS配置
+        cpu_count = multiprocessing.cpu_count()
+        os.environ['OMP_NUM_THREADS'] = str(cpu_count)
+        os.environ['MKL_NUM_THREADS'] = str(cpu_count)
+
+        # 随机种子设置
+        SEED = 42
+        random.seed(SEED)
+        np.random.seed(SEED)
+
+    def train(self, progress_callback=None) -> TrainingResult:
+        """完整两阶段训练流程（原pipeline.run）"""
+        # 阶段1：变量选择（固定k=块数）
+        selected_vars = self._run_variable_selection(progress_callback)
+
+        # 阶段2：因子数选择（PCA/Elbow/Fixed）
+        k_factors, pca_analysis = self._select_num_factors(
+            selected_vars, progress_callback
+        )
 
         # 最终训练
-        final_result = self._run_final_training(config, stage2_result, progress_callback)
+        results = self._train_final_model(
+            selected_vars, k_factors, progress_callback
+        )
 
-        return self._merge_results(stage1_result, stage2_result, final_result)
+        return results
 
-    def _run_stage1(self, config, progress_callback):
-        """阶段1：变量选择（固定k=块数）"""
-        if not config.selection.enable:
-            return Stage1Result(selected_variables=config.data.selected_indicators)
+    def _run_variable_selection(self, progress_callback):
+        """阶段1：变量选择（原pipeline._run_stage1）"""
+        if not self.config.enable_variable_selection:
+            return self.config.selected_indicators
 
-        data = load_data(config.data.data_path)
-        result = self.selection_engine.run(
-            selection_method=config.selection.method,
+        from selection.backward_selector import BackwardSelector
+        from utils.precompute import PrecomputeEngine
+
+        data = load_data(self.config.data_path)
+        selector = BackwardSelector(
+            evaluator=self.evaluator,
+            precompute_engine=PrecomputeEngine()
+        )
+        result = selector.select(
             data=data,
-            config=config,
+            target_col=self.config.target_variable,
+            initial_variables=self.config.selected_indicators,
             progress_callback=progress_callback
         )
-        return Stage1Result(selected_variables=result.selected_variables,
-                          selection_history=result.selection_history)
+        return result.selected_variables
 
-    def _run_stage2(self, config, stage1_result, progress_callback):
-        """阶段2：因子数选择（PCA/Elbow/Fixed）"""
-        data = load_data(config.data.data_path)[stage1_result.selected_variables]
+    def _select_num_factors(self, selected_vars, progress_callback):
+        """阶段2：因子数选择（原pipeline._run_stage2）"""
+        if self.config.factor_selection_method == 'fixed':
+            return self.config.k_factors, None
 
-        if config.model.factor_selection_method == 'fixed':
-            return Stage2Result(k_factors=config.model.k_factors)
+        # PCA分析
+        from sklearn.decomposition import PCA
+        data = load_data(self.config.data_path)[selected_vars]
+        pca = PCA()
+        pca.fit(data)
 
-        elif config.model.factor_selection_method == 'cumulative':
-            pca_analysis = self._perform_pca_analysis(data)
-            k = self._select_k_by_cumulative_variance(
-                pca_analysis.eigenvalues,
-                threshold=config.model.pca_threshold
-            )
-            return Stage2Result(k_factors=k, pca_analysis=pca_analysis)
+        if self.config.factor_selection_method == 'cumulative':
+            cumsum = np.cumsum(pca.explained_variance_ratio_)
+            k = np.argmax(cumsum >= self.config.pca_threshold) + 1
+        elif self.config.factor_selection_method == 'elbow':
+            marginal_variance = np.diff(pca.explained_variance_ratio_)
+            k = np.argmax(marginal_variance < self.config.elbow_threshold) + 1
 
-        elif config.model.factor_selection_method == 'elbow':
-            pca_analysis = self._perform_pca_analysis(data)
-            k = self._select_k_by_elbow(
-                pca_analysis.eigenvalues,
-                threshold=config.model.elbow_threshold
-            )
-            return Stage2Result(k_factors=k, pca_analysis=pca_analysis)
+        return k, pca
 
-    def _run_final_training(self, config, stage2_result, progress_callback):
-        """最终模型训练"""
-        model = self.factor_model.fit(
+    def _train_final_model(self, selected_vars, k_factors, progress_callback):
+        """最终模型训练（原pipeline._run_final_training）"""
+        from core.estimator import EMEstimator
+
+        # 加载数据
+        data = load_data(self.config.data_path)[selected_vars]
+
+        # EM估计
+        estimator = EMEstimator()
+        params = estimator.estimate(
             data=data,
-            k_factors=stage2_result.k_factors,
-            max_iter=config.model.max_iterations,
+            k_factors=k_factors,
+            max_iter=self.config.max_iterations,
             progress_callback=progress_callback
         )
 
         # 评估
-        metrics = self.evaluator.evaluate(model, data, config)
+        metrics = self.evaluator.evaluate(params, data, self.config)
 
-        return FinalResult(model=model, metrics=metrics)
+        return TrainingResult(params=params, metrics=metrics)
 ```
 
-**理由**：
-- 清晰的两阶段流程分离
-- 每个阶段可独立测试
-- 支持未来扩展（如添加阶段3）
+**精简理由**：
+- ✅ 删除pipeline.py，减少文件数
+- ✅ trainer.py包含完整流程，易于理解
+- ✅ 评估器合并到trainer.py，避免跨文件跳转
+- ✅ 仍保持清晰的私有方法分段
 
-### 4. 结果分析层实现
+### 4. 结果分析层实现（合并generate_report）
 
-**决策**：完整重新实现分析报告和可视化功能
+**决策**：合并generate_report.py到reporter.py，避免简单包装
 
 ```python
-# analysis/reporter.py
+# analysis/reporter.py（包含原generate_report.py逻辑）
 class AnalysisReporter:
-    def generate_full_report(self, model, data, config) -> AnalysisReport:
-        """生成完整分析报告"""
-        return AnalysisReport(
-            pca_analysis=self.generate_pca_report(model),
-            contribution_analysis=self.generate_contribution_report(model, data),
-            r2_analysis=self.generate_r2_report(model, data),
-            factor_loadings=self.calculate_factor_loadings(model)
-        )
+    def generate_report_with_params(self, results, output_dir, var_industry_map=None):
+        """参数化报告生成（原generate_report.py主函数）"""
+        # 文件路径管理
+        pca_path = os.path.join(output_dir, 'pca_analysis.xlsx')
+        contrib_path = os.path.join(output_dir, 'contribution_analysis.xlsx')
+        r2_path = os.path.join(output_dir, 'r2_analysis.xlsx')
 
-    def generate_pca_report(self, model) -> pd.DataFrame:
+        # 生成各类报告
+        self.generate_pca_report(results.pca_analysis, pca_path)
+        self.generate_contribution_report(results, contrib_path, var_industry_map)
+        self.generate_r2_report(results, r2_path)
+
+        # 生成可视化
+        from analysis.visualizer import ResultVisualizer
+        visualizer = ResultVisualizer()
+        visualizer.plot_forecast_vs_actual(results, output_dir)
+        visualizer.plot_factor_loadings(results, output_dir)
+
+    def generate_pca_report(self, pca_analysis, output_path):
         """PCA方差贡献分析"""
-        eigenvalues = model.get_eigenvalues()
+        eigenvalues = pca_analysis.eigenvalues
         variance_ratios = eigenvalues / np.sum(eigenvalues)
         cumulative_variance = np.cumsum(variance_ratios)
 
-        return pd.DataFrame({
+        df = pd.DataFrame({
             '因子索引': range(1, len(eigenvalues) + 1),
             '特征值': eigenvalues,
             '方差贡献率': variance_ratios,
             '累积方差贡献率': cumulative_variance
         })
 
-    def generate_contribution_report(self, model, data) -> pd.DataFrame:
+        # Excel多Sheet写入和格式化
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+            df.to_excel(writer, sheet_name='PCA分析', index=False)
+            self._format_excel_sheet(writer.sheets['PCA分析'])
+
+    def generate_contribution_report(self, results, output_path, var_industry_map):
         """因子贡献度分解（按指标、按行业）"""
-        factors = model.get_factors()
-        loadings = model.get_loadings()
+        from analysis.analysis_utils import calculate_factor_contributions
 
-        # 计算贡献度 = 因子载荷 * 因子值 * 标准差
-        contributions = {}
-        for i, var in enumerate(data.columns):
-            contrib = loadings[i, :] * factors * data[var].std()
-            contributions[var] = contrib.sum(axis=0)
+        # 使用工具函数计算
+        contrib_df = calculate_factor_contributions(
+            factors=results.factors,
+            loadings=results.loadings,
+            data_std=results.data_std,
+            var_industry_map=var_industry_map
+        )
 
-        return pd.DataFrame(contributions)
+        # 保存到Excel
+        ...
 
-    def generate_r2_report(self, model, data) -> pd.DataFrame:
-        """个体R²和行业R²计算"""
-        # 实现个体变量R²计算
-        # 实现行业聚合R²计算
-        pass
+    def _format_excel_sheet(self, worksheet, column_widths=None):
+        """Excel格式化（原results_analysis.py中的工具函数）"""
+        from openpyxl.styles import Font, Alignment, PatternFill
+        ...
 ```
 
-**理由**：
-- 与训练逻辑解耦
-- 便于扩展新的分析类型
-- 支持多种输出格式（Excel、CSV、JSON）
+**精简理由**：
+- ✅ 删除generate_report.py（省300行）
+- ✅ reporter.py包含完整报告生成逻辑
+- ✅ 避免简单包装器，减少文件跳转
+- ✅ Excel格式化等工具函数内联到reporter.py
 
 ### 5. 数值一致性保证机制
 
