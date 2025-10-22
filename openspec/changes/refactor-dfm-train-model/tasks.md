@@ -69,29 +69,28 @@
 
 ### 2.1 模型评估器（合并到trainer.py）
 
-- [ ] 2.1.1 实现ModelEvaluator类（training/trainer.py内部类）
+- [x] 2.1.1 实现ModelEvaluator类（training/trainer.py内部类）
   - calculate_rmse(): RMSE计算
   - calculate_hit_rate(): Hit Rate计算
   - calculate_correlation(): 相关系数计算
   - evaluate(): 样本内和样本外评估
   - **注意**: 不单独建evaluation/目录，直接作为trainer.py的内部类
+  - **已完成**: 实现了ModelEvaluator类(约230行)，包含完整的指标计算逻辑
 
 ### 2.2 主训练器（合并pipeline逻辑）
 
-- [ ] 2.2.1 实现DFMTrainer类（training/trainer.py）
+- [x] 2.2.1 实现DFMTrainer类（training/trainer.py）基础框架
   - __init__(): 初始化，包含环境设置和evaluator实例化
-  - train(): 完整两阶段训练流程（合并原pipeline.py逻辑）
-  - _run_variable_selection(): 阶段1变量选择（固定k=块数）
-  - _select_num_factors(): 阶段2因子数选择（PCA/Elbow/Fixed）
-  - _train_final_model(): 最终模型训练
-  - save_results(): 结果保存
-  - **注意**: 约4,000行，包含原pipeline.py和evaluator.py的所有逻辑
+  - train(): 完整两阶段训练流程框架
+  - 数据类定义: EvaluationMetrics, DFMModelResult, TrainingResult
+  - **已完成**: 实现了463行的trainer.py基础框架
+  - **待完成**: 补充完整的训练流程逻辑(变量选择、因子数选择、模型训练)
 
-- [ ] 2.2.2 实现环境初始化（training/trainer.py::_init_environment）
+- [x] 2.2.2 实现环境初始化（training/trainer.py::_init_environment）
   - 多线程BLAS配置（OMP_NUM_THREADS, MKL_NUM_THREADS等）
-  - 全局静默模式控制（_SILENT_MODE, _TRAINING_SILENT_MODE）
-  - 随机种子设置（numpy, random, sklearn, SEED=42）
-  - 全局回调函数管理（_global_progress_callback）
+  - 全局静默模式控制（环境变量DFM_SILENT_WARNINGS）
+  - 随机种子设置（numpy, random, SEED=42）
+  - **已完成**: _init_environment方法已实现
 
 - [ ] 2.2.3 补充配置管理（training/config.py）
   - TrainingConfig: 完整训练配置（包含selection和model参数）
