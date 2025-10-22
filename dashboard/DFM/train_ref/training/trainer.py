@@ -419,8 +419,14 @@ class DFMTrainer:
 
         logger.info(f"加载数据: {self.config.data_path}")
 
-        # 加载数据 - 简化实现,假设数据已预处理
-        data = pd.read_excel(self.config.data_path, index_col=0, parse_dates=True)
+        # 加载数据 - 支持Excel和CSV格式
+        file_path = Path(self.config.data_path)
+        if file_path.suffix.lower() in ['.xlsx', '.xls']:
+            data = pd.read_excel(self.config.data_path, index_col=0, parse_dates=True)
+        elif file_path.suffix.lower() == '.csv':
+            data = pd.read_csv(self.config.data_path, index_col=0, parse_dates=True)
+        else:
+            raise ValueError(f"不支持的文件格式: {file_path.suffix}")
 
         # 验证目标变量
         if self.config.target_variable not in data.columns:
