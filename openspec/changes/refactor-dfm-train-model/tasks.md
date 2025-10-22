@@ -50,12 +50,14 @@
 
 ### 1.1 后向选择器
 
-- [ ] 1.1.1 实现BackwardSelector类（selection/backward_selector.py）
+- [x] 1.1.1 实现BackwardSelector类（selection/backward_selector.py）
   - 后向逐步变量剔除算法
   - 支持RMSE和Hit Rate作为优化目标
   - 直接使用PrecomputeEngine（来自utils/precompute.py）
   - 返回SelectionResult对象（简单dataclass）
   - **注意**: 不需要SelectionEngine抽象层，直接实例化BackwardSelector
+  - **已完成**: 实现了339行的BackwardSelector类，包含完整的后向选择逻辑
+  - **已完成**: 删除了selection_engine.py，更新了__init__.py导出
 
 - [ ] 1.1.2 编写变量选择单元测试（tests/selection/）
   - 测试后向选择逻辑正确性
