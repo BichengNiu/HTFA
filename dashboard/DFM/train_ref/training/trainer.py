@@ -662,7 +662,7 @@ class DFMTrainer:
             train_end=self.config.train_end
         )
 
-        # 转换为DFMModelResult格式
+        # 转换为DFMModelResult格式（先不填充预测值）
         model_result = DFMModelResult(
             A=dfm_results.transition_matrix,
             Q=dfm_results.process_noise_cov,
@@ -680,6 +680,108 @@ class DFMTrainer:
             f"迭代={model_result.iterations}次, "
             f"LogLik={model_result.log_likelihood:.2f}"
         )
+
+        # 生成目标变量的预测
+        model_result = self._generate_target_forecast(
+            model_result=model_result,
+            target_data=target_data,
+            progress_callback=progress_callback
+        )
+
+        return model_result
+
+    def _generate_target_forecast(
+        self,
+        model_result: DFMModelResult,
+        target_data: pd.Series,
+        progress_callback: Optional[Callable] = None
+    ) -> DFMModelResult:
+        """
+        生成目标变量的预测值
+
+        通过将目标变量回归到因子上，得到目标变量的因子载荷，
+        然后使用因子和载荷进行预测。
+
+        Args:
+            model_result: DFM模型结果
+            target_data: 目标变量数据
+            progress_callback: 进度回调
+
+        Returns:
+            更新了forecast_is和forecast_oos的DFMModelResult
+        """
+        try:
+            if progress_callback:
+                progress_callback("[TRAIN] 生成目标变量预测...")
+
+            logger.info("开始生成目标变量预测...")
+
+            # 提取因子（时间 x 因子数）
+            factors = model_result.factors.T  # (n_time, n_factors)
+
+            # 对齐目标变量和因子的时间索引
+            # 确保使用相同的时间范围
+            common_index = target_data.index[:factors.shape[0]]
+            y = target_data.loc[common_index].values
+            X = factors[:len(common_index), :]
+
+            # 移除NaN值
+            valid_mask = ~np.isnan(y)
+            y_clean = y[valid_mask]
+            X_clean = X[valid_mask, :]
+
+            # 回归：y = X @ beta + epsilon
+            # 使用最小二乘法估计beta（目标变量的因子载荷）
+            from numpy.linalg import lstsq
+            beta, residuals, rank, s = lstsq(X_clean, y_clean, rcond=None)
+
+            logger.info(f"目标变量因子载荷: {beta}")
+
+            # 生成完整预测（包含NaN位置）
+            forecast_full = X @ beta
+
+            # 分割样本内和样本外（使用更健壮的日期查找）
+            # 使用asof方法找到最接近的日期
+            train_end_date = pd.to_datetime(self.config.train_end)
+            train_data_filtered = target_data[:train_end_date]
+            train_end_idx = len(train_data_filtered) - 1
+
+            # 样本内预测
+            forecast_is = forecast_full[:train_end_idx + 1]
+
+            # 样本外预测
+            if self.config.validation_start and self.config.validation_end:
+                val_start_date = pd.to_datetime(self.config.validation_start)
+                val_end_date = pd.to_datetime(self.config.validation_end)
+
+                val_data_filtered = target_data[val_start_date:val_end_date]
+                if len(val_data_filtered) > 0:
+                    val_start_idx = target_data.index.get_loc(val_data_filtered.index[0])
+                    val_end_idx = target_data.index.get_loc(val_data_filtered.index[-1])
+
+                    if val_start_idx < len(forecast_full) and val_end_idx < len(forecast_full):
+                        forecast_oos = forecast_full[val_start_idx:val_end_idx + 1]
+                    else:
+                        forecast_oos = None
+                else:
+                    forecast_oos = None
+            else:
+                forecast_oos = forecast_full[train_end_idx + 1:] if train_end_idx + 1 < len(forecast_full) else None
+
+            # 更新model_result
+            model_result.forecast_is = forecast_is
+            model_result.forecast_oos = forecast_oos if forecast_oos is not None and len(forecast_oos) > 0 else None
+
+            logger.info(
+                f"预测生成完成: IS={len(forecast_is) if forecast_is is not None else 0}, "
+                f"OOS={len(forecast_oos) if forecast_oos is not None else 0}"
+            )
+
+        except Exception as e:
+            logger.error(f"生成目标变量预测时出错: {e}")
+            import traceback
+            traceback.print_exc()
+            # 保持forecast为None（暂时保留异常处理以便调试）
 
         return model_result
 
@@ -827,6 +929,13 @@ SVD错误: {result.svd_error_count}
                 converged=dfm_results.converged,
                 iterations=dfm_results.n_iter,
                 log_likelihood=dfm_results.loglikelihood
+            )
+
+            # 生成目标变量预测
+            model_result = self._generate_target_forecast(
+                model_result=model_result,
+                target_data=target_data,
+                progress_callback=None
             )
 
             # 评估模型
