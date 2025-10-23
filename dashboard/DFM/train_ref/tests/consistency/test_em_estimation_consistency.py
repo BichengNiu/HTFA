@@ -130,8 +130,8 @@ class TestEMEstimationConsistency(ConsistencyTestBase):
         cls.factors_old_df = res_sm_old.x_sm  # DataFrame (n_time, n_states)
 
         # train_ref版本
-        Z_array = cls.Z_df.to_numpy().T  # (n_obs, n_time)
-        U_array = cls.U_df.to_numpy().T  # (n_controls, n_time)
+        Z_array = cls.Z_df.to_numpy()  # (n_time, n_obs) - 正确的维度
+        U_array = cls.U_df.to_numpy()  # (n_time, n_controls) - 正确的维度
 
         kf_new = KF_new(
             A=cls.A,
@@ -338,12 +338,13 @@ class TestEMEstimationConsistency(ConsistencyTestBase):
         # 注意: estimate_covariance_matrices需要载荷矩阵Lambda
         Lambda_new = estimate_loadings_new(self.Z_df, self.factors_new_df)
 
-        Q_new, R_new = estimate_QR_new(
+        B_new, Q_new, R_new = estimate_QR_new(
             self.smoothed_result_new,
             self.Z_df,
             Lambda_new,
             self.n_factors_small,
-            A_new
+            A_new,
+            n_shocks=self.n_factors_small
         )
 
         print(f"  Q_new shape: {Q_new.shape}")
@@ -420,12 +421,13 @@ class TestEMEstimationConsistency(ConsistencyTestBase):
         # train_ref版本
         print("\n[Step 2] 运行train_ref R矩阵估计...")
 
-        Q_new, R_new = estimate_QR_new(
+        B_new, Q_new, R_new = estimate_QR_new(
             self.smoothed_result_new,
             self.Z_df,
             Lambda_new,
             self.n_factors_small,
-            A_new
+            A_new,
+            n_shocks=self.n_factors_small
         )
 
         print(f"  R_new shape: {R_new.shape}")
