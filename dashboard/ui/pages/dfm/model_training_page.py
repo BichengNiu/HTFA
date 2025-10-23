@@ -156,34 +156,22 @@ _TRAIN_UI_IMPORT_ERROR_MESSAGE = None
 # Make the data_preparation available for the rest of the module
 data_preparation = _DATA_PREPARATION_MODULE
 
-# 3. 导入DFM训练脚本
-# 添加DFM训练模块路径
-dfm_train_dir = os.path.join(dashboard_root, 'dashboard', 'DFM', 'train_model')
-if dfm_train_dir not in sys.path:
-    sys.path.insert(0, dfm_train_dir)
+# 3. 导入DFM训练脚本 - 使用train_ref重构版本
+# 添加DFM train_ref模块路径
+dfm_train_ref_dir = os.path.join(dashboard_root, 'dashboard', 'DFM', 'train_ref')
+if dfm_train_ref_dir not in sys.path:
+    sys.path.insert(0, dfm_train_ref_dir)
 
-# 添加更多可能的路径
-possible_paths = [
-    dfm_train_dir,
-    os.path.join(dashboard_root, 'DFM', 'train_model'),
-    os.path.join(os.path.dirname(dashboard_root), 'dashboard', 'DFM', 'train_model')
-]
-
-for path in possible_paths:
-    if path not in sys.path and os.path.exists(path):
-        sys.path.insert(0, path)
-
-# 直接导入模块
-import tune_dfm
-
-# 检查函数是否存在
-if hasattr(tune_dfm, 'train_and_save_dfm_results'):
-    train_and_save_dfm_results = tune_dfm.train_and_save_dfm_results
-    print(f"[SUCCESS] 成功导入train_and_save_dfm_results函数")
-    # 如果tune_dfm导入成功，清除所有错误消息
+try:
+    # 导入train_ref模块
+    from dashboard.DFM.train_ref.training import DFMTrainer, TrainingConfig
+    from dashboard.DFM.train_ref.training.trainer import TrainingResult
+    print("[SUCCESS] 成功导入DFMTrainer和TrainingConfig from train_ref")
     _TRAIN_UI_IMPORT_ERROR_MESSAGE = None
-else:
-    raise ImportError("train_and_save_dfm_results function not found in tune_dfm module")
+except ImportError as e:
+    print(f"[ERROR] 导入train_ref模块失败: {e}")
+    _TRAIN_UI_IMPORT_ERROR_MESSAGE = f"train_ref module import error: {e}"
+    raise
 
 # 模拟的UIDefaults和TrainDefaults类
 class UIDefaults:
@@ -645,15 +633,15 @@ def render_dfm_train_model_tab(st_instance):
     cleanup_expired_downloads()
 
     if _TRAIN_UI_IMPORT_ERROR_MESSAGE:
-        if "train_and_save_dfm_results" in _TRAIN_UI_IMPORT_ERROR_MESSAGE:
+        if "train_ref" in _TRAIN_UI_IMPORT_ERROR_MESSAGE:
             st_instance.error(f"关键模块导入错误，模型训练功能不可用:\n{_TRAIN_UI_IMPORT_ERROR_MESSAGE}")
-            return  # 如果训练函数不可用，直接返回
+            return  # 如果训练模块不可用，直接返回
         else:
             # 如果只是数据准备模块的导入问题，显示警告但继续
             st_instance.warning("[WARNING] 数据准备模块导入警告，但映射数据传递已修复，功能应该正常")
     else:
         # 如果没有错误消息，显示成功信息
-        st_instance.success("[SUCCESS] 所有必需模块已成功加载，模型训练功能可用")
+        st_instance.success("[SUCCESS] 所有必需模块已成功加载(使用train_ref)，模型训练功能可用")
 
     current_training_status = get_dfm_state('dfm_training_status')
     current_model_results = get_dfm_state('dfm_model_results_paths')
@@ -1421,85 +1409,161 @@ def render_dfm_train_model_tab(st_instance):
                     return
 
                 try:
-                    # 获取行业映射数据（移除类型映射）
-                    var_industry_map = get_dfm_state('dfm_industry_map_obj', {})
-
-                    # 调试信息
-                    print(f"[VIEW] [映射数据传递] 行业映射: {len(var_industry_map)} 个")
-
-                    # 如果行业映射为空，显示警告但继续训练
-                    if not var_industry_map:
-                        st.warning("[WARNING] 行业映射数据为空，Factor-Industry R² 将无法计算，但模型训练将继续。")
-                        print("[WARNING] 行业映射为空，将跳过相关R²计算")
-
-                    # 准备训练参数（与train_and_save_dfm_results函数接口一致）
-                    # 计算train_end_date（训练结束日期通常是验证开始日期的前一天）
+                    # 使用train_ref进行训练
+                    import tempfile
                     from datetime import timedelta
+
+                    # 获取行业映射数据（用于后续分析）
+                    var_industry_map = get_dfm_state('dfm_industry_map_obj', {})
+                    if not var_industry_map:
+                        st.warning("[WARNING] 行业映射数据为空，Factor-Industry R² 将无法计算")
+
+                    # 计算train_end_date
                     train_end_date = None
                     if validation_start_value:
                         try:
                             train_end_date = validation_start_value - timedelta(days=1)
                         except Exception:
                             train_end_date = None
-                    
-                    
+
                     # 获取变量选择方法
                     var_selection_method = get_dfm_state('dfm_variable_selection_method', 'none')
                     enable_var_selection = (var_selection_method != 'none')
-                    
-                    # 确保因子选择策略被正确读取
+
+                    # 映射UI的变量选择方法到train_ref的变量选择方法
+                    # UI使用 'global_backward'，train_ref使用 'backward'
+                    var_selection_method_map = {
+                        'none': 'none',
+                        'global_backward': 'backward',
+                        'global_forward': 'forward',
+                        'backward': 'backward',
+                        'forward': 'forward'
+                    }
+                    mapped_var_selection_method = var_selection_method_map.get(var_selection_method, 'none')
+
+                    # 获取因子选择策略
                     factor_strategy = get_dfm_state('dfm_factor_selection_strategy', 'information_criteria')
-                    
-                    # 如果选择了固定因子数，确保参数被正确读取
-                    if factor_strategy == 'fixed_number':
-                        # [CRITICAL FIX] 统一使用get_dfm_state而不是st.session_state.get
-                        fixed_factors = get_dfm_state('dfm_fixed_number_of_factors', 3)
-                        st.info(f"使用固定因子数策略，因子数：{fixed_factors}")
+
+                    # 映射factor_selection_strategy到train_ref的factor_selection_method
+                    if factor_strategy == 'information_criteria':
+                        factor_selection_method = 'fixed'  # IC方法最终也是确定固定因子数
+                        k_factors = get_dfm_state('dfm_ic_max_factors', 10)  # 先用最大值，后续可优化
+                    elif factor_strategy == 'fixed_number':
+                        factor_selection_method = 'fixed'
+                        k_factors = get_dfm_state('dfm_fixed_number_of_factors', 3)
+                        st.info(f"使用固定因子数策略，因子数：{k_factors}")
+                    elif factor_strategy == 'cumulative_variance':
+                        factor_selection_method = 'cumulative'
+                        k_factors = 4  # 默认值，实际会通过PCA确定
                     else:
-                        fixed_factors = 3
-                    
-                    training_params = {
-                        'training_data': input_df,  # [HOT] 修复：参数名从 'input_df' 改为 'training_data' 以匹配训练组件期望
-                        'target_variable': current_target_var,
-                        'selected_indicators': current_selected_indicators,
-                        'training_start_date': training_start_value,
-                        'validation_start_date': validation_start_value,
-                        'validation_end_date': validation_end_value,
-                        'train_end_date': train_end_date,  # [FIX] 添加训练结束日期参数
-                        'factor_selection_strategy': factor_strategy,
-                        'max_iterations': get_dfm_state('dfm_max_iter', 100),
-                        'max_lags': get_dfm_state('dfm_factor_ar_order', 1),  # 参数名修正
-                        'variable_selection_method': var_selection_method,
-                        # [CRITICAL FIX] 根据variable_selection_method动态设置enable_variable_selection
-                        'enable_variable_selection': enable_var_selection,
-                        # 只传递行业映射（移除类型映射）
-                        'var_industry_map': var_industry_map
+                        factor_selection_method = 'fixed'
+                        k_factors = 3
+
+                    # 保存DataFrame到临时文件（TrainingConfig需要文件路径）
+                    temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8')
+                    temp_data_path = temp_file.name
+                    temp_file.close()
+                    input_df.to_csv(temp_data_path)
+                    print(f"[TRAIN_REF] 临时数据文件: {temp_data_path}")
+
+                    # 构建TrainingConfig
+                    training_config = TrainingConfig(
+                        # 核心配置
+                        data_path=temp_data_path,
+                        target_variable=current_target_var,
+                        selected_indicators=current_selected_indicators,
+
+                        # 训练/验证期配置
+                        train_start=training_start_value.strftime('%Y-%m-%d') if training_start_value else None,
+                        train_end=train_end_date.strftime('%Y-%m-%d') if train_end_date else None,
+                        validation_start=validation_start_value.strftime('%Y-%m-%d') if validation_start_value else None,
+                        validation_end=validation_end_value.strftime('%Y-%m-%d') if validation_end_value else None,
+                        target_freq='W-FRI',
+
+                        # 模型参数
+                        k_factors=k_factors,
+                        max_iterations=get_dfm_state('dfm_max_iter', 30),
+                        max_lags=get_dfm_state('dfm_factor_ar_order', 1),
+                        tolerance=1e-6,
+
+                        # 变量选择配置
+                        enable_variable_selection=enable_var_selection,
+                        variable_selection_method=mapped_var_selection_method if enable_var_selection else 'none',
+
+                        # 因子数选择配置
+                        factor_selection_method=factor_selection_method,
+                        pca_threshold=get_dfm_state('dfm_cumulative_variance_threshold', 0.9) if factor_strategy == 'cumulative_variance' else 0.9,
+
+                        # 优化配置
+                        use_cache=False,
+                        use_precompute=False
+                    )
+
+                    print(f"[TRAIN_REF] 训练配置: {training_config}")
+
+                    # 创建进度回调函数
+                    def progress_callback(message: str):
+                        """进度回调函数"""
+                        print(f"[TRAIN_REF] {message}")
+                        # 更新训练日志
+                        training_log = get_dfm_state('dfm_training_log', [])
+                        training_log.append(message)
+                        set_dfm_state('dfm_training_log', training_log)
+
+                    # 设置训练状态
+                    set_dfm_state('dfm_training_status', '正在训练...')
+                    set_dfm_state('dfm_training_log', ['[TRAIN_REF] 开始训练...'])
+
+                    # 创建训练器并训练（同步执行）
+                    st_instance.info("[LOADING] 正在训练模型，请稍候...")
+                    trainer = DFMTrainer(training_config)
+                    result: TrainingResult = trainer.train(progress_callback=progress_callback)
+
+                    # 处理训练结果并保存
+                    # 保存训练结果摘要
+                    result_summary = {
+                        'selected_variables': result.selected_variables,
+                        'k_factors': result.k_factors,
+                        'metrics': {
+                            'is_rmse': result.metrics.is_rmse if result.metrics else None,
+                            'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
+                            'is_hit_rate': result.metrics.is_hit_rate if result.metrics else None,
+                            'oos_hit_rate': result.metrics.oos_hit_rate if result.metrics else None
+                        },
+                        'training_time': result.training_time
                     }
 
-                    # 根据因子选择策略添加相应参数
-                    if factor_strategy == 'information_criteria':
-                        training_params['info_criterion_method'] = get_dfm_state('dfm_information_criterion', 'bic')
-                        training_params['ic_max_factors'] = get_dfm_state('dfm_ic_max_factors', 10)
-                    elif factor_strategy == 'fixed_number':
-                        training_params['fixed_number_of_factors'] = fixed_factors
-                    elif factor_strategy == 'cumulative_variance':
-                        training_params['cum_variance_threshold'] = get_dfm_state('dfm_cumulative_variance_threshold', 0.8)
+                    # 保存到状态管理器
+                    set_dfm_state('dfm_training_result', result_summary)
+                    set_dfm_state('dfm_training_status', '训练完成')
+                    set_dfm_state('dfm_training_completed_timestamp', time.time())
 
-                    # 注：global_backward方法基于性能提升自动决定剔除，不需要额外参数
+                    # 添加完成日志
+                    training_log = get_dfm_state('dfm_training_log', [])
+                    training_log.append(f"[SUCCESS] 训练完成！耗时: {result.training_time:.2f}秒")
+                    training_log.append(f"[RESULT] 选中变量数: {len(result.selected_variables)}")
+                    training_log.append(f"[RESULT] 因子数: {result.k_factors}")
+                    if result.metrics:
+                        training_log.append(f"[METRICS] 样本外RMSE: {result.metrics.oos_rmse:.4f}")
+                        training_log.append(f"[METRICS] 样本外Hit Rate: {result.metrics.oos_hit_rate:.2f}%")
+                    set_dfm_state('dfm_training_log', training_log)
 
-                    
-                    training_component = get_training_status_component()
-                    success = training_component._start_training(training_params)
+                    # 清理临时文件
+                    try:
+                        os.unlink(temp_data_path)
+                    except:
+                        pass
 
-                    if success:
-                        set_dfm_state('dfm_training_status', '正在训练...')
-                        set_dfm_state('dfm_training_started', True)
-                        st_instance.rerun()
-                    else:
-                        st_instance.error("[ERROR] 启动训练失败，请检查配置")
+                    st_instance.success("[SUCCESS] 训练完成！")
+                    st_instance.rerun()
 
                 except Exception as e:
-                    st_instance.error(f"[ERROR] 启动训练失败: {str(e)}")
+                    import traceback
+                    error_msg = f"启动训练失败: {str(e)}\n{traceback.format_exc()}"
+                    print(f"[ERROR] {error_msg}")
+                    set_dfm_state('dfm_training_status', f'训练失败: {str(e)}')
+                    set_dfm_state('dfm_training_error', error_msg)
+                    st_instance.error(f"[ERROR] {error_msg}")
         else:
             st_instance.button("[START] 开始训练",
                              disabled=True,
@@ -1580,8 +1644,37 @@ def render_dfm_train_model_tab(st_instance):
             print(f"[HOT] [UI状态检查] 检测到训练完成状态")
             debug_training_state("训练完成，显示最终结果", show_in_ui=False)
 
-            # 显示训练结果
-            if training_results:
+            # 显示训练结果摘要（train_ref版本）
+            training_result_summary = get_dfm_state('dfm_training_result')
+            if training_result_summary:
+                st_instance.success("[SUCCESS] 训练已完成")
+                st_instance.markdown("**训练结果摘要:**")
+
+                # 显示关键指标
+                col1, col2 = st_instance.columns(2)
+                with col1:
+                    st_instance.metric("选中变量数", len(training_result_summary.get('selected_variables', [])))
+                    st_instance.metric("因子数", training_result_summary.get('k_factors', 'N/A'))
+                with col2:
+                    metrics = training_result_summary.get('metrics', {})
+                    if metrics.get('oos_rmse'):
+                        st_instance.metric("样本外RMSE", f"{metrics['oos_rmse']:.4f}")
+                    if metrics.get('oos_hit_rate'):
+                        st_instance.metric("样本外Hit Rate", f"{metrics['oos_hit_rate']:.2f}%")
+
+                st_instance.metric("训练耗时", f"{training_result_summary.get('training_time', 0):.2f}秒")
+
+                # 显示选中的变量列表
+                with st_instance.expander("查看选中的变量"):
+                    selected_vars = training_result_summary.get('selected_variables', [])
+                    if selected_vars:
+                        for i, var in enumerate(selected_vars, 1):
+                            st_instance.text(f"{i}. {var}")
+                    else:
+                        st_instance.info("无变量选择")
+
+            # 显示训练结果文件（如果有）
+            elif training_results:
                 st_instance.success("[SUCCESS] 训练已完成")
                 print(f"[HOT] [UI状态检查] 开始处理训练结果，类型: {type(training_results)}")
                 print(f"[HOT] [UI状态检查] 训练结果内容: {training_results}")

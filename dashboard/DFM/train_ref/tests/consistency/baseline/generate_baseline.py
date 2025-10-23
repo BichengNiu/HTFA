@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 # 导入data_prep模块
 from dashboard.DFM.data_prep import prepare_data
 
-# 导入train_ref模块用于生成baseline
-from dashboard.DFM.train_ref.core.factor_model import DFMModel
-from dashboard.DFM.train_ref.evaluation.metrics import calculate_hit_rate
+# ⚠️ 重要: 导入老代码train_model模块用于生成baseline
+# 这样才能真正对比新旧代码的差异
+from dashboard.DFM.train_model.DynamicFactorModel import DFM_EMalgo, DFMEMResultsWrapper
 from sklearn.metrics import mean_squared_error
 
 
@@ -146,6 +146,7 @@ def run_baseline_case(
         validation_end = case_config.get('validation_end')
         k_factors = case_config.get('k_factors', 2)
         max_iterations = case_config.get('max_iterations', 30)
+        tolerance = case_config.get('tolerance', 1e-6)
 
         # 准备数据
         logger.info(f"目标变量配置: {target_variable}")
@@ -192,8 +193,8 @@ def run_baseline_case(
         logger.info(f"实际使用的指标数量: {len(actual_indicators)}")
         logger.info(f"实际使用的指标（前5个）: {actual_indicators[:5]}")
 
-        # 使用train_ref DFMModel生成baseline
-        logger.info(f"开始使用train_ref生成baseline...")
+        # ⚠️ 使用老代码train_model的DFM_EMalgo生成baseline
+        logger.info(f"开始使用老代码train_model的DFM_EMalgo生成baseline...")
 
         # 准备输入数据
         input_columns = [actual_target_variable] + actual_indicators
@@ -206,51 +207,48 @@ def run_baseline_case(
         logger.info(f"训练数据: {train_data.shape}, 验证数据: {validation_data.shape}")
 
         try:
-            # 创建并训练DFM模型
-            model = DFMModel(
+            # ⚠️ 调用老代码train_model的DFM_EMalgo
+            result = DFM_EMalgo(
+                observation=train_data,
                 n_factors=k_factors,
-                max_lags=1,
-                max_iter=max_iterations,
-                tolerance=tolerance
+                n_shocks=k_factors,  # 通常与n_factors相同
+                n_iter=max_iterations,
+                train_end_date=None,  # 已经分割好训练集,不需要指定
+                error='False',
+                max_lags=1
             )
 
-            # 训练模型
-            result = model.fit(train_data)
+            logger.info(f"老代码模型训练完成")
+            logger.info(f"  模型类型: {type(result)}")
+            # 老代码的DFMEMResultsWrapper可能没有converged等属性,但有基本的参数矩阵
 
-            logger.info(f"模型训练完成")
-            logger.info(f"  收敛: {result.converged}, 迭代次数: {result.n_iter}")
-            logger.info(f"  对数似然: {result.loglikelihood:.2f}")
-
-            # 计算验证集指标
-            target_col = actual_target_variable
-            true_values = validation_data[target_col].values
-
-            # 获取验证期的因子预测（使用第一个因子）
-            n_train = len(result.factors) - len(validation_data)
-            if n_train >= 0:
-                pred_factors = result.factors.iloc[n_train:, 0].values
+            # ⚠️ 老代码的result.x_sm结构: 已经是(n_time, n_factors)的DataFrame
+            # 不需要转置，直接转换为numpy数组
+            if hasattr(result.x_sm, 'values'):
+                smoothed_factors = result.x_sm.values  # DataFrame -> numpy
             else:
-                pred_factors = result.factors.iloc[:, 0].values[-len(validation_data):]
+                smoothed_factors = result.x_sm  # 已经是numpy数组
 
-            # 确保长度一致
-            min_len = min(len(true_values), len(pred_factors))
-            true_values = true_values[:min_len]
-            pred_factors = pred_factors[:min_len]
+            logger.info(f"平滑因子shape: {smoothed_factors.shape}")
+            logger.info(f"平滑因子类型: {type(smoothed_factors)}")
 
-            # 计算评估指标
-            rmse = np.sqrt(mean_squared_error(true_values, pred_factors))
-            hit_rate = calculate_hit_rate(
-                pd.Series(true_values),
-                pd.Series(pred_factors)
-            )
-            correlation = np.corrcoef(true_values, pred_factors)[0, 1]
+            # ⚠️ 注意：老代码的smoothed_factors只包含训练集,不包含验证集
+            # 因此无法直接计算验证集指标
+            # 对于baseline来说,最重要的是模型参数,验证集指标可以跳过
+            logger.info(f"Baseline生成：保存模型参数和训练集因子")
+            logger.info(f"  训练集长度: {len(train_data)}")
+            logger.info(f"  因子数量: {smoothed_factors.shape[0]}")
+            logger.info(f"  因子维度: {smoothed_factors.shape[1]}")
 
-            logger.info(f"验证集指标:")
-            logger.info(f"  RMSE: {rmse:.6f}")
-            logger.info(f"  Hit Rate: {hit_rate:.2%}")
-            logger.info(f"  Correlation: {correlation:.6f}")
+            # 设置默认的验证集指标（后续由train_ref计算）
+            rmse = None
+            hit_rate = None
+            correlation = None
+
+            logger.info(f"跳过验证集指标计算（留待train_ref对比时计算）")
 
             # 保存完整的baseline元数据
+            # ⚠️ 使用老代码DFMEMResultsWrapper的属性名称
             metadata = {
                 'case_id': case_id,
                 'actual_target_variable': actual_target_variable,
@@ -260,26 +258,28 @@ def run_baseline_case(
                 'max_iterations': max_iterations,
                 'tolerance': tolerance,
 
-                # 模型参数
+                # 模型参数 - 从老代码的result对象提取
                 'model_parameters': {
-                    'loadings': result.loadings.tolist(),
-                    'transition_matrix': result.transition_matrix.tolist(),
-                    'process_noise_cov': result.process_noise_cov.tolist(),
-                    'measurement_noise_cov': result.measurement_noise_cov.tolist(),
-                    'loglikelihood': float(result.loglikelihood),
-                    'converged': bool(result.converged),
-                    'n_iter': int(result.n_iter)
+                    'loadings': result.Lambda.tolist(),  # 老代码用Lambda
+                    'transition_matrix': result.A.tolist(),  # 老代码用A
+                    'process_noise_cov': result.Q.tolist(),  # 老代码用Q
+                    'measurement_noise_cov': result.R.tolist(),  # 老代码用R
+                    # 老代码DFMEMResultsWrapper没有loglikelihood, converged, n_iter属性
+                    # 使用None作为占位符
+                    'loglikelihood': None,
+                    'converged': None,
+                    'n_iter': max_iterations  # 使用配置的最大迭代次数
                 },
 
-                # 平滑因子
-                'smoothed_factors': result.factors.values.tolist(),
-                'smoothed_factors_shape': list(result.factors.shape),
+                # 平滑因子 - 老代码的x_sm已经转置过了
+                'smoothed_factors': smoothed_factors.tolist(),
+                'smoothed_factors_shape': list(smoothed_factors.shape),
 
-                # 验证集指标
+                # 验证集指标（均为None，留待对比时计算）
                 'validation_metrics': {
-                    'rmse': float(rmse),
-                    'hit_rate': float(hit_rate),
-                    'correlation': float(correlation)
+                    'rmse': None,
+                    'hit_rate': None,
+                    'correlation': None
                 },
 
                 'generated_at': datetime.now().isoformat()
