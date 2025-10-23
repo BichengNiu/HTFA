@@ -9,7 +9,7 @@
 import numpy as np
 import pandas as pd
 from typing import Tuple, Optional
-from sklearn.linear_model import LinearRegression
+import statsmodels.api as sm
 from dashboard.DFM.train_ref.utils.logger import get_logger
 
 
@@ -20,9 +20,9 @@ def estimate_loadings(
     observables: pd.DataFrame,
     factors: pd.DataFrame
 ) -> np.ndarray:
-    """估计因子载荷矩阵
+    """估计因子载荷矩阵（完全匹配train_model实现）
 
-    使用OLS回归估计每个观测变量对因子的载荷
+    使用statsmodels.OLS回归估计每个观测变量对因子的载荷
 
     Args:
         observables: 观测变量 (n_time, n_obs)
@@ -34,26 +34,27 @@ def estimate_loadings(
     n_obs = observables.shape[1]
     n_factors = factors.shape[1]
 
-    Lambda = np.zeros((n_obs, n_factors))
+    Lambda = np.full((n_obs, n_factors), np.nan)  # 初始化为NaN（匹配老代码）
 
     for i in range(n_obs):
-        y = observables.iloc[:, i].values
-        X = factors.values
+        y_i = observables.iloc[:, i]
+        valid_idx = y_i.notna() & factors.notna().all(axis=1)  # 匹配老代码
 
-        valid_idx = ~(np.isnan(y) | np.isnan(X).any(axis=1))
+        y_i_valid = y_i[valid_idx]
+        F_valid = factors[valid_idx]
 
-        if valid_idx.sum() < n_factors:
-            logger.warning(f"变量{observables.columns[i]}: 有效样本({valid_idx.sum()}) < 因子数({n_factors})")
-            Lambda[i, :] = np.nan
-            continue
-
-        y_valid = y[valid_idx]
-        X_valid = X[valid_idx]
-
-        reg = LinearRegression(fit_intercept=False)
-        reg.fit(X_valid, y_valid)
-
-        Lambda[i, :] = reg.coef_
+        # 匹配老代码：严格大于n_factors
+        if len(y_i_valid) > n_factors:
+            try:
+                # 使用statsmodels.OLS（匹配老代码）
+                ols_model = sm.OLS(y_i_valid, F_valid)
+                ols_results = ols_model.fit()
+                Lambda[i, :] = ols_results.params.values
+            except Exception as e:
+                logger.warning(f"变量{observables.columns[i]}: OLS失败 - {e}")
+                # Lambda[i, :] 保持NaN
+        else:
+            pass  # Lambda[i, :] 保持NaN
 
     logger.debug(f"载荷矩阵估计完成: {Lambda.shape}")
 
@@ -168,9 +169,10 @@ def estimate_covariance_matrices(
     observables: pd.DataFrame,
     Lambda: np.ndarray,
     n_factors: int,
-    A: np.ndarray = None
-) -> Tuple[np.ndarray, np.ndarray]:
-    """估计协方差矩阵Q和R（匹配老代码_calculate_shock_matrix）
+    A: np.ndarray = None,
+    n_shocks: int = None
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """估计协方差矩阵Q和R以及冲击矩阵B（匹配老代码_calculate_shock_matrix）
 
     Args:
         smoothed_result: 卡尔曼平滑结果
@@ -178,17 +180,18 @@ def estimate_covariance_matrices(
         Lambda: 载荷矩阵
         n_factors: 因子数量
         A: 状态转移矩阵（用于Q矩阵计算）
+        n_shocks: 冲击数量（用于B矩阵计算）
 
     Returns:
-        Tuple[np.ndarray, np.ndarray]: (Q, R)
+        Tuple[np.ndarray, np.ndarray, np.ndarray]: (B, Q, R)
     """
     n_time = observables.shape[0]
     n_obs = observables.shape[1]
 
     x_smooth = smoothed_result.x_smoothed
 
-    # Q矩阵计算（完全匹配老代码_calculate_shock_matrix）
-    # Q = E[F_t F_t'] - A E[F_{t-1} F_{t-1}'] A'
+    # Q矩阵和B矩阵计算（完全匹配老代码_calculate_shock_matrix）
+    # Sigma = E[F_t F_t'] - A E[F_{t-1} F_{t-1}'] A'
     F = x_smooth[:n_factors, :].T  # (n_time, n_factors)
 
     # Calculate F_{t-1}' F_{t-1}
@@ -200,16 +203,47 @@ def estimate_covariance_matrices(
     term1 = F_t.T @ F_t  # Shape (n_factors, n_factors)
     term1 = term1 / (n_time - 1)
 
-    # Calculate Q = E[F_t F_t'] - A E[F_{t-1} F_{t-1}'] A'
+    # Calculate Sigma = E[F_t F_t'] - A E[F_{t-1} F_{t-1}'] A'
     if A is not None:
         term2 = A @ (temp / (n_time - 1)) @ A.T
-        Q = term1 - term2
+        Sigma = term1 - term2
     else:
         # 如果没有传入A，使用简单估计
-        Q = term1
+        Sigma = term1
 
-    # 确保正定性（匹配老代码，使用epsilon=1e-7）
-    Q = _ensure_positive_definite(Q, epsilon=1e-7)
+    # 计算B矩阵和Q矩阵（匹配老代码_calculate_shock_matrix line 114-145）
+    if n_shocks is not None and A is not None:
+        try:
+            # 特征值分解
+            eigenvalues, eigenvectors = np.linalg.eigh(Sigma)
+            # 将负特征值替换为小正数
+            min_eig_val = 1e-7
+            eigenvalues_corrected = np.maximum(eigenvalues, min_eig_val)
+
+            # 使用修正后的特征值重构Sigma
+            Sigma_corrected = eigenvectors @ np.diag(eigenvalues_corrected) @ eigenvectors.T
+
+            # 计算B矩阵：选择最大的n_shocks个特征值
+            sorted_indices = np.argsort(eigenvalues_corrected)[::-1]
+            evalues_selected = eigenvalues_corrected[sorted_indices[:n_shocks]]
+            M = eigenvectors[:, sorted_indices[:n_shocks]]
+
+            # B = M * sqrt(diag(selected eigenvalues))
+            B = M @ np.diag(np.sqrt(evalues_selected))
+
+            # 使用修正后的Sigma作为Q
+            Q = Sigma_corrected
+
+        except np.linalg.LinAlgError as e:
+            logger.warning(f"Sigma特征值分解失败: {e}. 使用fallback值")
+            Q = np.eye(n_factors) * 1e-6
+            B = np.zeros((n_factors, n_shocks))
+            min_dim_fallback = min(n_factors, n_shocks)
+            B[:min_dim_fallback, :min_dim_fallback] = np.eye(min_dim_fallback) * np.sqrt(1e-6)
+    else:
+        # 如果没有n_shocks，只计算Q矩阵（保持向后兼容）
+        Q = _ensure_positive_definite(Sigma, epsilon=1e-7)
+        B = np.eye(n_factors) * 0.1  # 默认B矩阵
 
     # 计算残差和R矩阵（匹配老代码EMstep的实现）
     # 中心化数据：y_np
@@ -223,9 +257,9 @@ def estimate_covariance_matrices(
     R_diag = np.maximum(R_diag, 1e-7)  # 确保正定性
     R = np.diag(R_diag)
 
-    logger.debug(f"协方差矩阵估计完成: Q {Q.shape}, R {R.shape}")
+    logger.debug(f"协方差矩阵估计完成: B {B.shape}, Q {Q.shape}, R {R.shape}")
 
-    return Q, R
+    return B, Q, R
 
 
 def _ensure_positive_definite(matrix: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:

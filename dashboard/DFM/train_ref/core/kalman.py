@@ -81,66 +81,85 @@ class KalmanFilter:
         """卡尔曼滤波（完全匹配train_model实现）
 
         Args:
-            Z: 观测序列 (n_obs, n_time)
-            U: 控制输入 (n_control, n_time)
+            Z: 观测序列 (n_time, n_obs) - 匹配train_model格式
+            U: 控制输入 (n_time, n_control) - 匹配train_model格式
 
         Returns:
             KalmanFilterResult: 滤波结果
         """
         import scipy.linalg
 
-        n_time = Z.shape[1]
+        n_time = Z.shape[0]
 
         if U is None:
-            U = np.zeros((self.B.shape[1], n_time))
+            U = np.zeros((n_time, self.B.shape[1]))
 
         # 注意：为了匹配老代码，x和P的索引从0开始，但x[0]是初始状态
-        x_filt = np.zeros((self.n_states, n_time))
+        x_filt = np.zeros((n_time, self.n_states))
         P_filt = [np.zeros((self.n_states, self.n_states)) for _ in range(n_time)]
 
-        x_pred = np.zeros((self.n_states, n_time))
+        x_pred = np.zeros((n_time, self.n_states))
         P_pred = [np.zeros((self.n_states, self.n_states)) for _ in range(n_time)]
 
-        innovation = np.zeros((self.n_obs, n_time))
+        innovation = np.zeros((n_time, self.n_obs))
         loglikelihood = 0.0
 
         # 初始化
-        x_filt[:, 0] = self.x0
+        x_filt[0, :] = self.x0
         P_filt[0] = self.P0.copy()
-        x_pred[:, 0] = self.x0
+        x_pred[0, :] = self.x0
         P_pred[0] = self.P0.copy()
 
         # 从t=1开始循环（匹配老代码从i=1开始）
         for t in range(1, n_time):
             # 获取有效观测的索引
-            ix = np.where(~np.isnan(Z[:, t]))[0]
+            ix = np.where(~np.isnan(Z[t, :]))[0]
 
             # 先执行预测步（使用t-1时刻的滤波结果）
-            x_pred[:, t] = self.A @ x_filt[:, t-1] + self.B @ U[:, t]
+            x_pred[t, :] = self.A @ x_filt[t-1, :] + self.B @ U[t, :]
             P_pred_raw = self.A @ P_filt[t-1] @ self.A.T + self.Q
             # 添加jitter保证数值稳定性
             p_jitter = np.eye(self.n_states) * 1e-6
             P_pred[t] = P_pred_raw + p_jitter
 
+            # DEBUG: 输出第1个时间步的预测步结果
+            if t == 1:
+                print(f"\n[KALMAN-DEBUG] 新代码 t={t} 预测步:")
+                print(f"  x_filt[{t-1},:] = {x_filt[t-1, :]}")
+                print(f"  U[{t},:] = {U[t, :]}")
+                print(f"  x_pred[{t},:] = {x_pred[t, :]}")
+                print(f"  P_filt[{t-1}] diag = {np.diag(P_filt[t-1])}")
+                print(f"  P_pred_raw diag = {np.diag(P_pred_raw)}")
+                print(f"  P_pred[{t}] diag = {np.diag(P_pred[t])}")
+
             if len(ix) == 0:
                 # 没有观测，滤波结果等于预测结果
-                x_filt[:, t] = x_pred[:, t]
+                x_filt[t, :] = x_pred[t, :]
                 P_filt[t] = P_pred[t].copy()
-                innovation[:, t] = np.nan
+                innovation[t, :] = np.nan
                 continue
 
             # 提取有效观测和对应的H、R矩阵
-            z_t = Z[ix, t]
+            z_t = Z[t, ix]
             H_t = self.H[ix, :]
             R_t = self.R[np.ix_(ix, ix)]
 
             # 更新步
-            innov_t = z_t - H_t @ x_pred[:, t]
-            innovation[ix, t] = innov_t
+            innov_t = z_t - H_t @ x_pred[t, :]
+            innovation[t, ix] = innov_t
 
             S_t = H_t @ P_pred[t] @ H_t.T + R_t
             # 添加jitter保证数值稳定性
             jitter = np.eye(S_t.shape[0]) * 1e-4
+
+            # DEBUG: 输出第1个时间步的更新步中间结果
+            if t == 1:
+                print(f"\n[KALMAN-DEBUG] 新代码 t={t} 更新步:")
+                print(f"  有效观测数: {len(ix)}")
+                print(f"  Z[{t}, ix] = {z_t[:5]}")  # 只显示前5个
+                print(f"  H_t @ x_pred = {(H_t @ x_pred[t, :])[:5]}")
+                print(f"  innov_t[:5] = {innov_t[:5]}")
+                print(f"  S_t diag[:5] = {np.diag(S_t)[:5]}")
 
             try:
                 # 使用scipy.linalg.solve提高数值稳定性
@@ -150,10 +169,17 @@ class KalmanFilter:
                 logger.warning(f"时间步{t}: 新息协方差矩阵奇异，使用伪逆")
                 K_t = P_pred[t] @ H_t.T @ np.linalg.pinv(S_t + jitter)
 
-            x_filt[:, t] = x_pred[:, t] + K_t @ innov_t
+            x_filt[t, :] = x_pred[t, :] + K_t @ innov_t
             P_filt[t] = (np.eye(self.n_states) - K_t @ H_t) @ P_pred[t]
             # 对称化协方差矩阵
             P_filt[t] = (P_filt[t] + P_filt[t].T) / 2.0
+
+            # DEBUG: 输出第1个时间步的最终滤波结果
+            if t == 1:
+                print(f"\n[KALMAN-DEBUG] 新代码 t={t} 滤波结果:")
+                print(f"  K_t[0,:] = {K_t[0, :]}")  # 只显示第一行
+                print(f"  x_filt[{t},:] = {x_filt[t, :]}")
+                print(f"  P_filt[{t}] diag = {np.diag(P_filt[t])}")
 
             # 计算对数似然（只用于有观测的时间步）
             try:
@@ -196,11 +222,11 @@ class KalmanFilter:
         """
         import scipy.linalg
 
-        n_time = filter_result.x_filtered.shape[1]
+        n_time = filter_result.x_filtered.shape[0]
 
-        # 转换为(n_time, n_states)格式以匹配老代码
-        x_filt = filter_result.x_filtered.T  # (n_time, n_states)
-        x_pred = filter_result.x_predicted.T  # (n_time, n_states)
+        # filter_result已经是(n_time, n_states)格式,直接使用
+        x_filt = filter_result.x_filtered  # (n_time, n_states)
+        x_pred = filter_result.x_predicted  # (n_time, n_states)
 
         # P_filtered和P_predicted已经是(n_states, n_states, n_time)格式
         # 转换为list格式

@@ -461,12 +461,21 @@ def DFM_EMalgo(observation, n_factors, n_shocks, n_iter, train_end_date=None, er
     print(f"  P0_current_diag = {np.diag(P0_current)}, dtype = {P0_current.dtype}")
 
     for i in range(n_iter):
-        # DEBUG: 打印第一次迭代调用Kalman前的数据校验
+        # DEBUG: 打印第一次和第二次迭代调用Kalman前的数据校验
         if i == 0:
             print(f"\n[DEBUG] 老代码调用Kalman滤波器前的数据校验:")
             print(f"  obs_centered.sum().sum() = {obs_centered.sum().sum():.15f}")
             print(f"  obs_centered.iloc[0, :] = {obs_centered.iloc[0, :].values}")
             print(f"  obs_centered.iloc[1, :] = {obs_centered.iloc[1, :].values}")
+
+        # DEBUG: 打印第2次EM迭代传入Kalman的参数
+        if i == 1:
+            print(f"\n[DEBUG] 老代码第2次EM迭代传入Kalman的参数:")
+            print(f"  Lambda_current[:3,:] =\n{Lambda_current[:3, :]}")
+            print(f"  A_current =\n{A_current}")
+            print(f"  B_current =\n{B_current}")
+            print(f"  x0_current = {x0_current}")
+            print(f"  P0_current diag = {np.diag(P0_current)}")
 
         # E-Step: Run Kalman Filter and Smoother
         kf = KalmanFilter(Z=obs_centered, U=error_df, A=A_current, B=B_current, H=Lambda_current, state_names=state_names, x0=x0_current, P0=P0_current, Q=Q_current, R=R_current)
@@ -486,15 +495,27 @@ def DFM_EMalgo(observation, n_factors, n_shocks, n_iter, train_end_date=None, er
         Lambda_current = np.array(em.Lambda)
         Q_current = np.array(em.Q) # Make sure EMstep returns updated Q
         R_current = np.array(em.R) # Make sure EMstep returns updated R
-        
-        
+
+        # DEBUG: 打印第一次迭代M步后的参数
+        if i == 0:
+            print(f"\n[DEBUG] 老代码第1次迭代M步更新后参数:")
+            print(f"  Lambda[:3,:] =\n{Lambda_current[:3, :]}")
+            print(f"  A =\n{A_current}")
+            print(f"  Q diag = {np.diag(Q_current)}")
+            print(f"  R diag[:5] = {np.diag(R_current)[:5]}")
+            print(f"  em.x_sm.iloc[0] = {em.x_sm.iloc[0].values}")
+
         # Check diagonal of Q and R
-        
+
         # [DFM-SPECIFIC] Update initial state for next Kalman filter iteration
         # This state updating is essential for EM convergence
         if max_lags == 1:
             # VAR(1): Direct use of smoothed state
             x0_current = np.array(em.x_sm.iloc[0])
+
+            # DEBUG: 打印第一次迭代的x0更新
+            if i == 0:
+                print(f"  x0_current (更新后) = {x0_current}")
         else:
             # VAR(p): Construct companion form initial state
             if hasattr(em, 'x_sm') and em.x_sm is not None:
@@ -509,6 +530,10 @@ def DFM_EMalgo(observation, n_factors, n_shocks, n_iter, train_end_date=None, er
                 x0_current = np.zeros(n_state_vars)
 
         P0_current = fis.P_sm[0] # Use smoothed covariance for next iteration
+
+        # DEBUG: 打印第一次迭代的P0更新
+        if i == 0:
+            print(f"  P0_current diag (更新后) = {np.diag(P0_current)}")
 
     # === Step 4: Final DFM Results Generation ===
     print(f"  [DFM-SPECIFIC] 使用优化后参数运行最终Kalman滤波器")

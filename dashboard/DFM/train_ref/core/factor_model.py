@@ -234,7 +234,7 @@ class DFMModel:
             DFMResults: 估计结果
         """
         n_time, n_obs = obs_centered.shape
-        Z = obs_centered.values.T  # 转换为(n_obs, n_time)供Kalman滤波使用
+        Z = obs_centered.values  # (n_time, n_obs)格式,匹配train_model
         n_states = self.n_factors * self.max_lags
 
         factors_current = initial_factors.copy()
@@ -242,31 +242,24 @@ class DFMModel:
         # 使用初始载荷矩阵
         Lambda = initial_loadings.copy()
 
-        # 估计A矩阵和Q矩阵
+        # 初始化A矩阵和Q矩阵
+        # 关键修复：k=1用固定值（匹配老代码），k>=2用VAR估计
         if self.n_factors == 1:
-            # 对于单因子情况，使用AR模型
-            from statsmodels.tsa.api import AutoReg
-            ar_model = AutoReg(factors_current.iloc[:, 0].dropna(), lags=self.max_lags, trend='n')
-            ar_results = ar_model.fit()
-
+            # 单因子情况：使用固定初始值（匹配老代码line 354-355）
+            # 不使用AutoReg估计，因为初始PCA因子可能不准确，导致算法发散
             if self.max_lags == 1:
-                A = np.array([[ar_results.params.iloc[0]]])  # (1, 1) 矩阵
+                A = np.array([[0.95]])
+                Q = np.array([[0.1]])
             else:
-                # 构造companion form
-                n_states = self.max_lags
-                A = np.zeros((n_states, n_states))
-                A[0, :] = ar_results.params.iloc[:self.max_lags].values
+                # AR(p) companion form
+                A = np.zeros((self.max_lags, self.max_lags))
+                A[0, :] = 0.95 / self.max_lags
                 if self.max_lags > 1:
                     A[1:, :-1] = np.eye(self.max_lags - 1)
-
-            # 使用AR残差计算Q矩阵
-            Q = np.array([[ar_results.sigma2]])
-            if self.max_lags > 1:
-                Q_full = np.zeros((self.max_lags, self.max_lags))
-                Q_full[0, 0] = ar_results.sigma2
-                Q = Q_full
+                Q = np.zeros((self.max_lags, self.max_lags))
+                Q[0, 0] = 0.1
         else:
-            # 对于多因子情况，使用VAR模型（完全匹配老代码）
+            # 多因子情况：使用VAR模型估计（保持原逻辑，已验证成功）
             from statsmodels.tsa.api import VAR
             var_model = VAR(factors_current.dropna())
             var_results = var_model.fit(self.max_lags)
@@ -301,10 +294,17 @@ class DFMModel:
         x0 = np.zeros(n_states)
         P0 = np.eye(n_states)
 
-        # 生成外部shock矩阵U（匹配老代码默认行为：使用零矩阵）
-        # 老代码默认 error='False'，即使用零冲击
-        # 如果需要随机冲击，应在调用时明确指定
-        U = np.zeros((n_states, n_time))
+        # 初始化B矩阵（匹配老代码line 393: B_current = np.eye(n_factors) * 0.1）
+        B = np.eye(n_states) * 0.1
+
+        # 生成外部shock矩阵U（完全匹配老代码默认行为）
+        # 老代码有个Python陷阱：if error: 将字符串'False'当作True处理！
+        # 所以即使error='False'，也会生成随机U矩阵
+        # 为了保持一致性，这里也生成相同的随机U矩阵
+        DFM_SEED = 42  # 匹配老代码的种子
+        np.random.seed(DFM_SEED)
+        # 注意：老代码U shape是(n_time, n_shocks)，这里n_shocks=n_factors=n_states（max_lags=1时）
+        U = np.random.randn(n_time, n_states)  # (n_time, n_states)格式,匹配train_model
 
         # DEBUG: 打印第一次Kalman滤波前的参数
         print(f"\n[DEBUG] 新代码进入第1次Kalman滤波前的参数:")
@@ -327,8 +327,7 @@ class DFMModel:
             H = np.zeros((n_obs, n_states))
             H[:, :self.n_factors] = Lambda
 
-            # B矩阵：匹配老代码line 393: B_current = np.eye(n_factors) * 0.1
-            B = np.eye(n_states) * 0.1
+            # 注意：B矩阵在循环外初始化，并在M步后更新（匹配老代码）
 
             # DEBUG: 打印第一次迭代的H和B矩阵
             if iteration == 0:
@@ -345,7 +344,7 @@ class DFMModel:
                 print(f"  R对角线[:5]: {np.diag(R)[:5]}")
 
             kf = KalmanFilter(A, B, H, Q, R, x0, P0)
-            filter_result = kf.filter(Z, U)  # Z已经是(n_obs, n_time)格式
+            filter_result = kf.filter(Z, U)  # Z:(n_time, n_obs), U:(n_time, n_states) - 匹配train_model
             smoother_result = kf.smooth(filter_result)
 
             loglik_current = filter_result.loglikelihood
@@ -371,6 +370,8 @@ class DFMModel:
             if iteration == 0:
                 print(f"\n[DEBUG] 新代码第1次迭代E步平滑因子前3行:")
                 print(factors_smoothed[:3])
+                print(f"[DEBUG] factors_df shape: {factors_df.shape}")
+                print(f"[DEBUG] obs_centered shape: {obs_centered.shape}")
 
             # 使用中心化数据（而非标准化数据）估计载荷
             Lambda = estimate_loadings(
@@ -378,15 +379,21 @@ class DFMModel:
                 factors_df
             )
 
+            # DEBUG: 打印第一次迭代的M步Lambda结果
+            if iteration == 0:
+                print(f"\n[DEBUG] 新代码第1次迭代M步Lambda前3行:")
+                print(Lambda[:3, :])
+
             A = estimate_transition_matrix(factors_smoothed, self.max_lags)
 
-            # 估计协方差矩阵（使用中心化数据）
-            Q, R = estimate_covariance_matrices(
+            # 估计协方差矩阵和B矩阵（使用中心化数据，匹配老代码）
+            B, Q, R = estimate_covariance_matrices(
                 smoother_result,
                 obs_centered,  # 使用中心化数据
                 Lambda,
                 self.n_factors,
-                A  # 传入A矩阵用于Q矩阵计算
+                A,  # 传入A矩阵用于Q矩阵计算
+                n_shocks=self.n_factors  # 传入n_shocks以计算B矩阵
             )
 
             # 更新下一次迭代的初始状态（匹配老代码）

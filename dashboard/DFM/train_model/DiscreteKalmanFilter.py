@@ -221,14 +221,36 @@ def KalmanFilter(Z, U, A, B, H, state_names, x0, P0, Q, R):
         "prediction step"
         x_minus_pred = A @ x_prev_col + B @ u_col
         x_minus[i, :] = x_minus_pred.flatten()
-        
+
         P_minus_raw = A @ P[i-1] @ A.T + Q
         p_jitter = np.eye(P_minus_raw.shape[0]) * 1e-6 # Small jitter value
         P_minus[i] = P_minus_raw + p_jitter
 
+        # DEBUG: 输出第1个时间步的预测步结果
+        if i == 1:
+            print(f"\n[KALMAN-DEBUG] 老代码 i={i} 预测步:")
+            print(f"  x[{i-1},:] = {x[i-1, :]}")
+            print(f"  u[{i},:] = {u[i, :]}")
+            print(f"  x_minus[{i},:] = {x_minus[i, :]}")
+            print(f"  P[{i-1}] diag = {np.diag(P[i-1])}")
+            print(f"  P_minus_raw diag = {np.diag(P_minus_raw)}")
+            print(f"  P_minus[{i}] diag = {np.diag(P_minus[i])}")
+
         "update step"
         innovation_cov = H_t @ P_minus[i] @ H_t.T + R_t
         jitter = np.eye(innovation_cov.shape[0]) * 1e-4
+
+        # DEBUG: 输出第1个时间步的更新步中间结果
+        if i == 1:
+            print(f"\n[KALMAN-DEBUG] 老代码 i={i} 更新步:")
+            print(f"  有效观测数: {len(ix)}")
+            print(f"  z_t[:5] = {z_t[:5]}")
+            print(f"  H_t @ x_minus (前5) = {(H_t @ x_minus[i, :].reshape(-1, 1)).flatten()[:5]}")
+            x_minus_col = x_minus[i, :].reshape(-1, 1)
+            z_t_col = z_t.reshape(-1, 1)
+            innovation_temp = z_t_col - H_t @ x_minus_col
+            print(f"  innovation[:5] = {innovation_temp.flatten()[:5]}")
+            print(f"  innovation_cov diag[:5] = {np.diag(innovation_cov)[:5]}")
         
         try:
             # Use scipy.linalg.solve for better numerical stability
@@ -254,7 +276,7 @@ def KalmanFilter(Z, U, A, B, H, state_names, x0, P0, Q, R):
         x_minus_col = x_minus[i, :].reshape(-1, 1)
         z_t_col = z_t.reshape(-1, 1)
         innovation = z_t_col - H_t @ x_minus_col
-        
+
         x_updated = x_minus_col + K_t_effective @ innovation
         x[i, :] = x_updated.flatten()
 
@@ -262,6 +284,13 @@ def KalmanFilter(Z, U, A, B, H, state_names, x0, P0, Q, R):
         P[i] = (I_mat - K_t_effective @ H_t) @ P_minus[i]
         # Symmetrize P
         P[i] = (P[i] + P[i].T) / 2.0
+
+        # DEBUG: 输出第1个时间步的最终滤波结果
+        if i == 1:
+            print(f"\n[KALMAN-DEBUG] 老代码 i={i} 滤波结果:")
+            print(f"  K_t_effective[0,:] = {K_t_effective[0, :]}")  # 只显示第一行
+            print(f"  x[{i},:] = {x[i, :]}")
+            print(f"  P[{i}] diag = {np.diag(P[i])}")
 
     x = pd.DataFrame(data=x, index=Z.index, columns=state_names)
     x_minus = pd.DataFrame(data=x_minus, index=Z.index, columns=state_names)
