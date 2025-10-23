@@ -253,8 +253,12 @@ def estimate_covariance_matrices(
     residuals = Z - predicted_Z  # (n_time, n_obs)
 
     # R矩阵：残差的方差（每个变量的方差）
-    R_diag = np.nanvar(residuals, axis=0)  # (n_obs,)
+    R_diag = np.nanvar(residuals, axis=0, ddof=0)  # (n_obs,), ddof=0避免自由度问题
+
+    # 处理NaN和Inf：替换为默认值
+    R_diag = np.where(np.isfinite(R_diag), R_diag, 1.0)  # NaN/Inf用1.0替换
     R_diag = np.maximum(R_diag, 1e-7)  # 确保正定性
+
     R = np.diag(R_diag)
 
     logger.debug(f"协方差矩阵估计完成: B {B.shape}, Q {Q.shape}, R {R.shape}")

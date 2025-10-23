@@ -90,6 +90,22 @@ class DFMModel:
 
         logger.info(f"开始DFM拟合: 数据{data.shape}, 因子数={self.n_factors}, 滞后={self.max_lags}")
 
+        # 数据质量检查：过滤掉有效数据点不足的变量
+        min_required_points = max(self.n_factors + 5, 20)  # 至少需要n_factors+5个数据点
+        valid_counts = data.notna().sum()
+        valid_vars = valid_counts[valid_counts >= min_required_points].index.tolist()
+
+        if len(valid_vars) < len(data.columns):
+            dropped_vars = set(data.columns) - set(valid_vars)
+            logger.warning(f"过滤掉{len(dropped_vars)}个数据不足的变量（需要至少{min_required_points}个有效点）")
+            logger.debug(f"过滤掉的变量: {list(dropped_vars)[:5]}...")  # 只显示前5个
+            data = data[valid_vars]
+
+        if len(valid_vars) < self.n_factors:
+            raise ValueError(f"有效变量数（{len(valid_vars)}）少于因子数（{self.n_factors}），无法进行DFM估计")
+
+        logger.info(f"数据质量检查完成: 保留{len(valid_vars)}个变量")
+
         Z_orig = data.copy()
 
         if train_end:
@@ -205,6 +221,27 @@ class DFMModel:
             factors_df
         )
 
+        # 检查Lambda是否有NaN行
+        nan_rows = np.isnan(initial_loadings).any(axis=1)
+        n_nan_rows = nan_rows.sum()
+
+        if n_nan_rows > 0:
+            logger.warning(f"载荷矩阵有{n_nan_rows}行包含NaN，将使用替代方法估计")
+
+            # 对有NaN的行，使用SVD直接估计载荷
+            # Lambda = V[:n_factors].T * sqrt(s[:n_factors])
+            V_short = Vh[:self.n_factors, :].T  # (n_obs, n_factors)
+            svd_loadings = V_short * np.sqrt(s[:self.n_factors])
+
+            # 填充NaN行
+            for i in np.where(nan_rows)[0]:
+                logger.debug(f"变量{i}的载荷使用SVD估计")
+                initial_loadings[i, :] = svd_loadings[i, :]
+
+        # 最后检查：确保没有NaN或Inf
+        if np.any(np.isnan(initial_loadings)) or np.any(np.isinf(initial_loadings)):
+            raise ValueError(f"载荷矩阵仍包含NaN或Inf，无法继续。请检查输入数据质量。")
+
         logger.info(f"PCA初始化完成: 因子形状={factors_init.shape}, 载荷形状={initial_loadings.shape}")
 
         return factors_df, initial_loadings, V
@@ -306,21 +343,6 @@ class DFMModel:
         # 注意：老代码U shape是(n_time, n_shocks)，这里n_shocks=n_factors=n_states（max_lags=1时）
         U = np.random.randn(n_time, n_states)  # (n_time, n_states)格式,匹配train_model
 
-        # DEBUG: 打印第一次Kalman滤波前的参数
-        print(f"\n[DEBUG] 新代码进入第1次Kalman滤波前的参数:")
-        print(f"  obs_centered[:3, :3] =\n{obs_centered.iloc[:3, :3].values}")
-        print(f"  Z.shape = {Z.shape}, dtype = {Z.dtype}")
-        print(f"  U.shape = {U.shape}, dtype = {U.dtype}, 全为0: {np.allclose(U, 0)}")
-        print(f"  Lambda.shape = {Lambda.shape}, dtype = {Lambda.dtype}")
-        print(f"  Lambda[:3, :] =\n{Lambda[:3, :]}")
-        print(f"  A.dtype = {A.dtype}, Q.dtype = {Q.dtype}, R.dtype = {R.dtype}")
-        print(f"  A =\n{A}")
-        print(f"  Q_diag = {np.diag(Q)}")
-        print(f"  R_diag[:5] = {np.diag(R)[:5]}")
-        print(f"  x0 = {x0}, dtype = {x0.dtype}")
-        print(f"  P0_diag = {np.diag(P0)}, dtype = {P0.dtype}")
-        print(f"  n_states = {n_states}, n_obs = {n_obs}, n_factors = {self.n_factors}")
-
         for iteration in range(self.max_iter):
             logger.debug(f"EM迭代 {iteration + 1}/{self.max_iter}")
 
@@ -328,20 +350,6 @@ class DFMModel:
             H[:, :self.n_factors] = Lambda
 
             # 注意：B矩阵在循环外初始化，并在M步后更新（匹配老代码）
-
-            # DEBUG: 打印第一次迭代的H和B矩阵
-            if iteration == 0:
-                print(f"\n[DEBUG] 新代码第1次迭代构造H和B矩阵:")
-                print(f"  H.shape = {H.shape}")
-                print(f"  H[:3, :] =\n{H[:3, :]}")
-                print(f"  H是否等于Lambda: {np.allclose(H, Lambda) if H.shape == Lambda.shape else 'shape不同'}")
-                print(f"  B.shape = {B.shape}, dtype = {B.dtype}")
-                print(f"  B =\n{B}")
-                print(f"\n[DEBUG] 新代码调用Kalman滤波器前的数据校验:")
-                print(f"  Z.sum() = {Z.sum():.15f}")
-                print(f"  Z[:, 0] = {Z[:, 0]}")
-                print(f"  Z[:, 1] = {Z[:, 1]}")
-                print(f"  R对角线[:5]: {np.diag(R)[:5]}")
 
             kf = KalmanFilter(A, B, H, Q, R, x0, P0)
             filter_result = kf.filter(Z, U)  # Z:(n_time, n_obs), U:(n_time, n_states) - 匹配train_model
@@ -366,23 +374,26 @@ class DFMModel:
                 columns=[f'Factor{i+1}' for i in range(self.n_factors)]
             )
 
-            # DEBUG: 打印第一次迭代的E步结果
-            if iteration == 0:
-                print(f"\n[DEBUG] 新代码第1次迭代E步平滑因子前3行:")
-                print(factors_smoothed[:3])
-                print(f"[DEBUG] factors_df shape: {factors_df.shape}")
-                print(f"[DEBUG] obs_centered shape: {obs_centered.shape}")
-
             # 使用中心化数据（而非标准化数据）估计载荷
-            Lambda = estimate_loadings(
+            Lambda_new = estimate_loadings(
                 obs_centered,  # 使用中心化数据（匹配老代码）
                 factors_df
             )
 
-            # DEBUG: 打印第一次迭代的M步Lambda结果
-            if iteration == 0:
-                print(f"\n[DEBUG] 新代码第1次迭代M步Lambda前3行:")
-                print(Lambda[:3, :])
+            # 处理Lambda中的NaN：使用上一次迭代的值
+            nan_rows = np.isnan(Lambda_new).any(axis=1)
+            if np.any(nan_rows):
+                logger.warning(f"EM迭代{iteration}: Lambda有{nan_rows.sum()}行包含NaN，保留上一次迭代的值")
+                Lambda_new[nan_rows, :] = Lambda[nan_rows, :]
+
+            # 最终检查：如果仍有NaN（第一次迭代且初始化失败），抛出错误
+            if np.any(np.isnan(Lambda_new)):
+                raise ValueError(
+                    f"EM迭代{iteration}: Lambda仍包含NaN，无法继续。"
+                    f"可能原因：数据质量不足或变量有效数据点太少。"
+                )
+
+            Lambda = Lambda_new
 
             A = estimate_transition_matrix(factors_smoothed, self.max_lags)
 
