@@ -192,8 +192,8 @@ class TestEMIterationConsistency(ConsistencyTestBase):
         print("\n[Step 3] 运行train_ref单次EM迭代...")
 
         # 准备train_ref的输入格式
-        Z_new = obs_centered.values.T  # (n_obs, n_time)
-        U_new = np.zeros((self.n_factors_small, self.n_time_small))
+        Z_new = obs_centered.values  # (n_time, n_obs)
+        U_new = np.zeros((self.n_time_small, self.n_factors_small))
 
         # 构造H矩阵
         n_states = self.n_factors_small
@@ -225,12 +225,13 @@ class TestEMIterationConsistency(ConsistencyTestBase):
 
         Lambda_new_iter1 = estimate_loadings(obs_centered, factors_df_new)
         A_new_iter1 = estimate_transition_matrix(factors_smoothed, max_lags=1)
-        Q_new_iter1, R_new_iter1 = estimate_covariance_matrices(
+        B_new_iter1, Q_new_iter1, R_new_iter1 = estimate_covariance_matrices(
             smoother_result,
             obs_centered,
             Lambda_new_iter1,
             self.n_factors_small,
-            A_new_iter1
+            A_new_iter1,
+            n_shocks=self.n_factors_small
         )
 
         x0_new_iter1 = smoother_result.x_smoothed[:, 0].copy()
@@ -789,8 +790,8 @@ class TestEMIterationConsistency(ConsistencyTestBase):
         x0 = np.zeros(n_factors)
         P0 = np.eye(n_factors)
 
-        Z = obs_centered.values.T  # (n_obs, n_time)
-        U = np.zeros((n_factors, len(Z_df)))
+        Z = obs_centered.values  # (n_time, n_obs)
+        U = np.zeros((len(Z_df), n_factors))
 
         # 存储中间结果
         results = {
@@ -802,7 +803,7 @@ class TestEMIterationConsistency(ConsistencyTestBase):
 
         # EM迭代
         for i in range(n_iters):
-            n_obs, n_time = Z.shape
+            n_time, n_obs = Z.shape
             H = np.zeros((n_obs, n_factors))
             H[:, :n_factors] = Lambda
             B = np.eye(n_factors) * 0.1
@@ -821,12 +822,13 @@ class TestEMIterationConsistency(ConsistencyTestBase):
 
             Lambda = estimate_loadings(obs_centered, factors_df)
             A = estimate_transition_matrix(factors_smoothed, max_lags=1)
-            Q, R = estimate_covariance_matrices(
+            B, Q, R = estimate_covariance_matrices(
                 smoother_result,
                 obs_centered,
                 Lambda,
                 n_factors,
-                A
+                A,
+                n_shocks=n_factors
             )
 
             # 保存当前迭代结果
@@ -966,8 +968,8 @@ class TestEMIterationConsistency(ConsistencyTestBase):
         x0 = np.zeros(n_factors)
         P0 = np.eye(n_factors)
 
-        Z = obs_centered.values.T
-        U = np.zeros((n_factors, len(Z_df)))
+        Z = obs_centered.values
+        U = np.zeros((len(Z_df), n_factors))
 
         loglik_list = []
         converged = False
@@ -1004,12 +1006,13 @@ class TestEMIterationConsistency(ConsistencyTestBase):
 
             Lambda = estimate_loadings(obs_centered, factors_df)
             A = estimate_transition_matrix(factors_smoothed, max_lags=1)
-            Q, R = estimate_covariance_matrices(
+            B, Q, R = estimate_covariance_matrices(
                 smoother_result,
                 obs_centered,
                 Lambda,
                 n_factors,
-                A
+                A,
+                n_shocks=n_factors
             )
 
             x0 = smoother_result.x_smoothed[:, 0].copy()
@@ -1075,10 +1078,10 @@ class TestEMIterationConsistency(ConsistencyTestBase):
         # 准备数据
         means = Z_df.mean(skipna=True).values
         obs_centered = Z_df - means
-        Z = obs_centered.values.T  # (n_obs, n_time)
-        U = np.zeros((n_factors, len(Z_df)))
+        Z = obs_centered.values  # (n_time, n_obs)
+        U = np.zeros((len(Z_df), n_factors))
 
-        n_obs, n_time = Z.shape
+        n_time, n_obs = Z.shape
         H = np.zeros((n_obs, n_factors))
         H[:, :n_factors] = Lambda
         B = np.eye(n_factors) * 0.1
@@ -1098,12 +1101,13 @@ class TestEMIterationConsistency(ConsistencyTestBase):
 
         Lambda_new = estimate_loadings(obs_centered, factors_df)
         A_new = estimate_transition_matrix(factors_smoothed, max_lags=1)
-        Q_new, R_new = estimate_covariance_matrices(
+        B_new, Q_new, R_new = estimate_covariance_matrices(
             smoother_result,
             obs_centered,
             Lambda_new,
             n_factors,
-            A_new
+            A_new,
+            n_shocks=n_factors
         )
 
         return {
