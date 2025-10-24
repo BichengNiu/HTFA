@@ -94,7 +94,7 @@ dashboard/
 │   └── utils/                  # UI工具库
 ├── DFM/                # 动态因子模型
 │   ├── data_prep/              # 数据准备
-│   ├── train_ref/              # 重构版训练模块(6,000行)
+│   ├── train_ref/              # 重构版训练模块(10,800行)
 │   ├── model_analysis/         # 模型分析
 │   └── news_analysis/          # 新闻分析
 ├── preview/            # 数据预览
@@ -189,7 +189,7 @@ is_active INTEGER
 
 ## DFM模块重构架构
 
-DFM模块经过重构,从15,343行优化到6,000行(减少60%),采用分层设计:
+DFM模块经过重构,从15,049行优化到10,800行(减少28%),采用分层设计:
 
 ```
 dashboard/DFM/train_ref/
@@ -197,42 +197,119 @@ dashboard/DFM/train_ref/
 │   ├── kalman.py          # 卡尔曼滤波(预测/平滑)
 │   ├── factor_model.py    # DFM模型实现
 │   └── estimator.py       # EM参数估计
+├── selection/             # 变量选择层
+│   └── backward_selector.py  # 后向逐步变量选择
+├── training/              # 训练协调层
+│   ├── config.py          # 配置管理(TrainingConfig)
+│   ├── trainer.py         # DFMTrainer统一接口(包含ModelEvaluator)
+│   └── pipeline.py        # 训练流程管道
+├── analysis/              # 分析输出层
+│   ├── reporter.py        # 分析报告生成(PCA/贡献度/R²)
+│   ├── analysis_utils.py  # 分析工具函数
+│   └── visualizer.py      # 结果可视化
 ├── evaluation/            # 评估层
 │   ├── evaluator.py       # 模型评估器
-│   ├── metrics.py         # RMSE/Hit Rate/相关系数
+│   ├── metrics.py         # 评估指标
 │   └── validator.py       # 数据验证器
-├── training/              # 训练协调层
-│   ├── config.py          # 配置管理(DFMConfig/TrainingConfig)
-│   └── trainer.py         # DFMTrainer统一接口
+├── utils/                 # 工具层
+│   ├── data_utils.py      # 数据加载与预处理
+│   ├── precompute.py      # 预计算引擎
+│   └── logger.py          # 日志工具
 ├── optimization/          # 优化层
 │   └── cache.py           # LRU缓存
-└── utils/                 # 工具层
+└── facade.py              # 统一API入口
 ```
 
 **关键配置类**:
 ```python
 @dataclass
-class DFMConfig:
-    k_factors: int = 2              # 因子个数
-    max_iterations: int = 30        # 最大迭代次数
-    tolerance: float = 1e-6         # 收敛容差
-    smoothing: bool = True          # 是否使用平滑估计
-
-@dataclass
 class TrainingConfig:
+    # 数据配置
     data_path: str                  # 数据文件路径
     target_variable: str            # 目标变量
     selected_indicators: List[str]  # 选中指标
-    train_start, train_end: str     # 训练集日期范围
-    validation_start, validation_end: str  # 验证集日期范围
+    train_end_date: str             # 训练集结束日期
+    validation_end_date: str        # 验证集结束日期
+
+    # 模型配置
+    k_factors: int = 2              # 因子个数
+    max_iterations: int = 30        # 最大迭代次数
+    tolerance: float = 1e-6         # 收敛容差
+
+    # 变量选择配置
+    enable_variable_selection: bool = False  # 是否启用变量选择
+    selection_criterion: str = 'rmse'        # 选择准则(rmse/hit_rate)
+
+    # 因子数选择配置
+    factor_selection_method: str = 'fixed'   # 因子数选择方法(fixed/cumulative/elbow)
+    pca_threshold: float = 0.85             # PCA累积方差阈值
 ```
 
-**训练流程**:
-1. 数据加载与验证 (DataValidator)
-2. EM算法参数估计 (EMEstimator)
-3. 卡尔曼滤波状态估计 (KalmanFilter)
-4. 验证集评估 (ModelEvaluator)
-5. 结果缓存 (LRUCache)
+**训练流程**（两阶段）:
+1. **数据加载与验证** - DataValidator, data_utils
+2. **阶段1：变量选择**（可选） - BackwardSelector
+   - 固定k=块数，后向逐步剔除变量
+   - 优化目标：RMSE或Hit Rate
+3. **阶段2：因子数选择** - PCA分析
+   - fixed: 固定因子数
+   - cumulative: PCA累积方差阈值
+   - elbow: 边际方差肘部法则
+4. **最终模型训练** - DFMModel (core/)
+   - EM算法参数估计 (estimator.py)
+   - 卡尔曼滤波状态估计 (kalman.py)
+5. **模型评估** - ModelEvaluator
+   - 样本内/样本外RMSE, Hit Rate, 相关系数
+6. **结果分析与可视化** - AnalysisReporter, ResultVisualizer
+
+**快速开始示例**:
+
+```python
+from dashboard.DFM.train_ref import DFMTrainer, TrainingConfig
+
+# 1. 构建配置
+config = TrainingConfig(
+    # 数据配置
+    data_path="data/经济数据库.xlsx",
+    target_variable="规模以上工业增加值:当月同比",
+    selected_indicators=["钢铁产量", "发电量", "货运量", ...],
+    train_end_date="2023-12-31",
+    validation_end_date="2024-06-30",
+
+    # 模型配置
+    k_factors=3,
+    max_iterations=50,
+    tolerance=1e-6,
+
+    # 变量选择（可选）
+    enable_variable_selection=True,
+    selection_criterion='rmse',
+
+    # 因子数选择
+    factor_selection_method='cumulative',
+    pca_threshold=0.85
+)
+
+# 2. 训练模型
+trainer = DFMTrainer(config)
+
+def progress_callback(msg):
+    print(f"[训练进度] {msg}")
+
+results = trainer.train(progress_callback=progress_callback)
+
+# 3. 查看结果
+print(f"样本外RMSE: {results.metrics.rmse_oos:.4f}")
+print(f"样本外Hit Rate: {results.metrics.hit_rate_oos:.2%}")
+print(f"选定变量数: {len(results.selected_variables)}")
+print(f"因子个数: {results.k_factors}")
+
+# 4. 生成分析报告（可选）
+from dashboard.DFM.train_ref.analysis import AnalysisReporter
+reporter = AnalysisReporter()
+reporter.generate_report_with_params(results, output_dir="results/")
+```
+
+详细使用说明请参考: dashboard/DFM/train_ref/README.md
 
 ## 数据预览模块
 
@@ -371,7 +448,16 @@ pip install -r requirements.txt
 | 状态管理 | dashboard/core/unified_state.py:14 | UnifiedStateManager类 |
 | 导航管理 | dashboard/core/navigation_manager.py | NavigationManager类 |
 | 用户数据库 | dashboard/auth/database.py | AuthDatabase类 |
-| DFM训练器 | dashboard/DFM/train_ref/training/trainer.py | DFMTrainer类 |
+| **DFM训练器** | dashboard/DFM/train_ref/training/trainer.py | DFMTrainer类(845行) |
+| **DFM配置** | dashboard/DFM/train_ref/training/config.py | TrainingConfig类 |
+| **DFM核心算法** | dashboard/DFM/train_ref/core/factor_model.py | DFMModel类(514行) |
+| **卡尔曼滤波** | dashboard/DFM/train_ref/core/kalman.py | KalmanFilter类(341行) |
+| **EM参数估计** | dashboard/DFM/train_ref/core/estimator.py | estimate_parameters函数(298行) |
+| **变量选择** | dashboard/DFM/train_ref/selection/backward_selector.py | BackwardSelector类(339行) |
+| **结果分析** | dashboard/DFM/train_ref/analysis/reporter.py | AnalysisReporter类(289行) |
+| **结果可视化** | dashboard/DFM/train_ref/analysis/visualizer.py | ResultVisualizer类(634行) |
+| **模型评估** | dashboard/DFM/train_ref/evaluation/evaluator.py | ModelEvaluator类 |
+| **统一API** | dashboard/DFM/train_ref/facade.py | 完整使用示例 |
 | 数据预览 | dashboard/preview/main.py | 预览模块主逻辑 |
 | 频率配置 | dashboard/preview/config.py | UNIFIED_FREQUENCY_CONFIGS |
 | 平稳性分析 | dashboard/explore/analysis/stationarity.py | ADF/KPSS检验 |

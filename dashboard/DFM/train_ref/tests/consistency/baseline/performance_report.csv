@@ -1,0 +1,6 @@
+﻿case_id,case_name,n_indicators,k_factors,baseline_time,train_ref_time,time_diff_pct,memory_mb,converged,n_iter
+case_1,基础配置（小规模）,5,2,,1.7278430461883545,,0.2734375,False,30
+case_2,中等规模,15,4,,2.241487979888916,,0.14453125,False,30
+case_3,大规模配置,30,6,,2.1369383335113525,,0.125,False,30
+case_4,变量选择场景,20,3,,2.1532809734344482,,0.12890625,False,30
+case_5,边界情况,3,1,,1.0386924743652344,,0.03125,False,30
