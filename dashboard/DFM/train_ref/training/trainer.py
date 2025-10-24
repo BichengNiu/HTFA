@@ -189,26 +189,41 @@ class ModelEvaluator:
 
         # 移除NaN值
         valid_mask = ~(np.isnan(predictions) | np.isnan(actuals) | np.isnan(previous_values))
+        logger.info(f"[DEBUG Hit Rate] valid_mask统计: 总数={len(valid_mask)}, 有效={valid_mask.sum()}, NaN数={(~valid_mask).sum()}")
+
         if not valid_mask.any():
+            logger.warning(f"[DEBUG Hit Rate] 所有数据都是NaN，返回-inf")
             return -np.inf
 
         predictions_clean = predictions[valid_mask]
         actuals_clean = actuals[valid_mask]
         previous_clean = previous_values[valid_mask]
 
+        logger.info(f"[DEBUG Hit Rate] 清理后数据长度: {len(predictions_clean)}")
+        logger.info(f"[DEBUG Hit Rate] predictions_clean: {predictions_clean}")
+        logger.info(f"[DEBUG Hit Rate] actuals_clean: {actuals_clean}")
+        logger.info(f"[DEBUG Hit Rate] previous_clean: {previous_clean}")
+
         # 计算方向
         pred_direction = np.sign(predictions_clean - previous_clean)
         actual_direction = np.sign(actuals_clean - previous_clean)
+
+        logger.info(f"[DEBUG Hit Rate] pred_direction: {pred_direction}")
+        logger.info(f"[DEBUG Hit Rate] actual_direction: {actual_direction}")
 
         # 计算命中率
         hits = (pred_direction == actual_direction).sum()
         total = len(pred_direction)
 
+        logger.info(f"[DEBUG Hit Rate] hits={hits}, total={total}")
+
         if total == 0:
+            logger.warning(f"[DEBUG Hit Rate] total=0，返回-inf")
             return -np.inf
 
         hit_rate = (hits / total) * 100.0
 
+        logger.info(f"[DEBUG Hit Rate] 最终hit_rate={hit_rate}")
         return float(hit_rate)
 
     def calculate_correlation(
@@ -312,6 +327,11 @@ class ModelEvaluator:
                 forecast_oos = model_result.forecast_oos[:min_len]
                 actual_oos = val_data.values[:min_len]
 
+                # [DEBUG] 添加调试日志
+                logger.info(f"[DEBUG Hit Rate] val_data长度: {len(val_data)}")
+                logger.info(f"[DEBUG Hit Rate] forecast_oos长度: {len(forecast_oos)}, 前5个值: {forecast_oos[:5]}")
+                logger.info(f"[DEBUG Hit Rate] actual_oos长度: {len(actual_oos)}, 前5个值: {actual_oos[:5]}")
+
                 # RMSE
                 metrics.oos_rmse = self.calculate_rmse(forecast_oos, actual_oos)
 
@@ -327,9 +347,13 @@ class ModelEvaluator:
                     else:
                         previous_oos = np.concatenate([[np.nan], actual_oos[:-1]])
 
+                    logger.info(f"[DEBUG Hit Rate] 开始计算hit_rate, previous_oos: {previous_oos}")
                     metrics.oos_hit_rate = self.calculate_hit_rate(
                         forecast_oos, actual_oos, previous_oos
                     )
+                    logger.info(f"[DEBUG Hit Rate] 计算结果: {metrics.oos_hit_rate}")
+                else:
+                    logger.warning(f"[DEBUG Hit Rate] actual_oos数据不足({len(actual_oos)}<=1)，无法计算hit_rate")
 
         except Exception as e:
             logger.error(f"评估过程出错: {e}")
@@ -914,6 +938,18 @@ class DFMTrainer:
         progress_callback: Optional[Callable] = None
     ):
         """打印训练摘要"""
+        # 格式化Hit Rate显示
+        is_hit_rate_display = (
+            f"{result.metrics.is_hit_rate:.2f}%"
+            if np.isfinite(result.metrics.is_hit_rate)
+            else "N/A (数据不足)"
+        )
+        oos_hit_rate_display = (
+            f"{result.metrics.oos_hit_rate:.2f}%"
+            if np.isfinite(result.metrics.oos_hit_rate)
+            else "N/A (数据不足)"
+        )
+
         summary = f"""
 ========== 训练摘要 ==========
 变量数: {len(result.selected_variables) - 1}
@@ -923,8 +959,8 @@ class DFMTrainer:
 
 样本内RMSE: {result.metrics.is_rmse:.4f}
 样本外RMSE: {result.metrics.oos_rmse:.4f}
-样本内命中率: {result.metrics.is_hit_rate:.2f}%
-样本外命中率: {result.metrics.oos_hit_rate:.2f}%
+样本内命中率: {is_hit_rate_display}
+样本外命中率: {oos_hit_rate_display}
 
 总评估次数: {result.total_evaluations}
 SVD错误: {result.svd_error_count}
