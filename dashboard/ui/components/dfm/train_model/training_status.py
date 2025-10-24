@@ -17,32 +17,16 @@ from datetime import datetime
 
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
 from dashboard.core import get_global_dfm_manager
-from dashboard.DFM.train_model.tune_dfm import train_and_save_dfm_results
 
-# 尝试导入增强系统（可选）
-try:
-    from dashboard.DFM.train_model.core.utils.error_handling import (
-        DFMTrainingError, ErrorHandler
-    )
-    from dashboard.DFM.train_model.core.utils.logging_system import (
-        DFMLogger, get_logger
-    )
-    from dashboard.DFM.train_model.core.utils.performance_monitor import (
-        PerformanceMonitor, create_performance_monitor
-    )
-    ENHANCED_SYSTEMS_AVAILABLE = True
+# train_model已被删除,所有功能已迁移到train_ref
+# 这个组件将被废弃或重构为使用train_ref
 
-    # 初始化日志系统
-    dfm_logger = get_logger("DFM_Training_UI", level="INFO")
-    logger = dfm_logger.logger
-    error_handler = ErrorHandler(logger=logger)
-except ImportError:
-    ENHANCED_SYSTEMS_AVAILABLE = False
-    # 使用标准日志
-    logger = logging.getLogger(__name__)
-    dfm_logger = None
-    error_handler = None
-    print("[WARN] 增强系统不可用，使用标准日志系统")
+ENHANCED_SYSTEMS_AVAILABLE = False
+# 使用标准日志
+logger = logging.getLogger(__name__)
+dfm_logger = None
+error_handler = None
+print("[INFO] TrainingStatusComponent: 使用标准日志系统(train_model已废弃)")
 
 
 class TrainingStatusComponent(DFMComponent):
