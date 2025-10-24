@@ -428,6 +428,55 @@ class TrainingConfig:
 - 核心算法层: >90%覆盖率
 - 数值一致性: 100%验证通过
 
+### 端到端UI测试
+
+基于Playwright MCP的完整UI自动化测试，覆盖12种配置场景（2025-10-24完成）。
+
+**测试配置文件**: `tests/consistency/test_end_to_end_configs.py`
+
+**测试覆盖**:
+- 因子数选择: k=1, 2, 3, 5, 10（固定）、PCA累积方差（0.85, 0.90）
+- 变量选择: 启用/禁用 backward elimination
+- EM迭代: 10, 30（默认）, 50次
+- 边界条件: 单因子、高维因子
+
+**测试结果** (11/12通过，T6跳过-UI未实现Elbow):
+
+| 配置 | RMSE | 因子数 | 变量数 | 耗时 | 推荐 |
+|------|------|--------|--------|------|------|
+| 变量选择+PCA(0.85) | 4.8744 | 2 | 8 | 290s | ⭐ |
+| 变量选择+fixed(k=3) | 4.9508 | 3 | 8 | 162s | ⭐ |
+| 基线fixed(k=2) | 5.0278 | 2 | 13 | 3.3s | - |
+| PCA(0.85) | 5.3159 | 1 | 13 | 3.4s | - |
+
+**生产推荐配置**:
+```python
+# 方案A: 最佳性能（RMSE=4.87）
+config = TrainingConfig(
+    factor_selection_method='cumulative',
+    pca_threshold=0.85,
+    enable_variable_selection=True,
+    selection_criterion='rmse',
+    max_iterations=30
+)
+
+# 方案B: 平衡速度（RMSE=4.95，快44%）
+config = TrainingConfig(
+    k_factors=3,
+    factor_selection_method='fixed',
+    enable_variable_selection=True,
+    selection_criterion='rmse',
+    max_iterations=30
+)
+```
+
+**详细报告**: `tests/consistency/test_results_complete_final_2025-10-24.md`
+
+**关键发现**:
+- 变量选择提升性能5-8%，从14个指标筛选到8个核心钢铁指标
+- k=2-3是最优因子数范围，k≥5开始过拟合
+- EM 30次迭代是最佳平衡点，50次收益递减
+
 ## 迁移指南
 
 ### 从train_model迁移到train_ref
