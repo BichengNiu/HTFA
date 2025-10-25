@@ -670,7 +670,7 @@ def render_dfm_data_prep_tab(st):
                     progress_bar.progress(30)
 
                     # 调用真正的数据预处理函数
-                    from dashboard.DFM.data_prep.data_preparation import prepare_data
+                    from dashboard.models.DFM.prep.data_preparation import prepare_data
 
                     try:
                         # 打印调试信息
@@ -886,7 +886,7 @@ def _auto_load_mapping_data_if_needed(current_file):
         mapping_sheet_name = get_dfm_state('dfm_param_type_mapping_sheet', '指标体系')
 
         # 加载映射数据
-        from dashboard.DFM.data_prep.data_preparation import load_mappings
+        from dashboard.models.DFM.prep.data_preparation import load_mappings
 
         var_type_map, var_industry_map_loaded = load_mappings(
             excel_path=current_file,

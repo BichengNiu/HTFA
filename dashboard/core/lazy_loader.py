@@ -56,11 +56,11 @@ class LazyModuleLoader:
             
             # DFM模块
             'dfm_ui': {
-                'module_path': 'dashboard.DFM.model_analysis.dfm_ui',
+                'module_path': 'dashboard.models.DFM.results.dfm_ui',
                 'functions': ['render_dfm_tab']
             },
             'dfm_data_prep': {
-                'module_path': 'dashboard.DFM.data_prep.data_prep_ui',
+                'module_path': 'dashboard.models.DFM.prep.data_prep_ui',
                 'functions': ['render_dfm_data_prep_tab']
             },
             'dfm_train_model': {
@@ -68,7 +68,7 @@ class LazyModuleLoader:
                 'functions': ['render_dfm_train_model_tab']
             },
             'news_analysis': {
-                'module_path': 'dashboard.DFM.news_analysis.news_analysis_front_end',
+                'module_path': 'dashboard.models.DFM.decomp.news_analysis_front_end',
                 'functions': ['render_news_analysis_tab']
             },
 

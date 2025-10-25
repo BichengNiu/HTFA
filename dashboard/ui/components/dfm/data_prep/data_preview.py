@@ -12,7 +12,7 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
-from dashboard.DFM.data_prep.data_preparation import detect_sheet_format
+from dashboard.models.DFM.prep.data_preparation import detect_sheet_format
 from dashboard.core import get_global_dfm_manager
 
 

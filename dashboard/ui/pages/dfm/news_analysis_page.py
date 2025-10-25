@@ -73,7 +73,7 @@ def set_dfm_state(key, value):
 
 
 # 导入后端执行函数
-from dashboard.DFM.news_analysis.news_analysis_backend import execute_news_analysis
+from dashboard.models.DFM.decomp.news_analysis_backend import execute_news_analysis
 backend_available = True
 print("[News Frontend] Successfully imported news_analysis_backend.execute_news_analysis")
 

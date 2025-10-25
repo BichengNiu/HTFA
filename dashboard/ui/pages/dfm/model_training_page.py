@@ -164,8 +164,8 @@ if dfm_train_ref_dir not in sys.path:
 
 try:
     # 导入train_ref模块
-    from dashboard.DFM.train_ref.training import DFMTrainer, TrainingConfig
-    from dashboard.DFM.train_ref.training.trainer import TrainingResult
+    from dashboard.models.DFM.train.training import DFMTrainer, TrainingConfig
+    from dashboard.models.DFM.train.training.trainer import TrainingResult
     print("[SUCCESS] 成功导入DFMTrainer和TrainingConfig from train_ref")
     _TRAIN_UI_IMPORT_ERROR_MESSAGE = None
 except ImportError as e:
@@ -1517,7 +1517,11 @@ def render_dfm_train_model_tab(st_instance):
                     # 创建训练器并训练（同步执行）
                     st_instance.info("[LOADING] 正在训练模型，请稍候...")
                     trainer = DFMTrainer(training_config)
-                    result: TrainingResult = trainer.train(progress_callback=progress_callback)
+                    result: TrainingResult = trainer.train(
+                        progress_callback=progress_callback,
+                        enable_export=True,
+                        export_dir=None
+                    )
 
                     # 处理训练结果并保存
                     # 保存训练结果摘要
@@ -1535,6 +1539,7 @@ def render_dfm_train_model_tab(st_instance):
 
                     # 保存到状态管理器
                     set_dfm_state('dfm_training_result', result_summary)
+                    set_dfm_state('dfm_model_results_paths', result.export_files)
                     set_dfm_state('dfm_training_status', '训练完成')
                     set_dfm_state('dfm_training_completed_timestamp', time.time())
 
@@ -1545,7 +1550,14 @@ def render_dfm_train_model_tab(st_instance):
                     training_log.append(f"[RESULT] 因子数: {result.k_factors}")
                     if result.metrics:
                         training_log.append(f"[METRICS] 样本外RMSE: {result.metrics.oos_rmse:.4f}")
-                        training_log.append(f"[METRICS] 样本外Hit Rate: {result.metrics.oos_hit_rate:.2f}%")
+                        # 检查Hit Rate是否有效
+                        import numpy as np
+                        hit_rate_value = result.metrics.oos_hit_rate
+                        if np.isnan(hit_rate_value) or np.isinf(hit_rate_value):
+                            hit_rate_str = "N/A (数据不足)"
+                        else:
+                            hit_rate_str = f"{hit_rate_value:.2f}%"
+                        training_log.append(f"[METRICS] 样本外Hit Rate: {hit_rate_str}")
                     set_dfm_state('dfm_training_log', training_log)
 
                     # 清理临时文件
@@ -1660,7 +1672,14 @@ def render_dfm_train_model_tab(st_instance):
                     if metrics.get('oos_rmse'):
                         st_instance.metric("样本外RMSE", f"{metrics['oos_rmse']:.4f}")
                     if metrics.get('oos_hit_rate'):
-                        st_instance.metric("样本外Hit Rate", f"{metrics['oos_hit_rate']:.2f}%")
+                        # 检查Hit Rate是否有效
+                        import numpy as np
+                        hit_rate_value = metrics['oos_hit_rate']
+                        if np.isnan(hit_rate_value) or np.isinf(hit_rate_value):
+                            hit_rate_display = "N/A"
+                        else:
+                            hit_rate_display = f"{hit_rate_value:.2f}%"
+                        st_instance.metric("样本外Hit Rate", hit_rate_display)
 
                 st_instance.metric("训练耗时", f"{training_result_summary.get('training_time', 0):.2f}秒")
 
@@ -1674,8 +1693,7 @@ def render_dfm_train_model_tab(st_instance):
                         st_instance.info("无变量选择")
 
             # 显示训练结果文件（如果有）
-            elif training_results:
-                st_instance.success("[SUCCESS] 训练已完成")
+            if training_results:
                 print(f"[HOT] [UI状态检查] 开始处理训练结果，类型: {type(training_results)}")
                 print(f"[HOT] [UI状态检查] 训练结果内容: {training_results}")
 

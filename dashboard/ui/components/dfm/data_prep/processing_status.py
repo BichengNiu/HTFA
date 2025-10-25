@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
-from dashboard.DFM.data_prep.data_preparation import prepare_data, load_mappings
+from dashboard.models.DFM.prep.data_preparation import prepare_data, load_mappings
 from dashboard.core import get_global_dfm_manager
 
 

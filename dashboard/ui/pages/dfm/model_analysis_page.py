@@ -69,7 +69,7 @@ from datetime import datetime
 CONFIG_AVAILABLE = False
 
 # Import backend functions
-from dashboard.DFM.model_analysis.dfm_backend import load_dfm_results_from_uploads
+from dashboard.models.DFM.results.dfm_backend import load_dfm_results_from_uploads
 
 logger = logging.getLogger(__name__)
 

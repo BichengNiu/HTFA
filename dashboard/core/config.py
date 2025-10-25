@@ -34,10 +34,10 @@ class ResourcePathsConfig:
         'preview_main': 'dashboard.preview.main',  # 重构后的主模块
 
         # DFM模块
-        'dfm_ui': 'dashboard.DFM.model_analysis.dfm_ui',
-        'dfm_data_prep': 'dashboard.DFM.data_prep.data_prep_ui',
+        'dfm_ui': 'dashboard.models.DFM.results.dfm_ui',
+        'dfm_data_prep': 'dashboard.models.DFM.prep.data_prep_ui',
         'dfm_train_model': 'dashboard.DFM.train_model.train_model_ui',
-        'news_analysis': 'dashboard.DFM.news_analysis.news_analysis_front_end',
+        'news_analysis': 'dashboard.models.DFM.decomp.news_analysis_front_end',
 
         # 工具模块
         'stationarity_analysis': 'dashboard.ui.components.analysis.timeseries.stationarity',
