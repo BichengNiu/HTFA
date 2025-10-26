@@ -307,18 +307,18 @@ def _calculate_nowcast(
         
         lambda_target = reg_model.coef_
         r2_score = reg_model.score(train_factors_clean, train_target_clean)
-        
+
         print(f"    目标变量载荷估计完成，拟合优度 R²: {r2_score:.4f}")
-        
+
         # 计算nowcast: y_t = F_t @ λ_target
         factors_array = factors_sm.to_numpy()
-        
+
         # 维度一致性检查
         if factors_array.shape[1] != len(lambda_target):
             min_dim = min(factors_array.shape[1], len(lambda_target))
             if min_dim <= 0:
                 return False, "错误: 无法匹配因子和载荷维度", pd.Series(), predictor_lambda_df
-            
+
             print(f"    维度调整: 使用前{min_dim}个因子计算nowcast")
             nowcast_standardized = factors_array[:, :min_dim] @ lambda_target[:min_dim]
         else:

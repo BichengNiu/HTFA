@@ -445,37 +445,10 @@ def DFM_EMalgo(observation, n_factors, n_shocks, n_iter, train_end_date=None, er
     # [DFM-SPECIFIC] This is the core DFM parameter estimation via EM algorithm
     print(f"  [DFM-SPECIFIC] 开始EM算法迭代 ({n_iter} 次迭代)")
 
-    # DEBUG: 打印第一次Kalman滤波前的参数
-    print(f"\n[DEBUG] 老代码进入第1次Kalman滤波前的参数:")
-    print(f"  obs_centered.shape = {obs_centered.shape}, dtype = {obs_centered.dtypes.iloc[0]}")
-    print(f"  obs_centered[:3, :3] =\n{obs_centered.iloc[:3, :3].values}")
-    print(f"  Lambda_current.shape = {Lambda_current.shape}, dtype = {Lambda_current.dtype}")
-    print(f"  Lambda_current[:3, :] =\n{Lambda_current[:3, :]}")
-    print(f"  B_current.shape = {B_current.shape}, dtype = {B_current.dtype}")
-    print(f"  B_current =\n{B_current}")
-    print(f"  A_current.dtype = {A_current.dtype}, Q_current.dtype = {Q_current.dtype}, R_current.dtype = {R_current.dtype}")
-    print(f"  A_current =\n{A_current}")
-    print(f"  Q_current_diag = {np.diag(Q_current)}")
-    print(f"  R_current_diag[:5] = {np.diag(R_current)[:5]}")
-    print(f"  x0_current = {x0_current}, dtype = {x0_current.dtype}")
-    print(f"  P0_current_diag = {np.diag(P0_current)}, dtype = {P0_current.dtype}")
-
     for i in range(n_iter):
-        # DEBUG: 打印第一次迭代调用Kalman前的数据校验
-        if i == 0:
-            print(f"\n[DEBUG] 老代码调用Kalman滤波器前的数据校验:")
-            print(f"  obs_centered.sum().sum() = {obs_centered.sum().sum():.15f}")
-            print(f"  obs_centered.iloc[0, :] = {obs_centered.iloc[0, :].values}")
-            print(f"  obs_centered.iloc[1, :] = {obs_centered.iloc[1, :].values}")
-
         # E-Step: Run Kalman Filter and Smoother
         kf = KalmanFilter(Z=obs_centered, U=error_df, A=A_current, B=B_current, H=Lambda_current, state_names=state_names, x0=x0_current, P0=P0_current, Q=Q_current, R=R_current)
         fis = FIS(kf)
-
-        # DEBUG: 打印第一次迭代的E步结果
-        if i == 0:
-            print(f"\n[DEBUG] 老代码第1次迭代E步平滑因子前3行:")
-            print(fis.x_sm.iloc[:3].values)
 
         # M-Step: Update parameters using smoothed factors
         em = EMstep(fis, n_shocks) # Should return arrays
@@ -486,8 +459,7 @@ def DFM_EMalgo(observation, n_factors, n_shocks, n_iter, train_end_date=None, er
         Lambda_current = np.array(em.Lambda)
         Q_current = np.array(em.Q) # Make sure EMstep returns updated Q
         R_current = np.array(em.R) # Make sure EMstep returns updated R
-        
-        
+
         # Check diagonal of Q and R
         
         # [DFM-SPECIFIC] Update initial state for next Kalman filter iteration

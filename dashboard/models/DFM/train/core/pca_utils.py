@@ -63,15 +63,10 @@ def select_num_factors(
     logger.info("因子数选择")
     logger.info("=" * 60)
 
-    if progress_callback:
-        progress_callback("[SELECTION] 开始因子数选择")
-
     # 方法1: 固定因子数
     if method == 'fixed':
         k = fixed_k
         logger.info(f"使用固定因子数: k={k}")
-        if progress_callback:
-            progress_callback(f"[SELECTION] 使用固定因子数: k={k}")
         return k, None
 
     # 方法2/3: 基于PCA分析
@@ -100,19 +95,12 @@ def select_num_factors(
             f"PCA累积方差方法: 阈值={pca_threshold:.1%}, k={k}, "
             f"累积方差={cumsum_variance[k-1]:.1%}"
         )
-        if progress_callback:
-            progress_callback(
-                f"[SELECTION] PCA选择因子数: k={k} "
-                f"(累积方差={cumsum_variance[k-1]:.1%})"
-            )
 
     # 方法3: Elbow方法
     elif method == 'elbow':
         marginal_variance = np.diff(explained_variance)
         k = np.argmax(marginal_variance < elbow_threshold) + 1
         logger.info(f"Elbow方法: 阈值={elbow_threshold:.1%}, k={k}")
-        if progress_callback:
-            progress_callback(f"[SELECTION] Elbow选择因子数: k={k}")
 
     else:
         raise ValueError(f"未知的因子选择方法: {method}")

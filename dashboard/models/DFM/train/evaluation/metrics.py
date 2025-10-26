@@ -3,15 +3,13 @@
 指标计算模块
 
 计算模型评估指标
-参考: dashboard/DFM/train_model/analysis_utils.py
 """
 
 import pandas as pd
 import numpy as np
-from typing import Tuple, Optional, Dict
+from typing import Tuple
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from dashboard.models.DFM.train.utils.logger import get_logger
-from dashboard.models.DFM.train.core.models import MetricsResult
 
 
 logger = get_logger(__name__)
@@ -49,265 +47,6 @@ def calculate_rmse(y_true, y_pred) -> float:
     return float(rmse)
 
 
-def calculate_correlation(y_true, y_pred) -> float:
-    """
-    计算相关系数
-
-    Args:
-        y_true: 真实值（array-like或Series）
-        y_pred: 预测值（array-like或Series）
-
-    Returns:
-        float: 相关系数，无有效数据时返回-np.inf
-    """
-    # 转换为numpy数组
-    if isinstance(y_true, pd.Series):
-        y_true = y_true.values
-    if isinstance(y_pred, pd.Series):
-        y_pred = y_pred.values
-
-    # 移除NaN值
-    valid_mask = ~(np.isnan(y_true) | np.isnan(y_pred))
-    if valid_mask.sum() < 2:
-        logger.warning("[Correlation] 有效数据不足2个，返回-np.inf")
-        return -np.inf
-
-    y_true_clean = y_true[valid_mask]
-    y_pred_clean = y_pred[valid_mask]
-
-    try:
-        corr_matrix = np.corrcoef(y_true_clean, y_pred_clean)
-        corr = float(corr_matrix[0, 1])
-        return corr if not np.isnan(corr) else -np.inf
-    except Exception as e:
-        logger.warning(f"[Correlation] 计算失败: {e}")
-        return -np.inf
-
-
-def calculate_hit_rate(y_true: pd.Series, y_pred: pd.Series) -> float:
-    """计算方向命中率（与train_model/analysis_utils.py:650-673完全一致）
-
-    Args:
-        y_true: 真实值
-        y_pred: 预测值
-
-    Returns:
-        float: 命中率百分比 (0-100)，失败返回np.nan
-    """
-    logger.debug(f"[Hit Rate] 输入数据: y_true长度={len(y_true)}, y_pred长度={len(y_pred)}")
-
-    if len(y_true) < 2 or len(y_pred) < 2:
-        logger.warning(f"[Hit Rate] 数据不足: y_true={len(y_true)}, y_pred={len(y_pred)}, 需要至少2个样本")
-        return np.nan
-
-    # 1. 先diff再dropna（匹配老代码逻辑）
-    true_diff = y_true.diff().dropna()
-    pred_diff = y_pred.diff().dropna()
-
-    logger.debug(f"[Hit Rate] diff后数据: true_diff长度={len(true_diff)}, pred_diff长度={len(pred_diff)}")
-
-    # 2. 对齐索引（匹配老代码逻辑）
-    common_idx = true_diff.index.intersection(pred_diff.index)
-
-    logger.debug(f"[Hit Rate] 索引对齐: common_idx长度={len(common_idx)}")
-
-    if len(common_idx) == 0:
-        logger.warning("[Hit Rate] 对齐后无共同索引，无法计算命中率")
-        return np.nan
-
-    # 3. 计算方向
-    true_direction = np.sign(true_diff.loc[common_idx])
-    pred_direction = np.sign(pred_diff.loc[common_idx])
-
-    # 4. 统计命中
-    hits = (true_direction == pred_direction).sum()
-    total = len(common_idx)
-
-    # 返回百分比（0-100），与老代码train_model/analysis_utils.py:673一致
-    hit_rate = (hits / total) * 100.0 if total > 0 else np.nan
-    logger.debug(f"[Hit Rate] 计算完成: 命中={hits}/{total} = {hit_rate:.2f}%")
-
-    return hit_rate
-
-
-def align_target_with_lag(
-    nowcast: pd.Series,
-    target: pd.Series,
-    max_lag: int = 3
-) -> Tuple[pd.Series, pd.Series, int]:
-    """对齐nowcast和目标变量，考虑可能的滞后
-
-    Args:
-        nowcast: nowcast序列
-        target: 目标变量序列
-        max_lag: 最大滞后月数
-
-    Returns:
-        Tuple[pd.Series, pd.Series, int]: (对齐的nowcast, 对齐的目标, 最优滞后)
-    """
-    best_corr = -np.inf
-    best_lag = 0
-    best_nowcast = nowcast
-    best_target = target
-
-    for lag in range(-max_lag, max_lag + 1):
-        if lag == 0:
-            aligned_nowcast = nowcast
-            aligned_target = target
-        elif lag > 0:
-            aligned_nowcast = nowcast.shift(lag)
-            aligned_target = target
-        else:
-            aligned_nowcast = nowcast
-            aligned_target = target.shift(-lag)
-
-        common_idx = aligned_nowcast.index.intersection(aligned_target.index)
-        if len(common_idx) == 0:
-            continue
-
-        nc = aligned_nowcast.loc[common_idx]
-        tg = aligned_target.loc[common_idx]
-
-        valid_mask = ~(nc.isna() | tg.isna())
-        if valid_mask.sum() < 10:
-            continue
-
-        corr = nc[valid_mask].corr(tg[valid_mask])
-
-        if corr > best_corr:
-            best_corr = corr
-            best_lag = lag
-            best_nowcast = aligned_nowcast
-            best_target = aligned_target
-
-    logger.debug(f"最优滞后: {best_lag}个月, 相关系数: {best_corr:.4f}")
-
-    return best_nowcast, best_target, best_lag
-
-
-def calculate_metrics(
-    nowcast: pd.Series,
-    target: pd.Series,
-    train_end: str,
-    validation_start: Optional[str] = None,
-    validation_end: Optional[str] = None,
-    apply_lag_alignment: bool = True
-) -> MetricsResult:
-    """计算评估指标
-
-    Args:
-        nowcast: nowcast预测序列
-        target: 目标变量真实值
-        train_end: 训练期结束日期
-        validation_start: 验证期开始日期
-        validation_end: 验证期结束日期
-        apply_lag_alignment: 是否应用滞后对齐
-
-    Returns:
-        MetricsResult: 评估指标结果
-    """
-    logger.info(f"[Metrics] 接收日期参数 - train_end={train_end}, validation_start={validation_start}, validation_end={validation_end}")
-
-    # 转换日期字符串为Timestamp对象以确保正确索引
-    train_end_ts = pd.to_datetime(train_end) if isinstance(train_end, str) else train_end
-    validation_start_ts = pd.to_datetime(validation_start) if isinstance(validation_start, str) and validation_start else validation_start
-    validation_end_ts = pd.to_datetime(validation_end) if isinstance(validation_end, str) and validation_end else validation_end
-
-    if apply_lag_alignment:
-        nowcast_aligned, target_aligned, best_lag = align_target_with_lag(
-            nowcast, target
-        )
-    else:
-        nowcast_aligned = nowcast
-        target_aligned = target
-        best_lag = 0
-
-    common_idx = nowcast_aligned.index.intersection(target_aligned.index)
-
-    if len(common_idx) == 0:
-        logger.error("nowcast和target没有共同的时间索引，无法计算指标")
-        return MetricsResult(
-            np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, None
-        )
-
-    aligned_df = pd.DataFrame({
-        'Nowcast': nowcast_aligned.loc[common_idx],
-        'Target': target_aligned.loc[common_idx]
-    })
-
-    aligned_df = aligned_df.dropna()
-
-    if len(aligned_df) == 0:
-        logger.error("没有有效的对齐数据，无法计算指标")
-        return MetricsResult(
-            np.nan, np.nan, np.nan, np.nan, np.nan, np.nan, None
-        )
-
-    try:
-        train_data = aligned_df.loc[:train_end_ts]
-    except KeyError:
-        logger.warning(f"训练结束日期{train_end}不在对齐数据中，使用全部数据")
-        train_data = aligned_df
-
-    if validation_start_ts and validation_end_ts:
-        try:
-            oos_data = aligned_df.loc[validation_start_ts:validation_end_ts]
-        except KeyError:
-            logger.warning("验证期日期不在对齐数据中，使用训练期之后的数据")
-            oos_data = aligned_df.loc[train_end_ts:]
-    else:
-        oos_data = aligned_df.loc[train_end_ts:]
-
-    # 记录数据切分结果
-    logger.info(f"[Metrics] 数据切分完成 - 训练期样本数: {len(train_data)} (截止 {train_end}), "
-                f"验证期样本数: {len(oos_data)} ({validation_start} 至 {validation_end})")
-
-    if len(train_data) < 2:
-        logger.warning(f"训练期数据不足({len(train_data)}条)，无法计算样本内指标")
-        is_rmse = is_mae = np.nan
-        is_hit_rate = np.nan
-    else:
-        is_rmse = calculate_rmse(
-            train_data['Target'], train_data['Nowcast']
-        )
-        is_mae = mean_absolute_error(
-            train_data['Target'], train_data['Nowcast']
-        )
-        is_hit_rate = calculate_hit_rate(
-            train_data['Target'], train_data['Nowcast']
-        )
-
-    if len(oos_data) < 2:
-        logger.warning(f"样本外数据不足({len(oos_data)}条)，无法计算样本外指标")
-        oos_rmse = oos_mae = np.nan
-        oos_hit_rate = np.nan
-    else:
-        oos_rmse = calculate_rmse(
-            oos_data['Target'], oos_data['Nowcast']
-        )
-        oos_mae = mean_absolute_error(
-            oos_data['Target'], oos_data['Nowcast']
-        )
-        oos_hit_rate = calculate_hit_rate(
-            oos_data['Target'], oos_data['Nowcast']
-        )
-
-    logger.info(
-        f"指标计算完成 - IS: RMSE={is_rmse:.4f}, MAE={is_mae:.4f}, HR={is_hit_rate:.2f}% | "
-        f"OOS: RMSE={oos_rmse:.4f}, MAE={oos_mae:.4f}, HR={oos_hit_rate:.2f}%"
-    )
-
-    return MetricsResult(
-        is_rmse=is_rmse,
-        is_mae=is_mae,
-        is_hit_rate=is_hit_rate,
-        oos_rmse=oos_rmse,
-        oos_mae=oos_mae,
-        oos_hit_rate=oos_hit_rate,
-        aligned_data=aligned_df
-    )
-
-
 def calculate_combined_score(
     is_rmse: float,
     oos_rmse: float,
@@ -317,7 +56,9 @@ def calculate_combined_score(
     """
     计算组合得分（用于变量选择）
 
-    评分标准：先优化Hit Rate，再优化RMSE
+    评分标准：
+    - 如果有Hit Rate数据，先优化Hit Rate，再优化RMSE
+    - 如果没有Hit Rate数据（都是NaN），只优化RMSE
 
     Args:
         is_rmse: 样本内RMSE
@@ -327,7 +68,7 @@ def calculate_combined_score(
 
     Returns:
         Tuple[float, float]: (combined_hit_rate, -combined_rmse)
-            - 第一个元素：平均命中率（越大越好）
+            - 第一个元素：平均命中率（越大越好），无Hit Rate时为0
             - 第二个元素：负平均RMSE（越大越好）
     """
     # 计算平均RMSE
@@ -336,6 +77,257 @@ def calculate_combined_score(
 
     # 计算平均命中率
     finite_hrs = [hr for hr in [is_hit_rate, oos_hit_rate] if np.isfinite(hr)]
-    combined_hr = np.mean(finite_hrs) if finite_hrs else np.nan
+    if finite_hrs:
+        combined_hr = np.mean(finite_hrs)
+    else:
+        # 如果没有Hit Rate数据，设置为0（这样RMSE成为唯一比较标准）
+        combined_hr = 0.0
 
     return (combined_hr, -combined_rmse)
+
+
+# ==================== 下月配对评估函数（新定义）====================
+
+def align_next_month_weekly_data(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> pd.DataFrame:
+    """对齐m月所有周的nowcast与m+1月target（用于变量筛选RMSE计算）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        pd.DataFrame: 对齐后数据，列['month', 'week_date', 'nowcast', 'next_month_target']
+    """
+    # logger.debug("[align_next_month_weekly] 开始对齐：m月所有周nowcast与m+1月target")
+
+    # 确保索引是DatetimeIndex
+    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
+        nowcast_series.index = pd.to_datetime(nowcast_series.index)
+    if not isinstance(target_series.index, pd.DatetimeIndex):
+        target_series.index = pd.to_datetime(target_series.index)
+
+    # 参考老代码，使用DataFrame方式处理（避免Grouper错误）
+    # 1. 转换为DataFrame并添加月份列
+    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
+    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
+
+    target_df = target_series.to_frame('Target').copy()
+    target_df['TargetMonth'] = target_df.index.to_period('M')
+    # 确保每月只有一个target值
+    target_df = target_df.groupby('TargetMonth').last()
+
+    weekly_data = []
+
+    # 2. 按月遍历nowcast数据
+    for period, group in nowcast_df.groupby('NowcastMonth'):
+        # 获取下个月的period
+        next_period = period + 1
+
+        # 检查下个月是否有target数据
+        if next_period in target_df.index:
+            next_month_target = target_df.loc[next_period, 'Target']
+
+            # 该月所有周的nowcast都与下月target配对
+            for date, row in group.iterrows():
+                weekly_data.append({
+                    'month': period,
+                    'week_date': date,
+                    'nowcast': row['Nowcast'],
+                    'next_month_target': next_month_target
+                })
+
+    if not weekly_data:
+        logger.warning("[align_next_month_weekly] 未找到有效的周度-下月配对数据")
+        return pd.DataFrame(columns=['month', 'week_date', 'nowcast', 'next_month_target'])
+
+    df = pd.DataFrame(weekly_data)
+    # logger.info(f"[align_next_month_weekly] 配对完成: {len(df)}个周度数据点")
+
+    return df
+
+
+def align_next_month_last_friday(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> pd.DataFrame:
+    """对齐m月最后周五nowcast、m月target与m+1月target（用于Hit Rate和MAE计算）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        pd.DataFrame: 对齐后数据，列['month', 'last_friday_date', 'nowcast', 'current_target', 'next_target']
+    """
+    # logger.debug("[align_next_month_last_friday] 开始对齐：m月最后周五nowcast、m月target与m+1月target")
+
+    # 确保索引是DatetimeIndex
+    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
+        nowcast_series.index = pd.to_datetime(nowcast_series.index)
+    if not isinstance(target_series.index, pd.DatetimeIndex):
+        target_series.index = pd.to_datetime(target_series.index)
+
+    # 参考老代码，使用DataFrame方式处理（避免Grouper错误）
+    # 1. 转换为DataFrame并添加月份列
+    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
+    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
+
+    target_df = target_series.to_frame('Target').copy()
+    target_df['TargetMonth'] = target_df.index.to_period('M')
+    # 确保每月只有一个target值
+    target_df = target_df.groupby('TargetMonth').last()
+
+    monthly_friday_data = []
+
+    # 2. 按月遍历nowcast数据
+    for period, group in nowcast_df.groupby('NowcastMonth'):
+        # 找到该月的所有周五 (weekday=4)
+        fridays = group[group.index.weekday == 4]
+        if fridays.empty:
+            continue
+
+        # 取最后一个周五
+        last_friday_date = fridays.index.max()
+        last_friday_nowcast = fridays.loc[last_friday_date, 'Nowcast']
+
+        # 获取当月和下月的target
+        next_period = period + 1
+
+        if period in target_df.index and next_period in target_df.index:
+            current_target = target_df.loc[period, 'Target']
+            next_target = target_df.loc[next_period, 'Target']
+
+            monthly_friday_data.append({
+                'month': period,
+                'last_friday_date': last_friday_date,
+                'nowcast': last_friday_nowcast,
+                'current_target': current_target,
+                'next_target': next_target
+            })
+
+    if not monthly_friday_data:
+        logger.warning("[align_next_month_last_friday] 未找到有效的月度最后周五配对数据")
+        return pd.DataFrame(columns=['month', 'last_friday_date', 'nowcast', 'current_target', 'next_target'])
+
+    df = pd.DataFrame(monthly_friday_data)
+    df = df.set_index('last_friday_date').sort_index()
+    # logger.info(f"[align_next_month_last_friday] 配对完成: {len(df)}个月度数据点")
+
+    return df
+
+
+def calculate_next_month_rmse(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> float:
+    """计算m月所有周nowcast与m+1月target配对的RMSE（用于变量筛选）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        float: RMSE值，失败返回np.inf
+    """
+    try:
+        aligned_df = align_next_month_weekly_data(nowcast_series, target_series)
+
+        if aligned_df.empty or len(aligned_df) < 2:
+            logger.warning(f"[next_month_rmse] 配对数据不足: {len(aligned_df)}个数据点")
+            return np.inf
+
+        # 计算RMSE
+        squared_errors = (aligned_df['nowcast'] - aligned_df['next_month_target']) ** 2
+        rmse = np.sqrt(squared_errors.mean())
+
+        # logger.debug(f"[next_month_rmse] RMSE={rmse:.4f}, 数据点数={len(aligned_df)}")
+        return float(rmse)
+
+    except Exception as e:
+        logger.error(f"[next_month_rmse] 计算失败: {e}")
+        return np.inf
+
+
+def calculate_next_month_mae(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> float:
+    """计算m月最后周五nowcast与m+1月target配对的MAE
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        float: MAE值，失败返回np.inf
+    """
+    try:
+        aligned_df = align_next_month_last_friday(nowcast_series, target_series)
+
+        if aligned_df.empty or len(aligned_df) < 2:
+            logger.warning(f"[next_month_mae] 配对数据不足: {len(aligned_df)}个数据点")
+            return np.inf
+
+        # 计算MAE
+        abs_errors = np.abs(aligned_df['nowcast'] - aligned_df['next_target'])
+        mae = abs_errors.mean()
+
+        # logger.debug(f"[next_month_mae] MAE={mae:.4f}, 数据点数={len(aligned_df)}")
+        return float(mae)
+
+    except Exception as e:
+        logger.error(f"[next_month_mae] 计算失败: {e}")
+        return np.inf
+
+
+def calculate_next_month_hit_rate(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> float:
+    """计算新定义的Hit Rate
+
+    对每个月m：
+    - 预测变化：target_{m+1} - nowcast_m（m月最后周五）
+    - 实际变化：target_{m+1} - target_m
+    - 命中条件：两个变化符号相同
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        float: Hit Rate百分比（0-100），失败返回np.nan
+    """
+    try:
+        aligned_df = align_next_month_last_friday(nowcast_series, target_series)
+
+        if aligned_df.empty or len(aligned_df) < 2:
+            logger.warning(f"[next_month_hit_rate] 配对数据不足: {len(aligned_df)}个数据点")
+            return np.nan
+
+        # 计算预测变化：下月target - 当月最后周五nowcast
+        aligned_df['pred_change'] = aligned_df['next_target'] - aligned_df['nowcast']
+
+        # 计算实际变化：下月target - 当月target
+        aligned_df['actual_change'] = aligned_df['next_target'] - aligned_df['current_target']
+
+        # 判断符号是否相同
+        aligned_df['hit'] = (
+            np.sign(aligned_df['pred_change']) ==
+            np.sign(aligned_df['actual_change'])
+        )
+
+        # 计算命中率
+        hits = aligned_df['hit'].sum()
+        total = len(aligned_df)
+        hit_rate = (hits / total) * 100.0
+
+        # logger.debug(f"[next_month_hit_rate] Hit Rate={hit_rate:.2f}%, 命中={hits}/{total}")
+        return float(hit_rate)
+
+    except Exception as e:
+        logger.error(f"[next_month_hit_rate] 计算失败: {e}")
+        return np.nan

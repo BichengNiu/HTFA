@@ -54,7 +54,7 @@ def apply_final_stationarity_check(
     config_stationarity_rules = {}
 
     import importlib
-    from dashboard.DFM import config
+    from dashboard.models.DFM import config
     importlib.reload(config)
 
     if hasattr(config, 'PREDEFINED_STATIONARITY_TRANSFORMS') and isinstance(config.PREDEFINED_STATIONARITY_TRANSFORMS, dict):

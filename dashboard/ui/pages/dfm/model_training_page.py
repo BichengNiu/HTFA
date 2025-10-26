@@ -641,7 +641,8 @@ def render_dfm_train_model_tab(st_instance):
             st_instance.warning("[WARNING] 数据准备模块导入警告，但映射数据传递已修复，功能应该正常")
     else:
         # 如果没有错误消息，显示成功信息
-        st_instance.success("[SUCCESS] 所有必需模块已成功加载(使用train_ref)，模型训练功能可用")
+        # st_instance.success("[SUCCESS] 所有必需模块已成功加载(使用train_ref)，模型训练功能可用")
+        pass  # 已禁用模块加载成功提示
 
     current_training_status = get_dfm_state('dfm_training_status')
     current_model_results = get_dfm_state('dfm_model_results_paths')
@@ -849,7 +850,8 @@ def render_dfm_train_model_tab(st_instance):
 
         # 修复：显示实际可用的指标数量
         actual_indicator_count = sum(len(v) for v in var_to_indicators_map_by_industry.values())
-        st_instance.success(f"[SUCCESS] 已加载映射数据：{len(unique_industries)} 个行业，{actual_indicator_count} 个可用指标")
+        # st_instance.success(f"[SUCCESS] 已加载映射数据：{len(unique_industries)} 个行业，{actual_indicator_count} 个可用指标")
+        pass  # 已禁用映射数据加载成功提示
     else:
         # 不再回退到Excel文件，使用空映射继续（数据准备模块应该正确保存映射）
 
@@ -860,8 +862,11 @@ def render_dfm_train_model_tab(st_instance):
     # 主布局：现在是上下结构，不再使用列
     # REMOVED: var_selection_col, param_col = st_instance.columns([1, 1.5])
 
+    # 添加变量选择大标题
+    st_instance.subheader("变量选择")
 
     # 1. 选择目标变量（兼容新旧状态管理）
+    st_instance.markdown("**选择目标变量**")
     if available_target_vars:
         # 初始化目标变量状态
         if get_dfm_state('dfm_target_variable') is None:
@@ -875,7 +880,7 @@ def render_dfm_train_model_tab(st_instance):
             set_dfm_state('dfm_target_variable', current_target_var)
 
         selected_target_var = st_instance.selectbox(
-            "**选择目标变量**",
+            "目标变量",
             options=available_target_vars,
             index=available_target_vars.index(current_target_var),
             key="ss_dfm_target_variable",
@@ -946,28 +951,24 @@ def render_dfm_train_model_tab(st_instance):
             if excluded_count > 0:
                 st_instance.text(f"  已自动排除目标变量 '{current_target_var}' (共排除 {excluded_count} 个)")
 
-            # 默认选中该行业下的所有指标
+            # 默认不选中任何指标
             default_selection_for_industry = current_selection.get(
                 industry_name,
-                indicators_for_this_industry # 默认全选
+                []  # 默认为空，不选择任何指标
             )
             # 确保默认值是实际可选列表的子集
             valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
-            if not valid_default and indicators_for_this_industry: # 如果之前存的默认值无效了，且当前有可选指标，则全选
-                valid_default = indicators_for_this_industry
 
-            # 移除回调函数，改为直接逻辑处理
-
-            # 取消全选复选框，使用key确保状态追踪
-            deselect_all_checked = st_instance.checkbox(
-                f"取消全选 {industry_name} 指标",
-                key=f"dfm_deselect_all_indicators_{industry_name}",
-                help=f"勾选此框将取消所有已为 '{industry_name}' 选中的指标。"
+            # 全选复选框，使用key确保状态追踪
+            select_all_checked = st_instance.checkbox(
+                f"全选 {industry_name} 指标",
+                key=f"dfm_select_all_indicators_{industry_name}",
+                help=f"勾选此框将选中所有 '{industry_name}' 的指标。"
             )
 
-            # 如果取消全选被勾选，清空该行业的选择
-            if deselect_all_checked:
-                valid_default = []
+            # 如果全选被勾选，选中该行业的所有指标
+            if select_all_checked:
+                valid_default = indicators_for_this_industry
 
             selected_in_widget = st_instance.multiselect(
                 f"为 '{industry_name}' 选择指标",
@@ -1030,9 +1031,9 @@ def render_dfm_train_model_tab(st_instance):
             data_prep_end = get_dfm_state('dfm_param_data_end_date')
 
             static_defaults = {
-                'training_start': data_prep_start if data_prep_start else datetime(today.year - 5, 1, 1).date(),
-                'validation_start': datetime(2024, 7, 1).date(),  # 2024年7月1日
-                'validation_end': datetime(2024, 12, 31).date()  # [HOT] 修复：验证期结束于2024年12月31日
+                'training_start': datetime(2020, 1, 1).date(),  # 训练期开始：2020年1月1日
+                'validation_start': datetime(2025, 1, 1).date(),  # 验证期开始：2025年1月1日
+                'validation_end': datetime(2025, 12, 31).date()  # 验证期结束：2025年12月31日
             }
 
             try:
@@ -1052,42 +1053,12 @@ def render_dfm_train_model_tab(st_instance):
                         print(f"[WARNING] 警告: 数据包含未来日期 {data_last_date}，将使用今天作为最后日期")
                         data_last_date = today
 
-                    if data_prep_start:
-                        training_start_date = data_prep_start
-                    elif data_first_date:
-                        # 确保不早于合理的历史范围（2020年）
-                        reasonable_start = datetime(2020, 1, 1).date()
-                        training_start_date = max(data_first_date, reasonable_start)
-                        print(f"[WARNING] [日期回退] 数据准备页面未设置，使用数据文件日期（限制在2020年后）: {training_start_date}")
-                        print(f"   原始数据开始日期: {data_first_date}")
-                    else:
-                        training_start_date = datetime(2020, 1, 1).date()
-                        print(f"[WARNING] [日期默认] 使用硬编码默认值: {training_start_date}")
+                    # 训练期开始日期固定为2020年1月1日
+                    training_start_date = datetime(2020, 1, 1).date()
 
-                    # 计算验证期开始日期：使用数据时间范围的80%作为训练期
-                    if data_prep_start and data_prep_end:
-                        # 如果数据准备页面设置了边界，基于边界计算
-                        total_days = (data_prep_end - data_prep_start).days
-                        training_days = int(total_days * 0.8)
-                        validation_start_date = data_prep_start + timedelta(days=training_days)
-                    else:
-                        # 否则基于实际数据计算
-                        total_days = (data_last_date - data_first_date).days
-                        training_days = int(total_days * 0.8)
-                        validation_start_date = data_first_date + timedelta(days=training_days)
-
-                    # 确保验证期开始日期不是未来日期
-                    if validation_start_date > today:
-                        validation_start_date = today - timedelta(days=30)  # 1个月前
-
-                    # 验证期用于测试模型性能，必须使用历史数据
-                    validation_end_date = datetime(2024, 12, 31).date()  # [HOT] 强制使用2024年底作为验证期结束
-
-                    # 验证日期逻辑的合理性
-                    if validation_start_date >= validation_end_date:
-                        # 如果验证期开始晚于或等于结束，重新计算
-                        validation_end_date = datetime(2024, 12, 31).date()  # [HOT] 强制使用2024年底
-                        validation_start_date = validation_end_date - timedelta(days=90)  # 验证期3个月
+                    # 验证期开始和结束日期固定
+                    validation_start_date = datetime(2025, 1, 1).date()  # 验证期开始：2025年1月1日
+                    validation_end_date = datetime(2025, 12, 31).date()  # 验证期结束：2025年12月31日
 
                     return {
                         'training_start': training_start_date,       # [HOT] 训练开始日：优先使用数据准备页面设置
@@ -1117,21 +1088,17 @@ def render_dfm_train_model_tab(st_instance):
                 actual_data_start = data_df.index.min().date()
                 actual_data_end = data_df.index.max().date()
 
-                # 强制更新统一状态管理器中的日期默认值（检查是否为静态默认值或与数据不匹配）
+                # 初始化默认日期（只在状态为空时设置）
                 current_training_start = get_dfm_state('dfm_training_start_date')
-                if (current_training_start == datetime(2010, 1, 1).date() or
-                    current_training_start is None or
-                    current_training_start != actual_data_start):
+                if current_training_start is None:
                     set_dfm_state('dfm_training_start_date', date_defaults['training_start'])
 
                 current_validation_start = get_dfm_state('dfm_validation_start_date')
-                if (current_validation_start == datetime(2020, 12, 31).date() or
-                    current_validation_start is None):
+                if current_validation_start is None:
                     set_dfm_state('dfm_validation_start_date', date_defaults['validation_start'])
 
                 current_validation_end = get_dfm_state('dfm_validation_end_date')
-                if (current_validation_end == datetime(2022, 12, 31).date() or
-                    current_validation_end is None):
+                if current_validation_end is None:
                     set_dfm_state('dfm_validation_end_date', date_defaults['validation_end'])
 
                 # 简化数据范围信息
@@ -1254,11 +1221,10 @@ def render_dfm_train_model_tab(st_instance):
             default_strategy = TrainDefaults.FACTOR_SELECTION_STRATEGY
         else:
             factor_strategy_options = {
-                'information_criteria': "信息准则",
                 'fixed_number': "固定因子数",
                 'cumulative_variance': "累积方差贡献"
             }
-            default_strategy = 'information_criteria'
+            default_strategy = 'fixed_number'
 
         current_strategy = get_dfm_state('dfm_factor_selection_strategy', default_strategy)
 
@@ -1275,49 +1241,7 @@ def render_dfm_train_model_tab(st_instance):
         set_dfm_state('dfm_factor_selection_strategy', strategy_value)
 
         # 根据策略显示相应参数
-        if strategy_value == 'information_criteria':
-            # 信息准则方法
-            if CONFIG_AVAILABLE:
-                ic_options = UIDefaults.INFORMATION_CRITERION_OPTIONS
-                default_ic = TrainDefaults.INFORMATION_CRITERION
-            else:
-                ic_options = {
-                    'bic': "BIC",
-                    'aic': "AIC",
-                    'hqc': "HQC"
-                }
-                default_ic = 'bic'
-
-            current_ic = get_dfm_state('dfm_information_criterion', default_ic)
-
-            ic_value = st_instance.selectbox(
-                "信息准则方法",
-                options=list(ic_options.keys()),
-                format_func=lambda x: ic_options[x],
-                index=list(ic_options.keys()).index(current_ic),
-                key='dfm_information_criterion_input',
-                help="选择信息准则类型"
-            )
-            set_dfm_state('dfm_information_criterion', ic_value)
-
-            # IC最大因子数
-            if CONFIG_AVAILABLE:
-                default_ic_max = UIDefaults.IC_MAX_FACTORS_DEFAULT
-            else:
-                default_ic_max = 10
-
-            ic_max_value = st_instance.number_input(
-                "IC最大因子数",
-                min_value=1,
-                max_value=20,
-                value=get_dfm_state('dfm_ic_max_factors', default_ic_max),
-                step=1,
-                key='dfm_ic_max_factors_input',
-                help="信息准则搜索的最大因子数"
-            )
-            set_dfm_state('dfm_ic_max_factors', ic_max_value)
-
-        elif strategy_value == 'fixed_number':
+        if strategy_value == 'fixed_number':
             # 固定因子数
             if CONFIG_AVAILABLE:
                 default_fixed_factors = TrainDefaults.FIXED_NUMBER_OF_FACTORS
@@ -1442,13 +1366,10 @@ def render_dfm_train_model_tab(st_instance):
                     mapped_var_selection_method = var_selection_method_map.get(var_selection_method, 'none')
 
                     # 获取因子选择策略
-                    factor_strategy = get_dfm_state('dfm_factor_selection_strategy', 'information_criteria')
+                    factor_strategy = get_dfm_state('dfm_factor_selection_strategy', 'fixed_number')
 
                     # 映射factor_selection_strategy到train_ref的factor_selection_method
-                    if factor_strategy == 'information_criteria':
-                        factor_selection_method = 'fixed'  # IC方法最终也是确定固定因子数
-                        k_factors = get_dfm_state('dfm_ic_max_factors', 10)  # 先用最大值，后续可优化
-                    elif factor_strategy == 'fixed_number':
+                    if factor_strategy == 'fixed_number':
                         factor_selection_method = 'fixed'
                         k_factors = get_dfm_state('dfm_fixed_number_of_factors', 3)
                         st.info(f"使用固定因子数策略，因子数：{k_factors}")
@@ -1474,7 +1395,6 @@ def render_dfm_train_model_tab(st_instance):
                         selected_indicators=current_selected_indicators,
 
                         # 训练/验证期配置
-                        train_start=training_start_value.strftime('%Y-%m-%d') if training_start_value else None,
                         train_end=train_end_date.strftime('%Y-%m-%d') if train_end_date else None,
                         validation_start=validation_start_value.strftime('%Y-%m-%d') if validation_start_value else None,
                         validation_end=validation_end_value.strftime('%Y-%m-%d') if validation_end_value else None,
@@ -1492,11 +1412,7 @@ def render_dfm_train_model_tab(st_instance):
 
                         # 因子数选择配置
                         factor_selection_method=factor_selection_method,
-                        pca_threshold=get_dfm_state('dfm_cumulative_variance_threshold', 0.9) if factor_strategy == 'cumulative_variance' else 0.9,
-
-                        # 优化配置
-                        use_cache=False,
-                        use_precompute=False
+                        pca_threshold=get_dfm_state('dfm_cumulative_variance_threshold', 0.9) if factor_strategy == 'cumulative_variance' else 0.9
                     )
 
                     print(f"[TRAIN_REF] 训练配置: {training_config}")
@@ -1656,69 +1572,28 @@ def render_dfm_train_model_tab(st_instance):
             print(f"[HOT] [UI状态检查] 检测到训练完成状态")
             debug_training_state("训练完成，显示最终结果", show_in_ui=False)
 
-            # 显示训练结果摘要（train_ref版本）
-            training_result_summary = get_dfm_state('dfm_training_result')
-            if training_result_summary:
-                st_instance.success("[SUCCESS] 训练已完成")
-                st_instance.markdown("**训练结果摘要:**")
-
-                # 显示关键指标
-                col1, col2 = st_instance.columns(2)
-                with col1:
-                    st_instance.metric("选中变量数", len(training_result_summary.get('selected_variables', [])))
-                    st_instance.metric("因子数", training_result_summary.get('k_factors', 'N/A'))
-                with col2:
-                    metrics = training_result_summary.get('metrics', {})
-                    if metrics.get('oos_rmse'):
-                        st_instance.metric("样本外RMSE", f"{metrics['oos_rmse']:.4f}")
-                    if metrics.get('oos_hit_rate'):
-                        # 检查Hit Rate是否有效
-                        import numpy as np
-                        hit_rate_value = metrics['oos_hit_rate']
-                        if np.isnan(hit_rate_value) or np.isinf(hit_rate_value):
-                            hit_rate_display = "N/A"
-                        else:
-                            hit_rate_display = f"{hit_rate_value:.2f}%"
-                        st_instance.metric("样本外Hit Rate", hit_rate_display)
-
-                st_instance.metric("训练耗时", f"{training_result_summary.get('training_time', 0):.2f}秒")
-
-                # 显示选中的变量列表
-                with st_instance.expander("查看选中的变量"):
-                    selected_vars = training_result_summary.get('selected_variables', [])
-                    if selected_vars:
-                        for i, var in enumerate(selected_vars, 1):
-                            st_instance.text(f"{i}. {var}")
-                    else:
-                        st_instance.info("无变量选择")
-
             # 显示训练结果文件（如果有）
             if training_results:
                 print(f"[HOT] [UI状态检查] 开始处理训练结果，类型: {type(training_results)}")
                 print(f"[HOT] [UI状态检查] 训练结果内容: {training_results}")
 
                 if isinstance(training_results, dict) and training_results:
-                    st_instance.markdown("**生成的文件:**")
                     print(f"[HOT] [UI状态检查] 处理字典格式结果，包含 {len(training_results)} 个条目")
 
-                    # 显示文件信息
-                    file_count = 0
+                    # 只处理joblib和pkl(metadata)文件
+                    target_files = ['final_model_joblib', 'metadata']
                     available_files = []
-                    for file_key, file_path in training_results.items():
-                        print(f"[HOT] [UI状态检查] 检查文件: {file_key} -> {file_path}")
+
+                    for file_key in target_files:
+                        file_path = training_results.get(file_key)
                         if file_path and os.path.exists(file_path):
-                            file_count += 1
                             file_name = os.path.basename(file_path)
-                            file_size = _get_file_size(file_path)
-                            st_instance.write(f"{file_count}. {file_name} ({file_size})")
                             available_files.append((file_key, file_path, file_name))
                             print(f"[HOT] [UI状态检查] 文件存在: {file_name}")
                         else:
-                            print(f"[HOT] [UI状态检查] 文件不存在或路径为空: {file_path}")
+                            print(f"[HOT] [UI状态检查] 文件不存在或路径为空: {file_key}")
 
                     if available_files:
-                        st_instance.info(f"[DATA] 共生成 {len(available_files)} 个文件")
-
                         # 为每个文件创建下载按钮
                         for file_key, file_path, file_name in available_files:
                             try:
@@ -1726,28 +1601,21 @@ def render_dfm_train_model_tab(st_instance):
                                 with open(file_path, 'rb') as f:
                                     file_data = f.read()
 
-                                # 确定MIME类型和显示名称
+                                # 确定显示名称
                                 if file_key == 'final_model_joblib':
-                                    display_name = "[PACKAGE] 模型文件"
-                                    mime_type = "application/octet-stream"
+                                    display_name = "模型文件 (joblib)"
                                 elif file_key == 'metadata':
-                                    display_name = "元数据文件"
-                                    mime_type = "application/octet-stream"
-                                elif file_key == 'excel_report':
-                                    display_name = "[DATA] Excel报告"
-                                    mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                    display_name = "元数据文件 (pkl)"
                                 else:
-                                    display_name = f"{file_key}"
-                                    mime_type = "application/octet-stream"
+                                    display_name = file_name
 
                                 # 创建下载按钮
                                 st_instance.download_button(
                                     label=display_name,
                                     data=file_data,
                                     file_name=file_name,
-                                    mime=mime_type,
-                                    key=f"dfm_download_{file_key}",
-                                    use_container_width=True
+                                    mime="application/octet-stream",
+                                    key=f"dfm_download_{file_key}"
                                 )
 
                             except Exception as e:

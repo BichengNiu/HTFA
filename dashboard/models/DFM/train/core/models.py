@@ -18,24 +18,10 @@ class EvaluationMetrics:
     """评估指标"""
     is_rmse: float = np.inf
     oos_rmse: float = np.inf
+    is_mae: float = np.inf
+    oos_mae: float = np.inf
     is_hit_rate: float = -np.inf
     oos_hit_rate: float = -np.inf
-    is_correlation: float = -np.inf
-    oos_correlation: float = -np.inf
-
-    def to_tuple(self) -> Tuple:
-        """转换为9元组格式(兼容train_model)"""
-        return (
-            self.is_rmse,
-            self.oos_rmse,
-            None,  # placeholder
-            None,  # placeholder
-            self.is_hit_rate,
-            self.oos_hit_rate,
-            False,  # is_svd_error
-            None,  # placeholder
-            None   # placeholder
-        )
 
 
 @dataclass

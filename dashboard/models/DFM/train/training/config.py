@@ -39,9 +39,8 @@ class TrainingConfig:
     min_variables_after_selection: Optional[int] = None
 
     # 因子数选择配置
-    factor_selection_method: str = 'fixed'  # fixed, cumulative, elbow
+    factor_selection_method: str = 'fixed'  # fixed, cumulative
     pca_threshold: Optional[float] = 0.9  # cumulative方法的阈值
-    elbow_threshold: Optional[float] = 0.1  # elbow方法的阈值
 
     # 输出配置
     output_dir: Optional[str] = None
@@ -72,7 +71,7 @@ class TrainingConfig:
             raise ValueError(f"max_lags必须>=1,当前值: {self.max_lags}")
 
         # 验证因子选择方法
-        valid_methods = ['fixed', 'cumulative', 'elbow']
+        valid_methods = ['fixed', 'cumulative']
         if self.factor_selection_method not in valid_methods:
             raise ValueError(
                 f"factor_selection_method必须是{valid_methods}之一,"

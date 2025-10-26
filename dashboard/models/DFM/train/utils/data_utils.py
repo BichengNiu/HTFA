@@ -9,9 +9,11 @@ import pandas as pd
 from pathlib import Path
 from typing import Tuple, List, Optional, Callable
 from dashboard.models.DFM.train.utils.logger import get_logger
-from dashboard.models.DFM.train.constants import MIN_REQUIRED_DATA_POINTS
 
 logger = get_logger(__name__)
+
+# 常量定义
+MIN_REQUIRED_DATA_POINTS = 10  # 变量需要的最小有效数据点数
 
 
 def load_and_validate_data(
@@ -49,9 +51,6 @@ def load_and_validate_data(
         ... )
         >>> print(f"数据形状: {data.shape}, 预测变量数: {len(predictors)}")
     """
-    if progress_callback:
-        progress_callback("[DATA] 加载数据...")
-
     logger.info(f"加载数据: {data_path}")
 
     # 加载数据 - 支持Excel和CSV格式
@@ -112,10 +111,6 @@ def load_and_validate_data(
             f"数据清理: 移除了{len(removed_vars)}个无效变量, "
             f"剩余{len(predictor_vars)}个有效变量"
         )
-        if progress_callback:
-            progress_callback(
-                f"[DATA] 数据清理: 移除{len(removed_vars)}个无效变量"
-            )
 
     # 验证是否还有足够的预测变量
     if len(predictor_vars) < 2:
@@ -128,12 +123,6 @@ def load_and_validate_data(
         f"数据加载完成: {data.shape}, "
         f"有效预测变量数: {len(predictor_vars)}"
     )
-
-    if progress_callback:
-        progress_callback(
-            f"[DATA] 数据加载完成: {data.shape[0]}行, "
-            f"{len(predictor_vars)}个有效预测变量"
-        )
 
     return data, target_data, predictor_vars
 

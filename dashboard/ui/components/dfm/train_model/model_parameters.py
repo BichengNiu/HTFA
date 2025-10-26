@@ -13,7 +13,7 @@ from datetime import datetime
 
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
 from dashboard.core import get_global_dfm_manager
-from dashboard.DFM.config import TrainDefaults, UIDefaults
+from dashboard.models.DFM.config import TrainDefaults, UIDefaults
 
 
 logger = logging.getLogger(__name__)
@@ -50,9 +50,7 @@ class ModelParametersComponent(DFMComponent):
             'dfm_factor_ar_order',  # 修正：与model_training_page.py一致
             'dfm_factor_selection_strategy',
             'dfm_fixed_number_of_factors',
-            'dfm_ic_max_factors',
-            'dfm_cumulative_variance_threshold',  # 修正：与model_training_page.py一致
-            'dfm_information_criterion'  # 修正：与model_training_page.py一致
+            'dfm_cumulative_variance_threshold'  # 修正：与model_training_page.py一致
         ]
     
     def validate_input(self, data: Dict) -> bool:
@@ -179,11 +177,10 @@ class ModelParametersComponent(DFMComponent):
         """渲染因子选择策略 - 与老代码第1359-1463行完全一致"""
         # 与老代码完全一致的选项
         factor_selection_strategy_options = {
-            'information_criteria': "信息准则 (Information Criteria)",
             'fixed_number': "固定因子数量 (Fixed Number of Factors)",
             'cumulative_variance': "累积共同方差 (Cumulative Common Variance)"
         }
-        default_strategy = 'information_criteria'
+        default_strategy = 'fixed_number'
 
         factor_strategy_value = st_obj.selectbox(
             "因子数量选择策略",
@@ -195,7 +192,6 @@ class ModelParametersComponent(DFMComponent):
             key='new_dfm_factor_selection_strategy_input',
             help=(
                 "选择确定模型中因子数量的方法：\n"
-                "- 信息准则: 根据AIC/BIC等自动选择。\n"
                 "- 固定因子数量: 直接指定因子数量。\n"
                 "- 累积共同方差: 根据解释的方差比例确定因子数。"
             )
@@ -209,36 +205,7 @@ class ModelParametersComponent(DFMComponent):
 
     def _render_strategy_specific_parameters(self, st_obj, factor_strategy_value: str):
         """根据策略显示对应参数 - 与老代码第1386-1463行完全一致"""
-        if factor_strategy_value == 'information_criteria':
-            # a. 信息准则选择 (BIC, AIC等)
-            info_criterion_options = {
-                'bic': "BIC (Bayesian Information Criterion)",
-                'aic': "AIC (Akaike Information Criterion)",
-            }
-            info_criterion_value = st_obj.selectbox(
-                "信息准则选择",
-                options=list(info_criterion_options.keys()),
-                format_func=lambda x: info_criterion_options[x],
-                index=list(info_criterion_options.keys()).index(
-                    self._get_state('dfm_information_criterion', 'bic')  # 修正键名
-                ),
-                key='new_dfm_info_criterion_method_input',
-                help="选择用于确定最佳因子数量的信息准则。"
-            )
-            self._set_state('dfm_information_criterion', info_criterion_value)  # 修正键名
-
-            # b. IC 最大因子数
-            ic_max_factors_value = st_obj.number_input(
-                "IC 最大因子数 (Max Factors for IC)",
-                min_value=1,
-                value=self._get_state('dfm_ic_max_factors', 10),
-                step=1,
-                key='new_dfm_ic_max_factors_input',
-                help="使用信息准则时，允许测试的最大因子数量。"
-            )
-            self._set_state('dfm_ic_max_factors', ic_max_factors_value)
-
-        elif factor_strategy_value == 'fixed_number':
+        if factor_strategy_value == 'fixed_number':
             default_fixed_factors = 3
             fixed_factors_value = st_obj.number_input(
                 "固定因子数量 (Fixed Number of Factors)",
@@ -312,11 +279,6 @@ class ModelParametersComponent(DFMComponent):
                 'max': 20,
                 'type': int
             },
-            'ic_max_factors': {
-                'min': 1,
-                'max': 20,
-                'type': int
-            },
             'cumulative_variance_threshold': {  # 修正键名
                 'min': 0.1,
                 'max': 1.0,
@@ -341,11 +303,9 @@ class ModelParametersComponent(DFMComponent):
                     'enable_variable_selection': True,
                     'max_iter': getattr(UIDefaults, 'MAX_ITERATIONS_DEFAULT', 30),  # 修正键名
                     'factor_ar_order': 1,  # 修正键名
-                    'factor_selection_strategy': getattr(TrainDefaults, 'FACTOR_SELECTION_STRATEGY', 'information_criteria'),
+                    'factor_selection_strategy': getattr(TrainDefaults, 'FACTOR_SELECTION_STRATEGY', 'fixed_number'),
                     'fixed_number_of_factors': getattr(TrainDefaults, 'FIXED_NUMBER_OF_FACTORS', 3),
-                    'ic_max_factors': 10,
-                    'cumulative_variance_threshold': getattr(TrainDefaults, 'CUM_VARIANCE_THRESHOLD', 0.8),  # 修正键名
-                    'information_criterion': 'bic'  # 修正键名
+                    'cumulative_variance_threshold': getattr(TrainDefaults, 'CUM_VARIANCE_THRESHOLD', 0.8)  # 修正键名
                 }
             else:
                 # 硬编码默认值
@@ -354,11 +314,9 @@ class ModelParametersComponent(DFMComponent):
                     'enable_variable_selection': True,
                     'max_iter': 30,  # 修正键名
                     'factor_ar_order': 1,  # 修正键名
-                    'factor_selection_strategy': 'information_criteria',
+                    'factor_selection_strategy': 'fixed_number',
                     'fixed_number_of_factors': 3,
-                    'ic_max_factors': 10,
-                    'cumulative_variance_threshold': 0.8,  # 修正键名
-                    'information_criterion': 'bic'  # 修正键名
+                    'cumulative_variance_threshold': 0.8  # 修正键名
                 }
                 
         except Exception as e:
@@ -369,11 +327,9 @@ class ModelParametersComponent(DFMComponent):
                 'enable_variable_selection': True,
                 'max_iter': 30,  # 修正键名
                 'factor_ar_order': 1,  # 修正键名
-                'factor_selection_strategy': 'information_criteria',
+                'factor_selection_strategy': 'fixed_number',
                 'fixed_number_of_factors': 3,
-                'ic_max_factors': 10,
-                'cumulative_variance_threshold': 0.8,  # 修正键名
-                'information_criterion': 'bic'  # 修正键名
+                'cumulative_variance_threshold': 0.8  # 修正键名
             }
     
     def _validate_parameter_constraints(self, parameters: Dict[str, Any]) -> Tuple[bool, List[str]]:
@@ -408,12 +364,7 @@ class ModelParametersComponent(DFMComponent):
                     
                     if 'max' in constraints and value > constraints['max']:
                         errors.append(f"{param_name} 不能大于 {constraints['max']}")
-            
-            # 逻辑一致性检查
-            if 'ic_max_factors' in parameters and 'fixed_number_of_factors' in parameters:
-                if parameters['ic_max_factors'] < parameters['fixed_number_of_factors']:
-                    errors.append("IC最大因子数不能小于固定因子数量")
-            
+
             return len(errors) == 0, errors
             
         except Exception as e:
@@ -521,12 +472,11 @@ class ModelParametersComponent(DFMComponent):
             选择的因子选择策略
         """
         factor_selection_options = {
-            'information_criteria': "信息准则 (Information Criteria)",
             'fixed_number': "固定因子数量 (Fixed Number of Factors)",
             'cumulative_variance': "累积共同方差 (Cumulative Common Variance)"
         }
 
-        current_strategy = self._get_state('dfm_factor_selection_strategy', 'information_criteria')
+        current_strategy = self._get_state('dfm_factor_selection_strategy', 'fixed_number')
 
         selected_strategy = st_obj.selectbox(
             "因子选择策略",
@@ -536,7 +486,6 @@ class ModelParametersComponent(DFMComponent):
             key=f"{self.get_state_key_prefix()}_factor_selection_strategy",
             help=(
                 "选择确定因子数量的方法：\n"
-                "- 信息准则: 使用AIC/BIC等信息准则自动选择最优因子数\n"
                 "- 固定因子数量: 手动指定固定的因子数量\n"
                 "- 累积共同方差: 基于解释的累积方差比例选择因子数"
             )
@@ -560,45 +509,7 @@ class ModelParametersComponent(DFMComponent):
         """
         params = {}
 
-        if strategy == 'information_criteria':
-            # 信息准则方法
-            ic_method_options = {
-                'aic': "AIC (Akaike Information Criterion)",
-                'bic': "BIC (Bayesian Information Criterion)",
-                'hqic': "HQIC (Hannan-Quinn Information Criterion)"
-            }
-
-            current_method = self._get_state('dfm_information_criterion', 'bic')  # 修正键名
-
-            info_criterion_method = st_obj.selectbox(
-                "信息准则方法",
-                options=list(ic_method_options.keys()),
-                format_func=lambda x: ic_method_options[x],
-                index=list(ic_method_options.keys()).index(current_method),
-                key=f"{self.get_state_key_prefix()}_info_criterion_method",
-                help="选择用于因子数量选择的信息准则。"
-            )
-
-            ic_max_factors = st_obj.number_input(
-                "IC 最大因子数 (Max Factors for IC)",
-                min_value=1,
-                max_value=20,
-                value=self._get_state('dfm_ic_max_factors', 10),
-                step=1,
-                key=f"{self.get_state_key_prefix()}_ic_max_factors",
-                help="使用信息准则时，允许测试的最大因子数量。建议设置为10-15，过大的值可能导致过拟合。"
-            )
-
-            # 更新状态
-            self._set_state('dfm_information_criterion', info_criterion_method)  # 修正键名
-            self._set_state('dfm_ic_max_factors', ic_max_factors)
-
-            params = {
-                'information_criterion': info_criterion_method,  # 修正返回的键名
-                'ic_max_factors': ic_max_factors
-            }
-
-        elif strategy == 'fixed_number':
+        if strategy == 'fixed_number':
             # 固定因子数量
             fixed_factors = st_obj.number_input(
                 "固定因子数量 (Fixed Number of Factors)",
@@ -658,10 +569,7 @@ class ModelParametersComponent(DFMComponent):
 
             # 策略特定参数
             strategy = parameters.get('factor_selection_strategy')
-            if strategy == 'information_criteria':
-                st_obj.text(f"信息准则方法: {parameters.get('information_criterion', '未设置')}")
-                st_obj.text(f"IC最大因子数: {parameters.get('ic_max_factors', '未设置')}")
-            elif strategy == 'fixed_number':
+            if strategy == 'fixed_number':
                 st_obj.text(f"固定因子数量: {parameters.get('fixed_number_of_factors', '未设置')}")
             elif strategy == 'cumulative_variance':
                 st_obj.text(f"累积方差阈值: {parameters.get('cumulative_variance_threshold', '未设置')}")

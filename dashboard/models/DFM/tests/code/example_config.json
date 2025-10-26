@@ -1,0 +1,31 @@
+{
+  "__comment__": "DFM模型训练示例配置 - 使用tests/data目录下的测试数据",
+
+  "data_path": "../data/dfm_prepared_output.csv",
+  "target_variable": "规模以上工业增加值:当月同比",
+  "selected_indicators": [],
+
+  "__comment_dates__": "日期配置 - 根据实际数据自动调整",
+  "train_end": "2023-12-29",
+  "validation_start": "2024-01-05",
+  "validation_end": "2024-06-28",
+  "target_freq": "W-FRI",
+
+  "__comment_model__": "模型参数",
+  "k_factors": 3,
+  "max_iterations": 30,
+  "max_lags": 1,
+  "tolerance": 1e-6,
+
+  "__comment_selection__": "变量选择配置",
+  "enable_variable_selection": false,
+  "variable_selection_method": "backward",
+  "min_variables_after_selection": null,
+
+  "__comment_factor__": "因子数选择配置",
+  "factor_selection_method": "fixed",
+  "pca_threshold": 0.9,
+
+  "__comment_output__": "输出配置 - null表示使用临时目录",
+  "output_dir": null
+}

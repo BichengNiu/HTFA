@@ -19,7 +19,7 @@ from scipy.cluster import hierarchy as sch
 
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
 from dashboard.core import get_global_dfm_manager
-from dashboard.DFM.config import VisualizationDefaults
+from dashboard.models.DFM.config import VisualizationDefaults
 
 
 logger = logging.getLogger(__name__)

@@ -36,7 +36,7 @@ class ParameterConfigComponent(DFMComponent):
             'dfm_param_consecutive_nan_threshold': 10,
             'dfm_param_type_mapping_sheet': '指标体系',
             'dfm_param_data_start_date': date(2020, 1, 1),
-            'dfm_param_data_end_date': date(2025, 4, 30)
+            'dfm_param_data_end_date': date(2025, 12, 31)
         }
     
     def get_component_id(self) -> str:
@@ -220,7 +220,7 @@ class ParameterConfigComponent(DFMComponent):
         with row1_col2:
             end_date = st_obj.date_input(
                 "数据结束日期 (系统边界)",
-                value=self._get_state('dfm_param_data_end_date', date(2025, 4, 30)),
+                value=self._get_state('dfm_param_data_end_date', date(2025, 12, 31)),
                 key=f"{self.get_state_key_prefix()}_end_date",
                 help="设置系统处理数据的最晚日期边界。训练期、验证期必须在此日期之前。"
             )
@@ -354,17 +354,17 @@ class ParameterConfigComponent(DFMComponent):
     def _detect_date_range_from_file(self, uploaded_file) -> Tuple[Optional[date], Optional[date]]:
         """
         从文件检测日期范围
-        
+
         Args:
             uploaded_file: 上传的文件对象
-            
+
         Returns:
             Tuple[开始日期, 结束日期]
         """
         try:
             # 这里应该实现实际的日期检测逻辑
             # 暂时返回默认值
-            return date(2020, 1, 1), date(2025, 4, 30)
+            return date(2020, 1, 1), date(2025, 12, 31)
         except Exception as e:
             logger.error(f"日期范围检测失败: {e}")
             return None, None

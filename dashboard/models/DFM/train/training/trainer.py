@@ -19,7 +19,7 @@ from dashboard.models.DFM.train.training.model_ops import train_dfm_with_forecas
 
 # 导入流程步骤
 from dashboard.models.DFM.train.utils.data_utils import load_and_validate_data
-from dashboard.models.DFM.train.training.evaluator_strategy import create_dfm_evaluator
+from dashboard.models.DFM.train.training.evaluator_strategy import create_variable_selection_evaluator
 from dashboard.models.DFM.train.export.exporter import TrainingResultExporter
 
 # 导入核心功能
@@ -27,7 +27,7 @@ from dashboard.models.DFM.train.selection.backward_selector import BackwardSelec
 from dashboard.models.DFM.train.core.pca_utils import select_num_factors
 
 # 导入格式化工具
-from dashboard.models.DFM.train.utils.formatting import print_training_summary
+from dashboard.models.DFM.train.utils.formatting import print_training_summary, format_training_config
 
 # 导入环境配置
 from dashboard.models.DFM.train.utils.environment import setup_training_environment
@@ -76,20 +76,13 @@ class DFMTrainer:
 
         Args:
             progress_callback: 进度回调函数,签名为 (message: str) -> None
-            enable_export: 是否导出结果文件(模型、元数据、Excel报告)
+            enable_export: 是否导出结果文件(模型、元数据)
             export_dir: 导出目录(None=使用临时目录)
 
         Returns:
             TrainingResult对象
         """
         start_time = time.time()
-
-        logger.info("=" * 60)
-        logger.info("开始DFM模型训练")
-        logger.info("=" * 60)
-
-        if progress_callback:
-            progress_callback("[TRAIN] 开始DFM模型训练")
 
         try:
             # 步骤1: 加载和验证数据
@@ -100,17 +93,29 @@ class DFMTrainer:
                 progress_callback=progress_callback
             )
 
+            # 输出训练配置摘要
+            train_data = data.loc[:self.config.train_end]
+            val_data = data.loc[self.config.validation_start:self.config.validation_end]
+
+            config_summary = format_training_config(
+                train_start=str(data.index.min().date()) if hasattr(data.index.min(), 'date') else str(data.index.min()),
+                train_end=self.config.train_end,
+                validation_start=self.config.validation_start,
+                validation_end=self.config.validation_end,
+                train_samples=len(train_data),
+                validation_samples=len(val_data),
+                initial_vars=len(predictor_vars),
+                k_factors=self.config.k_factors
+            )
+
+            logger.info(config_summary)
+            if progress_callback:
+                progress_callback(config_summary.strip())
+
             # 步骤2: 阶段1变量选择
             if self.config.enable_variable_selection:
-                if progress_callback:
-                    progress_callback("[SELECTION] 阶段1: 开始变量选择")
-
-                logger.info("=" * 60)
-                logger.info("阶段1: 变量选择")
-                logger.info("=" * 60)
-
-                # 创建评估器（函数式接口）
-                evaluator = create_dfm_evaluator(self.config)
+                # 创建变量筛选专用评估器（使用下月配对RMSE）
+                evaluator = create_variable_selection_evaluator(self.config)
 
                 # 创建变量选择器
                 selector = BackwardSelector(
@@ -119,9 +124,14 @@ class DFMTrainer:
                     min_variables=self.config.min_variables_after_selection or 1
                 )
 
-                # 计算合理的k_factors用于变量选择
-                k_for_selection = max(2, min(len(predictor_vars) // 2, len(predictor_vars) - 2))
-                logger.info(f"变量选择使用k_factors={k_for_selection} (变量数: {len(predictor_vars)})")
+                # 根据因子选择策略确定k_factors用于变量选择
+                if self.config.factor_selection_method == 'fixed':
+                    # 如果使用固定因子数策略，直接使用用户设置的k_factors
+                    k_for_selection = self.config.k_factors
+                else:  # cumulative
+                    # 如果使用累积方差贡献策略，计算合理的k_factors用于变量选择
+                    # 最终的k_factors会在阶段2通过PCA确定
+                    k_for_selection = max(2, min(len(predictor_vars) // 2, len(predictor_vars) - 2))
 
                 # 执行变量选择
                 initial_vars = [self.config.target_variable] + predictor_vars
@@ -151,18 +161,7 @@ class DFMTrainer:
                 # 更新统计
                 self.total_evaluations += selection_result.total_evaluations
                 self.svd_error_count += selection_result.svd_error_count
-
-                logger.info(
-                    f"变量选择完成: {len(predictor_vars)} -> {len(selected_vars)}个变量"
-                )
-                if progress_callback:
-                    progress_callback(
-                        f"[SELECTION] 变量选择完成: 保留{len(selected_vars)}个变量"
-                    )
             else:
-                logger.info("跳过变量选择,使用全部变量")
-                if progress_callback:
-                    progress_callback("[SELECTION] 跳过变量选择")
                 selected_vars = predictor_vars
                 selection_history = []
 
@@ -173,22 +172,10 @@ class DFMTrainer:
                 method=self.config.factor_selection_method,
                 fixed_k=self.config.k_factors,
                 pca_threshold=self.config.pca_threshold or 0.9,
-                elbow_threshold=self.config.elbow_threshold or 0.1,
                 progress_callback=progress_callback
             )
 
             # 步骤4: 最终模型训练（直接调用）
-            logger.info("=" * 60)
-            logger.info("最终模型训练")
-            logger.info("=" * 60)
-
-            if progress_callback:
-                progress_callback(
-                    f"[TRAIN] 开始最终训练: k={k_factors}, {len(selected_vars)}个变量"
-                )
-
-            logger.info(f"训练参数: k={k_factors}, max_iter={self.config.max_iterations}")
-
             # 准备数据并训练
             predictor_data = data[selected_vars]
 
@@ -205,16 +192,7 @@ class DFMTrainer:
                 progress_callback=progress_callback
             )
 
-            logger.info(
-                f"模型训练完成: 收敛={model_result.converged}, "
-                f"迭代={model_result.iterations}次, "
-                f"LogLik={model_result.log_likelihood:.2f}"
-            )
-
             # 步骤5: 模型评估（直接调用）
-            logger.info("评估模型性能...")
-            if progress_callback:
-                progress_callback("[TRAIN] 评估模型性能...")
 
             metrics = evaluate_model_performance(
                 model_result=model_result,
@@ -222,11 +200,6 @@ class DFMTrainer:
                 train_end=self.config.train_end,
                 validation_start=self.config.validation_start,
                 validation_end=self.config.validation_end
-            )
-
-            logger.info(
-                f"评估完成: IS_RMSE={metrics.is_rmse:.4f}, "
-                f"OOS_RMSE={metrics.oos_rmse:.4f}"
             )
 
             # 步骤6: 构建结果（直接调用）
@@ -251,10 +224,6 @@ class DFMTrainer:
 
             # 步骤8: 导出结果文件（直接调用）
             if enable_export:
-                logger.info("开始导出训练结果文件")
-                if progress_callback:
-                    progress_callback("[EXPORT] 开始导出训练结果文件")
-
                 try:
                     exporter = TrainingResultExporter()
                     file_paths = exporter.export_all(
@@ -266,21 +235,16 @@ class DFMTrainer:
                     result.export_files = file_paths
 
                     success_count = len([p for p in file_paths.values() if p])
-                    logger.info(f"文件导出完成,成功 {success_count}/3 个")
 
                     if progress_callback:
-                        progress_callback(f"[EXPORT] 文件导出完成,成功 {success_count}/3 个")
+                        progress_callback(f"结果文件导出完成 (成功 {success_count}/3 个)")
 
                 except Exception as e:
                     logger.warning(f"文件导出失败: {e}", exc_info=True)
                     if progress_callback:
-                        progress_callback(f"[EXPORT] 文件导出失败: {e}")
+                        progress_callback(f"文件导出失败: {e}")
 
                     result.export_files = None
-
-            logger.info("训练完成!")
-            if progress_callback:
-                progress_callback("[TRAIN] 训练完成!")
 
             return result
 
@@ -290,7 +254,7 @@ class DFMTrainer:
             traceback.print_exc()
 
             if progress_callback:
-                progress_callback(f"[ERROR] 训练失败: {e}")
+                progress_callback(f"训练失败: {e}")
 
             raise
 

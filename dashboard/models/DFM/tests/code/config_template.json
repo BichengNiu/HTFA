@@ -1,0 +1,89 @@
+{
+  "__comment__": "========== DFM模型训练配置模板 ==========",
+  "__usage__": "复制此模板创建自己的配置文件，根据需要修改参数",
+
+  "__section_data__": "========== 数据配置 ==========",
+  "data_path": "path/to/your/data.csv",
+  "__help_data_path__": "数据文件路径（支持CSV或Excel格式）",
+
+  "target_variable": "目标变量名称",
+  "__help_target_variable__": "要预测的目标变量在数据中的列名",
+
+  "selected_indicators": [],
+  "__help_selected_indicators__": "选中的指标列表，空列表[]表示使用全部指标，否则指定具体指标名称列表",
+
+  "__section_dates__": "========== 日期配置 ==========",
+  "train_end": "2023-12-31",
+  "__help_train_end__": "训练期结束日期（YYYY-MM-DD格式）",
+
+  "validation_start": "2024-01-01",
+  "__help_validation_start__": "验证期开始日期（YYYY-MM-DD格式）",
+
+  "validation_end": "2024-06-30",
+  "__help_validation_end__": "验证期结束日期（YYYY-MM-DD格式）",
+
+  "target_freq": "W-FRI",
+  "__help_target_freq__": "目标频率: W-FRI(周度-周五), M(月度), D(日度)等",
+
+  "__section_model__": "========== 模型参数 ==========",
+  "k_factors": 3,
+  "__help_k_factors__": "因子个数（正整数）",
+
+  "max_iterations": 30,
+  "__help_max_iterations__": "EM算法最大迭代次数",
+
+  "max_lags": 1,
+  "__help_max_lags__": "因子自回归的最大滞后阶数",
+
+  "tolerance": 1e-6,
+  "__help_tolerance__": "EM算法收敛容差",
+
+  "__section_variable_selection__": "========== 变量选择配置 ==========",
+  "enable_variable_selection": false,
+  "__help_enable_variable_selection__": "是否启用变量选择（true/false）",
+
+  "variable_selection_method": "backward",
+  "__help_variable_selection_method__": "变量选择方法: backward(后向逐步), forward(前向逐步), none(不选择)",
+
+  "min_variables_after_selection": null,
+  "__help_min_variables_after_selection__": "变量选择后保留的最少变量数（null表示不限制）",
+
+  "__section_factor_selection__": "========== 因子数选择配置 ==========",
+  "factor_selection_method": "fixed",
+  "__help_factor_selection_method__": "因子数选择方法: fixed(固定), cumulative(PCA累积方差)",
+
+  "pca_threshold": 0.9,
+  "__help_pca_threshold__": "PCA累积方差阈值（仅当factor_selection_method=cumulative时使用）",
+
+  "__section_output__": "========== 输出配置 ==========",
+  "output_dir": null,
+  "__help_output_dir__": "输出目录路径（null表示使用临时目录）",
+
+  "__example_minimal__": "========== 最小配置示例 ==========",
+  "__minimal_example__": {
+    "data_path": "data.csv",
+    "target_variable": "目标变量",
+    "train_end": "2023-12-31",
+    "validation_start": "2024-01-01",
+    "validation_end": "2024-06-30"
+  },
+
+  "__example_full__": "========== 完整配置示例 ==========",
+  "__full_example__": {
+    "data_path": "data/economic_data.csv",
+    "target_variable": "规模以上工业增加值:当月同比",
+    "selected_indicators": ["指标1", "指标2", "指标3"],
+    "train_end": "2023-12-31",
+    "validation_start": "2024-01-01",
+    "validation_end": "2024-06-30",
+    "target_freq": "W-FRI",
+    "k_factors": 4,
+    "max_iterations": 50,
+    "tolerance": 1e-6,
+    "enable_variable_selection": true,
+    "min_variables_after_selection": 10,
+    "factor_selection_method": "cumulative",
+    "pca_threshold": 0.85,
+    "output_dir": "results/dfm_output"
+  }
+}

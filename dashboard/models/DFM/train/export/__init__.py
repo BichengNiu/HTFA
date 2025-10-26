@@ -5,7 +5,6 @@
 提供训练结果的文件导出功能:
 - 模型文件导出（.joblib）
 - 元数据文件导出（.pkl）
-- Excel报告导出（.xlsx）
 
 所有功能已整合到TrainingResultExporter类中
 """

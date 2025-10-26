@@ -520,7 +520,6 @@ class TrainingStatusComponent(DFMComponent):
                 'model_joblib': ('[PACKAGE]', '模型'),
                 'metadata': ('[DOC]', '元数据'),
                 'simplified_metadata': ('[DOC]', '元数据'),
-                'excel_report': ('[DATA]', 'Excel报告'),
                 'training_data': ('[DATA]', '训练数据')
             }
 
@@ -536,9 +535,7 @@ class TrainingStatusComponent(DFMComponent):
                             file_data = f.read()
 
                         # 确定MIME类型
-                        if file_path.endswith('.xlsx'):
-                            mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        elif file_path.endswith('.csv'):
+                        if file_path.endswith('.csv'):
                             mime_type = "text/csv"
                         elif file_path.endswith('.json'):
                             mime_type = "application/json"

@@ -3,7 +3,6 @@
 卡尔曼滤波器模块
 
 实现离散卡尔曼滤波和平滑算法
-参考: dashboard/DFM/train_model/DiscreteKalmanFilter.py
 """
 
 import numpy as np

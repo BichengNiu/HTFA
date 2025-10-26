@@ -76,7 +76,7 @@ import unicodedata
 from DFM_Nowcasting import DFMNowcastModel
 
 # 导入DFM配置模块
-from dashboard.DFM import config as dfm_config
+from dashboard.models.DFM import config as dfm_config
 print("[run_nowcasting_evolution] 成功导入DFM配置模块")
 
 # 创建配置包装类以保持兼容性

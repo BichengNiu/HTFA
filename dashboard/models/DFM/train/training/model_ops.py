@@ -14,8 +14,8 @@ from dashboard.models.DFM.train.core.factor_model import DFMModel
 from dashboard.models.DFM.train.core.prediction import generate_target_forecast
 from dashboard.models.DFM.train.evaluation.metrics import (
     calculate_rmse,
-    calculate_hit_rate,
-    calculate_correlation
+    calculate_next_month_mae,
+    calculate_next_month_hit_rate
 )
 
 logger = get_logger(__name__)
@@ -82,11 +82,11 @@ def train_dfm_with_forecast(
     if max_lags < 1:
         raise ValueError(f"max_lags必须>=1，当前值: {max_lags}")
 
-    logger.info(
-        f"[ModelOps] 开始训练 - k={k_factors}, "
-        f"变量数={predictor_data.shape[1]}, "
-        f"样本数={predictor_data.shape[0]}"
-    )
+    # logger.info(
+    #     f"[ModelOps] 开始训练 - k={k_factors}, "
+    #     f"变量数={predictor_data.shape[1]}, "
+    #     f"样本数={predictor_data.shape[0]}"
+    # )
 
     # 1. 创建并配置DFM模型
     dfm = DFMModel(
@@ -96,11 +96,6 @@ def train_dfm_with_forecast(
         tolerance=tolerance
     )
 
-    if progress_callback:
-        progress_callback(
-            f"[TRAIN] 正在训练DFM模型 (k={k_factors}, max_iter={max_iter})..."
-        )
-
     # 2. 训练模型
     try:
         model_result = dfm.fit(
@@ -108,21 +103,18 @@ def train_dfm_with_forecast(
             train_end=train_end
         )
 
-        logger.info(
-            f"[ModelOps] 模型训练完成 - "
-            f"收敛={model_result.converged}, "
-            f"迭代={model_result.iterations}次, "
-            f"LogLik={model_result.log_likelihood:.2f}"
-        )
+        # logger.info(
+        #     f"[ModelOps] 模型训练完成 - "
+        #     f"收敛={model_result.converged}, "
+        #     f"迭代={model_result.iterations}次, "
+        #     f"LogLik={model_result.log_likelihood:.2f}"
+        # )
 
     except Exception as e:
         logger.error(f"[ModelOps] 模型训练失败: {e}")
         raise RuntimeError(f"DFM模型训练失败: {e}") from e
 
     # 3. 生成目标变量预测
-    if progress_callback:
-        progress_callback("[TRAIN] 生成目标变量预测...")
-
     try:
         model_result = generate_target_forecast(
             model_result=model_result,
@@ -133,11 +125,11 @@ def train_dfm_with_forecast(
             progress_callback=progress_callback
         )
 
-        logger.info(
-            f"[ModelOps] 预测生成完成 - "
-            f"IS预测点数={len(model_result.forecast_is) if model_result.forecast_is is not None else 0}, "
-            f"OOS预测点数={len(model_result.forecast_oos) if model_result.forecast_oos is not None else 0}"
-        )
+        # logger.info(
+        #     f"[ModelOps] 预测生成完成 - "
+        #     f"IS预测点数={len(model_result.forecast_is) if model_result.forecast_is is not None else 0}, "
+        #     f"OOS预测点数={len(model_result.forecast_oos) if model_result.forecast_oos is not None else 0}"
+        # )
 
     except Exception as e:
         logger.error(f"[ModelOps] 预测生成失败: {e}")
@@ -239,19 +231,34 @@ def _evaluate_in_sample(
     forecast_aligned = forecast[:min_len]
     actual_aligned = actual.values[:min_len]
 
-    # 计算RMSE和Correlation（使用数组）
+    # 计算RMSE（保持原逻辑，基于样本内对齐）
     metrics.is_rmse = calculate_rmse(actual_aligned, forecast_aligned)
-    metrics.is_correlation = calculate_correlation(actual_aligned, forecast_aligned)
 
-    # 计算Hit Rate（需要Series格式）
-    pred_series = pd.Series(forecast_aligned, index=actual.index[:min_len])
-    actual_series = pd.Series(actual_aligned, index=actual.index[:min_len])
-    metrics.is_hit_rate = calculate_hit_rate(actual_series, pred_series)
+    # 创建周度预测和目标值Series - 确保使用DatetimeIndex
+    actual_index = pd.to_datetime(actual.index[:min_len])
+    pred_series = pd.Series(forecast_aligned, index=actual_index)
+    actual_series = pd.Series(actual_aligned, index=actual_index)
+
+    # 计算MAE（新：使用下月配对）
+    try:
+        metrics.is_mae = calculate_next_month_mae(pred_series, actual_series)
+        logger.debug(f"[IS] MAE计算成功: {metrics.is_mae:.4f}")
+    except Exception as e:
+        logger.error(f"[IS] MAE计算失败: {e}")
+        metrics.is_mae = np.inf
+
+    # 计算Hit Rate（新：使用新定义）
+    try:
+        metrics.is_hit_rate = calculate_next_month_hit_rate(pred_series, actual_series)
+        logger.debug(f"[IS] Hit Rate计算成功: {metrics.is_hit_rate:.2f}%")
+    except Exception as e:
+        logger.error(f"[IS] Hit Rate计算失败: {e}")
+        metrics.is_hit_rate = np.nan
 
     logger.debug(
         f"[IS] RMSE={metrics.is_rmse:.4f}, "
-        f"HitRate={metrics.is_hit_rate:.2f}%, "
-        f"Corr={metrics.is_correlation:.4f}"
+        f"MAE={metrics.is_mae:.4f}, "
+        f"HitRate={metrics.is_hit_rate:.2f}%"
     )
 
 
@@ -273,19 +280,34 @@ def _evaluate_out_of_sample(
     forecast_aligned = forecast[:min_len]
     actual_aligned = actual.values[:min_len]
 
-    # 计算RMSE和Correlation（使用数组）
+    # 计算RMSE（保持原逻辑，基于样本外对齐）
     metrics.oos_rmse = calculate_rmse(actual_aligned, forecast_aligned)
-    metrics.oos_correlation = calculate_correlation(actual_aligned, forecast_aligned)
 
-    # 计算Hit Rate（需要Series格式）
-    pred_series = pd.Series(forecast_aligned, index=actual.index[:min_len])
-    actual_series = pd.Series(actual_aligned, index=actual.index[:min_len])
-    metrics.oos_hit_rate = calculate_hit_rate(actual_series, pred_series)
+    # 创建周度预测和目标值Series - 确保使用DatetimeIndex
+    actual_index = pd.to_datetime(actual.index[:min_len])
+    pred_series = pd.Series(forecast_aligned, index=actual_index)
+    actual_series = pd.Series(actual_aligned, index=actual_index)
+
+    # 计算MAE（新：使用下月配对）
+    try:
+        metrics.oos_mae = calculate_next_month_mae(pred_series, actual_series)
+        logger.debug(f"[OOS] MAE计算成功: {metrics.oos_mae:.4f}")
+    except Exception as e:
+        logger.error(f"[OOS] MAE计算失败: {e}")
+        metrics.oos_mae = np.inf
+
+    # 计算Hit Rate（新：使用新定义）
+    try:
+        metrics.oos_hit_rate = calculate_next_month_hit_rate(pred_series, actual_series)
+        logger.debug(f"[OOS] Hit Rate计算成功: {metrics.oos_hit_rate:.2f}%")
+    except Exception as e:
+        logger.error(f"[OOS] Hit Rate计算失败: {e}")
+        metrics.oos_hit_rate = np.nan
 
     logger.debug(
         f"[OOS] RMSE={metrics.oos_rmse:.4f}, "
-        f"HitRate={metrics.oos_hit_rate:.2f}%, "
-        f"Corr={metrics.oos_correlation:.4f}"
+        f"MAE={metrics.oos_mae:.4f}, "
+        f"HitRate={metrics.oos_hit_rate:.2f}%"
     )
 
 

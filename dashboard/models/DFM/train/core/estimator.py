@@ -3,7 +3,6 @@
 参数估计模块
 
 实现DFM模型的参数估计算法
-参考: dashboard/DFM/train_model/DiscreteKalmanFilter.py
 """
 
 import numpy as np
@@ -234,7 +233,7 @@ def estimate_covariance_matrices(
             min_dim_fallback = min(n_factors, n_shocks)
             B[:min_dim_fallback, :min_dim_fallback] = np.eye(min_dim_fallback) * np.sqrt(1e-6)
     else:
-        # 如果没有n_shocks，只计算Q矩阵（保持向后兼容）
+        # 如果没有n_shocks，只计算Q矩阵
         Q = _ensure_positive_definite(Sigma, epsilon=1e-7)
         B = np.eye(n_factors) * 0.1  # 默认B矩阵
 

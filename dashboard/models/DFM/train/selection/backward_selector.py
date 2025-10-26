@@ -2,7 +2,7 @@
 """
 后向逐步变量选择器
 
-实现后向逐步变量剔除算法,支持RMSE和Hit Rate作为优化目标。
+实现后向逐步变量剔除算法,以RMSE作为优化目标。
 参考train_model/variable_selection.py的核心逻辑,但简化为更清晰的面向对象设计。
 """
 import numpy as np
@@ -26,7 +26,7 @@ class BackwardSelector:
     4. 选择性能提升最大的变量剔除
     5. 重复直到无法提升
 
-    优化目标: HR -> -RMSE (先优化命中率,再优化RMSE)
+    优化目标: 最小化RMSE
     """
 
     def __init__(
@@ -41,7 +41,7 @@ class BackwardSelector:
                 is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate,
                 is_svd_error, _, _
             )
-            criterion: 优化准则,'rmse'或'hit_rate'(当前固定为HR -> -RMSE)
+            criterion: 优化准则,'rmse'(Hit Rate已弃用)
             min_variables: 最少保留的变量数
         """
         self.evaluator_func = evaluator_func
@@ -118,7 +118,7 @@ class BackwardSelector:
             )
 
         # 2. 计算初始基准性能
-        current_best_score, eval_count, svd_count = self._evaluate_baseline(
+        current_best_score, eval_count, svd_count, current_is_rmse, current_oos_rmse = self._evaluate_baseline(
             current_predictors, progress_callback
         )
         total_evaluations += eval_count
@@ -131,7 +131,7 @@ class BackwardSelector:
             self._log_iteration_start(iteration, len(current_predictors), progress_callback)
 
             # 找到本轮最佳移除候选
-            best_removal, best_score_this_iter, eval_count, svd_count = self._find_best_removal_candidate(
+            best_removal, best_score_this_iter, eval_count, svd_count, best_is_rmse, best_oos_rmse = self._find_best_removal_candidate(
                 current_predictors
             )
             total_evaluations += eval_count
@@ -146,19 +146,21 @@ class BackwardSelector:
             if best_score_this_iter <= current_best_score:
                 logger.warning(
                     f"移除任何变量都无法提升性能 "
-                    f"(当前: HR={current_best_score[0]:.2f}%, RMSE={-current_best_score[1]:.6f}; "
-                    f"最佳候选: HR={best_score_this_iter[0]:.2f}%, RMSE={-best_score_this_iter[1]:.6f})"
+                    f"(当前RMSE={-current_best_score[1]:.6f}; 最佳候选RMSE={-best_score_this_iter[1]:.6f})"
                 )
                 break
 
             # 应用移除并记录历史
             self._apply_removal_and_record(
                 current_predictors, best_removal, best_score_this_iter,
-                current_best_score, iteration, selection_history, progress_callback
+                current_best_score, iteration, selection_history, progress_callback,
+                current_is_rmse, current_oos_rmse, best_is_rmse, best_oos_rmse
             )
 
-            # 更新当前最佳得分
+            # 更新当前最佳得分和RMSE
             current_best_score = best_score_this_iter
+            current_is_rmse = best_is_rmse
+            current_oos_rmse = best_oos_rmse
 
         # 4. 返回结果
         return self._build_selection_result(
@@ -166,6 +168,15 @@ class BackwardSelector:
             current_best_score, total_evaluations, svd_error_count,
             len(initial_variables)
         )
+
+    def _generate_progress_bar(self, current: int, total: int, width: int = 20) -> str:
+        """生成简单的进度条"""
+        if total <= 0:
+            return "[====================]"
+        percent = min(1.0, current / total)
+        filled = int(width * percent)
+        bar = '=' * filled + '-' * (width - filled)
+        return f"[{bar}]"
 
     def _initialize_predictors(
         self,
@@ -182,12 +193,9 @@ class BackwardSelector:
         self,
         current_predictors: List[str],
         progress_callback: Optional[Callable]
-    ) -> Tuple[Tuple[float, float], int, int]:
-        """计算初始基准性能"""
-        if progress_callback:
-            progress_callback(f"[SELECTION] 计算初始基准性能，变量数: {len(current_predictors)}")
-
-        logger.info(f"计算初始基准性能，变量数: {len(current_predictors)}")
+    ) -> Tuple[Tuple[float, float], int, int, float, float]:
+        """计算初始基准性能（扩展返回is_rmse和oos_rmse）"""
+        # logger.info(f"计算初始基准性能，变量数: {len(current_predictors)}")
 
         target_variable = self._eval_params['target_variable']
         initial_vars = [target_variable] + current_predictors
@@ -197,7 +205,7 @@ class BackwardSelector:
 
             if len(result_tuple) != 9:
                 logger.error(f"评估函数返回了{len(result_tuple)}个值(预期9)，使用默认分数")
-                return ((-np.inf, -np.inf), 1, 0)
+                return ((-np.inf, -np.inf), 1, 0, np.inf, np.inf)
 
             is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
             svd_count = 1 if is_svd_error else 0
@@ -208,17 +216,24 @@ class BackwardSelector:
                 logger.warning(f"初始基准评估返回无效分数，使用最差分数")
                 score = (-np.inf, -np.inf)
 
-            logger.info(
-                f"初始基准得分 (HR={score[0]:.2f}%, RMSE={-score[1]:.6f}), "
-                f"变量数: {len(current_predictors)}"
-            )
+            # logger.info(
+            #     f"初始基准得分 (RMSE={-score[1]:.6f}), "
+            #     f"变量数: {len(current_predictors)}"
+            # )
 
-            return (score, 1, svd_count)
+            # 输出基线模型RMSE（精简格式）
+            if progress_callback:
+                progress_callback(
+                    f"========== 变量选择 ==========\n"
+                    f"基线模型 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}"
+                )
+
+            return (score, 1, svd_count, is_rmse, oos_rmse)
 
         except Exception as e:
             logger.error(f"计算初始基准性能时出错: {e}")
             logger.warning("使用默认分数继续")
-            return ((-np.inf, -np.inf), 1, 0)
+            return ((-np.inf, -np.inf), 1, 0, np.inf, np.inf)
 
     def _should_continue_selection(
         self,
@@ -241,23 +256,25 @@ class BackwardSelector:
         progress_callback: Optional[Callable]
     ):
         """记录迭代开始信息"""
-        logger.info(f"\n{'='*60}")
-        logger.info(f"变量选择 - 第{iteration}轮 (当前{n_vars}个变量)")
-        logger.info(f"{'='*60}")
+        # logger.info(f"\n{'='*60}")
+        # logger.info(f"变量选择 - 第{iteration}轮 (当前{n_vars}个变量)")
+        # logger.info(f"{'='*60}")
 
+        # 进度显示（简化格式）
         if progress_callback:
             max_rounds = n_vars - self.min_variables
-            progress_callback(
-                f"[SELECTION] 第{iteration}/{max_rounds}轮: 当前{n_vars}个变量"
-            )
+            progress_bar = self._generate_progress_bar(iteration, max_rounds)
+            progress_callback(f"{progress_bar} 第{iteration}轮 (当前{n_vars}个变量)")
 
     def _find_best_removal_candidate(
         self,
         current_predictors: List[str]
-    ) -> Tuple[Optional[str], Tuple[float, float], int, int]:
-        """找到本轮最佳移除候选"""
+    ) -> Tuple[Optional[str], Tuple[float, float], int, int, Optional[float], Optional[float]]:
+        """找到本轮最佳移除候选（扩展返回is_rmse和oos_rmse）"""
         best_score = (-np.inf, -np.inf)
         best_var = None
+        best_is_rmse = None
+        best_oos_rmse = None
         total_evals = 0
         total_svd_errors = 0
 
@@ -295,12 +312,14 @@ class BackwardSelector:
                 if np.isfinite(score[1]) and score > best_score:
                     best_score = score
                     best_var = var
+                    best_is_rmse = is_rmse
+                    best_oos_rmse = oos_rmse
 
             except Exception as e:
                 logger.error(f"评估移除{var}时出错: {e}")
                 continue
 
-        return (best_var, best_score, total_evals, total_svd_errors)
+        return (best_var, best_score, total_evals, total_svd_errors, best_is_rmse, best_oos_rmse)
 
     def _apply_removal_and_record(
         self,
@@ -310,9 +329,13 @@ class BackwardSelector:
         old_score: Tuple[float, float],
         iteration: int,
         history: List[Dict],
-        progress_callback: Optional[Callable]
+        progress_callback: Optional[Callable],
+        old_is_rmse: float,
+        old_oos_rmse: float,
+        new_is_rmse: float,
+        new_oos_rmse: float
     ):
-        """应用变量移除并记录历史"""
+        """应用变量移除并记录历史（精简输出）"""
         current_predictors.remove(removed_var)
 
         # 记录选择历史
@@ -325,20 +348,21 @@ class BackwardSelector:
         })
 
         # 记录得分改善
-        delta_hr = new_score[0] - old_score[0]
         delta_rmse = -(new_score[1] - old_score[1])
 
-        logger.info(
-            f"第{iteration}轮完成: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
-            f"  移除前 -> HR={old_score[0]:.2f}%, RMSE={-old_score[1]:.6f}\n"
-            f"  移除后 -> HR={new_score[0]:.2f}%, RMSE={-new_score[1]:.6f}\n"
-            f"  改善量  -> ΔHR={delta_hr:+.2f}%, ΔRMSE={delta_rmse:.6f}"
-        )
+        # logger.info(
+        #     f"第{iteration}轮完成: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
+        #     f"  移除前RMSE -> {-old_score[1]:.6f}\n"
+        #     f"  移除后RMSE -> {-new_score[1]:.6f}\n"
+        #     f"  改善量ΔRMSE -> {delta_rmse:.6f}"
+        # )
 
+        # 精简的回调输出格式
         if progress_callback:
             progress_callback(
-                f"[SELECTION] 移除'{removed_var}': 剩余{len(current_predictors)}个变量, "
-                f"HR={new_score[0]:.2f}% (Δ{delta_hr:+.2f}%)"
+                f"第{iteration}轮: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
+                f"  训练期RMSE: {old_is_rmse:.4f} -> {new_is_rmse:.4f}\n"
+                f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f}"
             )
 
     def _build_selection_result(
@@ -356,7 +380,7 @@ class BackwardSelector:
 
         logger.info(
             f"变量选择完成: 从{n_initial_vars-1}个变量剔除到{len(final_predictors)}个, "
-            f"最终得分 (HR={final_score[0]:.2f}%, RMSE={-final_score[1]:.6f})"
+            f"最终RMSE={-final_score[1]:.6f}"
         )
 
         return SelectionResult(

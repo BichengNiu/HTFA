@@ -6,6 +6,7 @@ DFM评估策略 - 函数式接口
 """
 
 import numpy as np
+import pandas as pd
 from typing import Tuple, List, Callable
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.training.model_ops import train_dfm_with_forecast, evaluate_model_performance
@@ -101,4 +102,108 @@ def create_dfm_evaluator(config: 'TrainingConfig') -> Callable:
     return evaluate
 
 
-__all__ = ['create_dfm_evaluator']
+def create_variable_selection_evaluator(config: 'TrainingConfig') -> Callable:
+    """
+    创建变量筛选专用评估器（函数式接口）
+
+    与create_dfm_evaluator的区别：
+    - 使用下月配对RMSE作为唯一评估指标
+    - 不计算Hit Rate和MAE（用于最终评估）
+    - 专门用于变量筛选阶段
+
+    Returns:
+        评估函数，签名为 (variables: List[str], **kwargs) -> Tuple[float, ...]
+    """
+    def evaluate(variables: List[str], **kwargs) -> Tuple[float, float, float, float, float, float, bool, None, None]:
+        """
+        评估指定变量组合的DFM模型性能（仅使用下月配对RMSE）
+
+        Args:
+            variables: 变量列表（包含目标变量）
+            **kwargs: 其他参数
+
+        Returns:
+            9元组: (is_rmse, oos_rmse, None, None, np.nan, np.nan, is_svd_error, None, None)
+                   只有RMSE有意义，其他字段为占位符
+        """
+        try:
+            # 提取参数
+            full_data = kwargs.get('full_data')
+            k_factors = kwargs.get('params', {}).get('k_factors', 2)
+            max_iter = kwargs.get('max_iter', config.max_iterations)
+            target_var = config.target_variable
+
+            # 分离预测变量
+            predictor_vars = [v for v in variables if v != target_var]
+
+            if len(predictor_vars) == 0:
+                logger.warning("[VarSelectionEvaluator] 预测变量为空，返回无穷大RMSE")
+                return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, False, None, None)
+
+            # 准备数据
+            predictor_data = full_data[predictor_vars]
+            target_data = full_data[target_var]
+
+            # 训练模型
+            model_result = train_dfm_with_forecast(
+                predictor_data=predictor_data,
+                target_data=target_data,
+                k_factors=k_factors,
+                train_end=config.train_end,
+                validation_start=config.validation_start,
+                validation_end=config.validation_end,
+                max_iter=max_iter,
+                max_lags=1,
+                tolerance=config.tolerance,
+                progress_callback=None
+            )
+
+            # 计算下月配对RMSE
+            from dashboard.models.DFM.train.evaluation.metrics import calculate_next_month_rmse
+
+            # 样本内RMSE（训练期）
+            if model_result.forecast_is is not None and len(model_result.forecast_is) > 0:
+                train_data_len = len(model_result.forecast_is)
+                # 确保使用DatetimeIndex
+                train_index = pd.to_datetime(predictor_data.index[:train_data_len])
+                train_nowcast = pd.Series(
+                    model_result.forecast_is,
+                    index=train_index
+                )
+                is_rmse = calculate_next_month_rmse(train_nowcast, target_data)
+            else:
+                is_rmse = np.inf
+
+            # 样本外RMSE（验证期）
+            if model_result.forecast_oos is not None and len(model_result.forecast_oos) > 0:
+                # 使用训练集长度作为验证期起始位置
+                train_data_len = len(model_result.forecast_is) if model_result.forecast_is is not None else 0
+
+                # 确保使用DatetimeIndex - 验证期数据紧接着训练期
+                val_index = pd.to_datetime(predictor_data.index[train_data_len:train_data_len+len(model_result.forecast_oos)])
+
+                if len(val_index) == len(model_result.forecast_oos):
+                    val_nowcast = pd.Series(
+                        model_result.forecast_oos,
+                        index=val_index
+                    )
+                    oos_rmse = calculate_next_month_rmse(val_nowcast, target_data)
+                else:
+                    logger.warning(f"[VarSelectionEvaluator] 验证期索引长度不匹配: {len(val_index)} vs {len(model_result.forecast_oos)}")
+                    oos_rmse = np.inf
+            else:
+                oos_rmse = np.inf
+
+            # 返回简化的9元组（只有RMSE有意义）
+            return (is_rmse, oos_rmse, np.nan, np.nan, np.nan, np.nan, False, None, None)
+
+        except Exception as e:
+            logger.error(f"[VarSelectionEvaluator] 评估失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, True, None, None)
+
+    return evaluate
+
+
+__all__ = ['create_dfm_evaluator', 'create_variable_selection_evaluator']

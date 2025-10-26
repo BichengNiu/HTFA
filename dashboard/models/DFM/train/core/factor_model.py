@@ -3,7 +3,6 @@
 动态因子模型核心实现
 
 实现基于EM算法的DFM估计
-参考: dashboard/DFM/train_model/DynamicFactorModel.py
 """
 
 import numpy as np
@@ -92,7 +91,7 @@ class DFMModel:
 
         if train_end:
             Z_train = data.loc[:train_end]
-            logger.info(f"使用训练期数据初始化: {Z_train.shape}")
+            # logger.info(f"使用训练期数据初始化: {Z_train.shape}")
         else:
             Z_train = data
 
@@ -182,8 +181,10 @@ class DFMModel:
         # 初始因子 F0 = U_k * S_k （匹配老代码）
         factors_init = U[:, :self.n_factors] * s[:self.n_factors]
 
+        # 关键修复：必须指定index，否则estimate_loadings索引错误！
         factors_df = pd.DataFrame(
             factors_init,
+            index=obs_centered.index,  # 使用obs_centered的index（日期）
             columns=[f'Factor{i+1}' for i in range(self.n_factors)]
         )
 
@@ -221,6 +222,10 @@ class DFMModel:
             raise ValueError(f"载荷矩阵仍包含NaN或Inf，无法继续。请检查输入数据质量。")
 
         # PCA初始化完成（静默）
+
+        # 添加调试信息
+        logger.debug(f"[PCA] 初始因子标准差: {factors_df.std().values}")
+        logger.debug(f"[PCA] 初始载荷范围: [{initial_loadings.min():.2f}, {initial_loadings.max():.2f}]")
 
         return factors_df, initial_loadings, V
 
@@ -302,6 +307,10 @@ class DFMModel:
         obs_centered_for_R = obs_centered.loc[train_index] if len(train_index) < len(index) else obs_centered
         R = self._compute_R_matrix(initial_factors.values, V, stds, obs_centered_for_R)
 
+        # 调试：打印初始R矩阵
+        logger.debug(f"[初始化] R矩阵对角线前5个: {np.diag(R)[:5]}")
+        logger.debug(f"[初始化] 初始Q矩阵对角线: {np.diag(Q)}")
+
         loglik_prev = -np.inf
         converged = False
 
@@ -329,9 +338,28 @@ class DFMModel:
 
             # 注意：B矩阵在循环外初始化，并在M步后更新（匹配老代码）
 
+            if iteration == 0:
+                logger.debug(f"[EM第0次] Kalman滤波前, 当前因子标准差: {factors_current.std().values}")
+                logger.debug(f"[EM第0次] obs_centered.shape = {obs_centered.shape}, dtype = {obs_centered.values.dtype}")
+                logger.debug(f"[EM第0次] obs_centered[:3, :3] =\n{obs_centered.values[:3, :3]}")
+                logger.debug(f"[EM第0次] Lambda.shape = {Lambda.shape}, dtype = {Lambda.dtype}")
+                logger.debug(f"[EM第0次] Lambda[:3, :] =\n{Lambda[:3, :]}")
+                logger.debug(f"[EM第0次] B.shape = {B.shape}, dtype = {B.dtype}")
+                logger.debug(f"[EM第0次] B =\n{B}")
+                logger.debug(f"[EM第0次] A.dtype = {A.dtype}, Q.dtype = {Q.dtype}, R.dtype = {R.dtype}")
+                logger.debug(f"[EM第0次] A =\n{A}")
+                logger.debug(f"[EM第0次] Q_diag = {np.diag(Q)}")
+                logger.debug(f"[EM第0次] R_diag[:5] = {np.diag(R)[:5]}")
+                logger.debug(f"[EM第0次] x0 = {x0}, dtype = {x0.dtype}")
+                logger.debug(f"[EM第0次] P0_diag = {np.diag(P0)}, dtype = {P0.dtype}")
+
             kf = KalmanFilter(A, B, H, Q, R, x0, P0)
             filter_result = kf.filter(Z, U)  # Z:(n_time, n_obs), U:(n_time, n_states) - 匹配train_model
             smoother_result = kf.smooth(filter_result)
+
+            if iteration == 0:
+                factors_after_kf = smoother_result.x_smoothed[:self.n_factors, :].T
+                logger.debug(f"[EM第0次] Kalman滤波后, 因子标准差: {np.std(factors_after_kf, axis=0)}")
 
             loglik_current = filter_result.loglikelihood
 
@@ -339,16 +367,18 @@ class DFMModel:
                 loglik_diff = loglik_current - loglik_prev
                 logger.debug(f"  LogLik: {loglik_current:.2f} (增量: {loglik_diff:.4f})")
 
-                if abs(loglik_diff) < self.tolerance:
-                    logger.info(f"EM算法收敛于迭代{iteration + 1}")
-                    converged = True
-                    break
+                # [TEMPORARY] 禁用收敛检查以匹配老代码的固定30次迭代
+                # if abs(loglik_diff) < self.tolerance:
+                #     # logger.info(f"EM算法收敛于迭代{iteration + 1}")
+                #     converged = True
+                #     break
 
             loglik_prev = loglik_current
 
             factors_smoothed = smoother_result.x_smoothed[:self.n_factors, :].T
             factors_df = pd.DataFrame(
                 factors_smoothed,
+                index=obs_centered.index,  # 关键修复：必须指定DatetimeIndex！
                 columns=[f'Factor{i+1}' for i in range(self.n_factors)]
             )
 
@@ -358,9 +388,16 @@ class DFMModel:
                 factors_df
             )
 
+            # [DEBUG] 检查Lambda_new
+            if iteration == 0:
+                logger.debug(f"[EM第0次] estimate_loadings返回的Lambda_new[:3, :] =\n{Lambda_new[:3, :]}")
+                logger.debug(f"[EM第0次] Lambda_new中NaN数量: {np.isnan(Lambda_new).sum()}")
+
             # 处理Lambda中的NaN：使用上一次迭代的值
             nan_rows = np.isnan(Lambda_new).any(axis=1)
             if np.any(nan_rows):
+                if iteration == 0:
+                    logger.debug(f"[EM第0次] 发现{nan_rows.sum()}行包含NaN，用初始Lambda替换")
                 Lambda_new[nan_rows, :] = Lambda[nan_rows, :]
 
             # 最终检查：如果仍有NaN（第一次迭代且初始化失败），抛出错误
@@ -384,6 +421,15 @@ class DFMModel:
                 n_shocks=self.n_factors  # 传入n_shocks以计算B矩阵
             )
 
+            # 调试信息：打印第1、2、30次迭代的Q和R
+            if iteration == 0 or iteration == 1 or iteration == 29:
+                logger.debug(f"[EM第{iteration+1}次迭代] Q矩阵对角线: {np.diag(Q)}")
+                logger.debug(f"[EM第{iteration+1}次迭代] R矩阵对角线前5个: {np.diag(R)[:5]}")
+                logger.debug(f"[EM第{iteration+1}次迭代] Lambda[:3, :] =\n{Lambda[:3, :]}")
+                logger.debug(f"[EM第{iteration+1}次迭代] A =\n{A}")
+                logger.debug(f"[EM第{iteration+1}次迭代] 因子标准差: {factors_df.std().values}")
+                logger.debug(f"[EM第{iteration+1}次迭代] 因子前3行:\n{factors_df.values[:3, :]}")
+
             # 更新下一次迭代的初始状态（匹配老代码）
             x0 = smoother_result.x_smoothed[:, 0].copy()  # 第一个时间点的平滑状态
             P0 = smoother_result.P_smoothed[:, :, 0].copy()  # 第一个时间点的平滑协方差
@@ -392,6 +438,10 @@ class DFMModel:
 
         # 提取平滑因子（n_factors × n_time格式）
         factors_smoothed_final = smoother_result.x_smoothed[:self.n_factors, :]  # (n_factors, n_time)
+
+        # 添加调试信息
+        logger.debug(f"[EM结束] 最终因子标准差: {factors_smoothed_final.std(axis=1)}")
+        logger.debug(f"[EM结束] 最终载荷范围: [{Lambda.min():.2f}, {Lambda.max():.2f}]")
 
         # 返回统一的DFMModelResult
         return DFMModelResult(
