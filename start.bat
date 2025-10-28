@@ -45,11 +45,27 @@ if %errorlevel% equ 0 (
 )
 
 echo.
-echo [3/4] 启动应用程序...
+echo [3/4] 配置运行环境...
+REM ========================================
+REM 调试模式配置
+REM ========================================
+REM 调试模式：跳过用户认证和权限检查（适用于开发调试）
+REM 正常模式：启用完整的用户认证和权限控制（适用于生产环境）
+REM
+REM 设置 HTFA_DEBUG_MODE=true  -> 调试模式（默认）
+REM 设置 HTFA_DEBUG_MODE=false -> 正常模式
+REM ========================================
+
+REM 设置调试模式（开发时使用true，生产时使用false）
+set HTFA_DEBUG_MODE=false
+
+echo [信息] 调试模式: %HTFA_DEBUG_MODE%
+echo.
+echo [4/5] 启动应用程序...
 echo.
 REM 自动输入空邮箱(直接回车)跳过邮箱提示
 echo. | py -m streamlit run dashboard/app.py --server.port=8501
 
 echo.
-echo [4/4] 应用程序已退出
+echo [5/5] 应用程序已退出
 pause

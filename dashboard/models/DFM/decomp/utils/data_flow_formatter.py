@@ -7,6 +7,7 @@
 """
 
 import pandas as pd
+import unicodedata
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
 from datetime import datetime
@@ -30,6 +31,44 @@ class DataFlowFormatter:
             var_industry_map: 变量名到行业的映射字典
         """
         self.var_industry_map = var_industry_map or {}
+
+    @staticmethod
+    def _normalize_variable_name(variable_name: str) -> str:
+        """
+        标准化变量名以匹配var_industry_map中的键
+
+        采用与数据准备模块相同的标准化策略
+
+        Args:
+            variable_name: 原始变量名
+
+        Returns:
+            标准化后的变量名
+        """
+        if pd.isna(variable_name) or variable_name == '':
+            return ''
+
+        text = str(variable_name)
+        text = unicodedata.normalize('NFKC', text)
+        text = text.strip()
+
+        if any(ord(char) < 128 for char in text):
+            text = text.lower()
+
+        return text
+
+    def _get_industry(self, variable_name: str) -> str:
+        """
+        获取变量所属行业
+
+        Args:
+            variable_name: 变量名
+
+        Returns:
+            行业名称
+        """
+        normalized_name = self._normalize_variable_name(variable_name)
+        return self.var_industry_map.get(normalized_name, 'Other')
 
     def format_data_flow(
         self,
@@ -103,7 +142,7 @@ class DataFlowFormatter:
                 release = {
                     'time': contrib.release_date.strftime('%I:%M%p'),  # 格式: 08:35AM
                     'variable': contrib.variable_name,
-                    'industry': self.var_industry_map.get(contrib.variable_name, 'Other'),
+                    'industry': self._get_industry(contrib.variable_name),
                     'actual': float(contrib.observed_value),
                     'contribution': float(contrib.contribution_pct),
                     'impact': float(contrib.impact_value),
@@ -143,7 +182,7 @@ class DataFlowFormatter:
                 '发布日期': contrib.release_date.strftime('%Y-%m-%d'),
                 '发布时间': contrib.release_date.strftime('%H:%M'),
                 '变量名称': contrib.variable_name,
-                '所属行业': self.var_industry_map.get(contrib.variable_name, 'Other'),
+                '所属行业': self._get_industry(contrib.variable_name),
                 '观测值': contrib.observed_value,
                 '影响值': contrib.impact_value,
                 '贡献度(%)': contrib.contribution_pct,
@@ -257,7 +296,7 @@ class DataFlowFormatter:
                 'date': contrib.release_date.strftime('%Y-%m-%d'),
                 'time': contrib.release_date.strftime('%H:%M'),
                 'variable': contrib.variable_name,
-                'industry': self.var_industry_map.get(contrib.variable_name, 'Other'),
+                'industry': self._get_industry(contrib.variable_name),
                 'impact': float(contrib.impact_value),
                 'description': f"{contrib.variable_name}: {contrib.observed_value:.2f} (影响: {contrib.impact_value:+.4f})"
             }
@@ -282,7 +321,7 @@ class DataFlowFormatter:
         """
         filtered = [
             c for c in contributions
-            if self.var_industry_map.get(c.variable_name, 'Other') == industry
+            if self._get_industry(c.variable_name) == industry
         ]
         return filtered
 

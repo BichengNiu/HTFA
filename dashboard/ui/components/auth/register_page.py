@@ -23,6 +23,7 @@ class RegisterPage:
         """初始化注册页面"""
         self.auth_manager = AuthManager()
         self.db = AuthDatabase()
+        self.security_utils = SecurityUtils()
         self.logger = logging.getLogger(__name__)
     
     def render(self) -> Optional[bool]:
@@ -199,7 +200,7 @@ class RegisterPage:
                 return False
             
             # 用户名格式验证
-            is_valid, msg = SecurityUtils.validate_username(username)
+            is_valid, msg = self.security_utils.validate_username(username)
             if not is_valid:
                 error_placeholder.error(f"用户名格式错误: {msg}")
                 return False

@@ -60,17 +60,63 @@ def force_navigation_state_sync(state_manager, main_module: str, sub_module: str
 def check_user_permission(module_name: str) -> tuple[bool, Optional[str]]:
     """
     检查用户是否有访问指定模块的权限
-    
+
     Args:
         module_name: 模块名称
-        
+
     Returns:
         tuple[bool, Optional[str]]: (是否有权限, 错误信息)
     """
     try:
-        logger.debug(f"权限检查 - 模块名称: {module_name}")
-        logger.debug(f"临时允许访问模块: {module_name}")
-        return True, None
+        from dashboard.core import get_unified_manager
+        state_manager = get_unified_manager()
+
+        # 读取调试模式状态
+        debug_mode = state_manager.get_state('auth.debug_mode', True)
+
+        # 调试模式：直接放行
+        if debug_mode:
+            logger.debug(f"调试模式：允许访问模块 {module_name}")
+            return True, None
+
+        # 正常模式：检查用户权限
+        user_accessible_modules = state_manager.get_state('auth.user_accessible_modules', set())
+        current_user = state_manager.get_state('auth.current_user', None)
+
+        if not current_user:
+            error_msg = f"请先登录后访问「{module_name}」模块"
+            logger.warning(f"权限检查失败：{error_msg}")
+            return False, error_msg
+
+        # 获取管理员权限检查器
+        from dashboard.ui.components.auth.auth_middleware import get_auth_middleware
+        auth_middleware = get_auth_middleware()
+        is_admin = auth_middleware.permission_manager.is_admin(current_user)
+
+        # 用户管理模块：仅管理员可访问
+        if module_name == '用户管理':
+            if is_admin:
+                logger.debug(f"权限检查通过：管理员可以访问用户管理模块")
+                return True, None
+            else:
+                error_msg = f"只有管理员才能访问「{module_name}」模块"
+                logger.warning(f"权限检查失败：{error_msg}")
+                return False, error_msg
+
+        # 其他模块：管理员不可访问，普通用户按权限访问
+        if is_admin:
+            error_msg = f"管理员账户无法访问「{module_name}」模块，仅可访问用户管理"
+            logger.warning(f"权限检查失败：{error_msg}")
+            return False, error_msg
+
+        # 普通用户：检查模块是否在可访问列表中
+        if module_name in user_accessible_modules:
+            logger.debug(f"权限检查通过：用户可以访问模块 {module_name}")
+            return True, None
+        else:
+            error_msg = f"您没有访问「{module_name}」模块的权限，请联系管理员"
+            logger.warning(f"权限检查失败：{error_msg}")
+            return False, error_msg
 
     except Exception as e:
         logger.error(f"权限检查失败: {e}")
@@ -581,6 +627,10 @@ def detect_navigation_level(main_module: str, sub_module: Optional[str], nav_man
 
         # 对于数据探索模块，直接显示内容（无子模块）
         if main_module == '数据探索':
+            return 'FUNCTION_ACTIVE'
+
+        # 对于用户管理模块，直接显示内容（管理员专属，无子模块）
+        if main_module == '用户管理':
             return 'FUNCTION_ACTIVE'
 
         # 如果没有子模块，说明只选择了主模块

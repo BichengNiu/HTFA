@@ -9,6 +9,7 @@ from typing import Optional
 # 导入认证相关组件
 from dashboard.ui.components.auth.user_management import render_user_management_page
 from dashboard.ui.components.auth.auth_middleware import get_auth_middleware
+from dashboard.core import get_unified_manager
 
 
 class UserManagementWelcomePage:
@@ -23,14 +24,14 @@ class UserManagementWelcomePage:
             if get_auth_middleware is None:
                 st.error("认证中间件未正确导入")
                 return
-            
+
             # 获取认证中间件
             auth_middleware = get_auth_middleware()
-            
-            
-            # 检查用户认证
-            current_user = auth_middleware.require_authentication(show_login=False)
-            
+
+            # 从统一状态管理器获取当前用户（避免重复认证）
+            state_manager = get_unified_manager()
+            current_user = state_manager.get_state('auth.current_user', None)
+
             if not current_user:
                 # 显示登录提示而不是停止渲染
                 st.warning("请先登录以访问用户管理功能")
@@ -103,15 +104,17 @@ def render_user_management_sub_module(sub_module_name: str) -> Optional[str]:
         if get_auth_middleware is None:
             st.error("❌ 认证中间件未正确导入")
             return "认证中间件导入失败"
-        
+
         # 获取认证中间件
         auth_middleware = get_auth_middleware()
-        
+
         # 添加子模块标题
         st.markdown(f"### {sub_module_name}")
-        
-        # 检查用户认证
-        current_user = auth_middleware.require_authentication(show_login=False)
+
+        # 从统一状态管理器获取当前用户（避免重复认证）
+        state_manager = get_unified_manager()
+        current_user = state_manager.get_state('auth.current_user', None)
+
         if not current_user:
             st.warning("⚠️ 请先登录以访问用户管理功能")
             st.info("💡 用户管理功能需要管理员权限")

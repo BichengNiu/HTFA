@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
+import unicodedata
 
 from ..core.news_impact_calculator import NewsContribution
 
@@ -30,6 +31,38 @@ class IndustryAggregator:
         """
         self.var_industry_map = var_industry_map or {}
         self.default_industry = "Other"  # 默认行业类别
+
+    @staticmethod
+    def _normalize_variable_name(variable_name: str) -> str:
+        """
+        标准化变量名以匹配var_industry_map中的键
+
+        采用与数据准备模块相同的标准化策略：
+        - Unicode NFKC规范化
+        - 去除首尾空格
+        - 英文字母转小写
+
+        Args:
+            variable_name: 原始变量名
+
+        Returns:
+            标准化后的变量名
+        """
+        if pd.isna(variable_name) or variable_name == '':
+            return ''
+
+        # NFKC规范化
+        text = str(variable_name)
+        text = unicodedata.normalize('NFKC', text)
+
+        # 去除前后空格
+        text = text.strip()
+
+        # 英文字母转小写
+        if any(ord(char) < 128 for char in text):
+            text = text.lower()
+
+        return text
 
     def aggregate_by_industry(
         self,
@@ -277,9 +310,9 @@ class IndustryAggregator:
 
         return color_map
 
-    def _get_industry(self, variable_name: str) -> str:
+    def get_industry(self, variable_name: str) -> str:
         """
-        获取变量所属行业
+        获取变量所属行业（公共方法）
 
         Args:
             variable_name: 变量名
@@ -287,7 +320,21 @@ class IndustryAggregator:
         Returns:
             行业名称
         """
-        return self.var_industry_map.get(variable_name, self.default_industry)
+        # 标准化变量名以匹配var_industry_map中的键
+        normalized_name = self._normalize_variable_name(variable_name)
+        return self.var_industry_map.get(normalized_name, self.default_industry)
+
+    def _get_industry(self, variable_name: str) -> str:
+        """
+        获取变量所属行业（内部方法，保持向后兼容）
+
+        Args:
+            variable_name: 变量名
+
+        Returns:
+            行业名称
+        """
+        return self.get_industry(variable_name)
 
     def get_summary_statistics(
         self,

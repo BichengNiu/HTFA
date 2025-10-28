@@ -379,9 +379,7 @@ MODULE_CONFIG = {
         "DFM 模型": ["数据准备", "模型训练", "模型分析", "新闻分析"]
     },
     "数据探索": None,  # 直接显示数据探索功能，包含平稳性分析和相关性分析
-    "用户管理": {
-        "用户管理": ["用户列表", "权限配置", "系统设置"]
-    }
+    "用户管理": None  # 直接显示用户管理功能
 }
 
 
@@ -424,11 +422,17 @@ lazy_loader, state_manager, nav_manager = get_managers()
 
 # 集成认证中间件
 from dashboard.ui.components.auth.auth_middleware import get_auth_middleware
+from dashboard.config.auth_config import AuthConfig
 
 auth_middleware = get_auth_middleware()
 
-# 暂时跳过认证用于调试
-current_user = None
+# 根据调试模式决定是否需要认证
+if AuthConfig.is_debug_mode():
+    # 调试模式：跳过认证
+    current_user = None
+else:
+    # 正常模式：强制要求认证
+    current_user = auth_middleware.require_authentication(show_login=True)
 
 # 如果用户已认证，渲染用户信息到侧边栏
 if current_user:
@@ -609,11 +613,11 @@ if state_manager and nav_manager:
     if current_main or current_sub:
         force_navigation_state_sync(state_manager, current_main, current_sub)
 
-    # 获取用户可访问的模块信息（但不过滤）
+    # 获取用户可访问的模块信息
     user_accessible_modules = set()
     if current_user and auth_middleware:
         try:
-            # 直接使用权限管理器获取用户可访问的模块列表
+            # 正常模式：使用权限管理器获取用户可访问的模块列表
             accessible_modules_list = auth_middleware.permission_manager.get_accessible_modules(current_user)
             user_accessible_modules = set(accessible_modules_list)
             debug_navigation("权限检查", f"用户 {current_user.username} 可访问 {len(user_accessible_modules)} 个模块: {user_accessible_modules}")
@@ -622,11 +626,17 @@ if state_manager and nav_manager:
             # 如果检查失败，不给任何默认权限，让用户联系管理员
             user_accessible_modules = set()
     else:
-        # 没有用户或认证中间件时，为测试给所有权限
-        user_accessible_modules = set(['数据预览', '监测分析', '模型分析', '数据探索', '用户管理'])
-    
-    # 将权限信息存储到状态管理器供内容路由使用
+        # 调试模式：没有用户时给所有权限
+        if AuthConfig.is_debug_mode():
+            user_accessible_modules = set(AuthConfig.DEBUG_ACCESSIBLE_MODULES)
+            debug_navigation("权限检查", f"调试模式：允许访问所有模块 ({len(user_accessible_modules)} 个)")
+        else:
+            # 正常模式且未登录：无权限
+            user_accessible_modules = set()
+
+    # 将权限信息和调试模式状态存储到状态管理器
     if state_manager:
+        state_manager.set_state('auth.debug_mode', AuthConfig.is_debug_mode())
         state_manager.set_state('auth.user_accessible_modules', user_accessible_modules)
         state_manager.set_state('auth.current_user', current_user)
     

@@ -485,11 +485,38 @@ def render_complete_sidebar(
     with create_sidebar_container():
         # 移除侧边栏标题，保持简洁
 
+        # === 调试模式徽章 ===
+        state_manager = get_unified_manager()
+        if state_manager:
+            debug_mode = state_manager.get_state('auth.debug_mode', True)
+            if debug_mode:
+                st.warning("调试模式：认证和权限检查已禁用")
+                st.markdown("")
+
         # === 第一层：主模块选择器 ===
         st.markdown("### 主模块")
 
-        # 暂时显示所有模块，包括用户管理模块
-        main_module_options = list(module_config.keys())
+        # 根据用户角色决定显示的模块
+        current_user = state_manager.get_state('auth.current_user', None) if state_manager else None
+
+        if debug_mode:
+            # 调试模式：显示所有模块
+            main_module_options = list(module_config.keys())
+        elif current_user:
+            # 正常模式：根据管理员身份决定模块列表
+            from dashboard.ui.components.auth.auth_middleware import get_auth_middleware
+            auth_middleware = get_auth_middleware()
+
+            if auth_middleware.permission_manager.is_admin(current_user):
+                # 管理员：只显示用户管理模块
+                main_module_options = ['用户管理']
+            else:
+                # 非管理员：显示除用户管理外的所有模块（按权限过滤）
+                all_non_admin_modules = [m for m in module_config.keys() if m != '用户管理']
+                main_module_options = filter_modules_by_permission(all_non_admin_modules)
+        else:
+            # 未登录且非调试模式：不应该到这里，但为了安全返回空列表
+            main_module_options = []
 
         # 获取当前状态，初次进入时可能为None
         current_main_module = nav_manager.get_current_main_module() if nav_manager else None
@@ -799,24 +826,27 @@ def filter_modules_by_permission(all_modules: List[str]) -> List[str]:
         # 如果状态管理器不可用，返回除用户管理外的所有模块
         return [module for module in all_modules if module != '用户管理']
 
+    # 读取调试模式状态
+    debug_mode = state_manager.get_state('auth.debug_mode', True)
+
+    # 调试模式：显示所有模块
+    if debug_mode:
+        return all_modules
+
+    # 正常模式：按权限过滤
     user_accessible_modules = state_manager.get_state('auth.user_accessible_modules', set())
     current_user = state_manager.get_state('auth.current_user', None)
 
     if not current_user:
-        # 如果用户未登录，返回除用户管理外的所有模块
-        return [module for module in all_modules if module != '用户管理']
+        # 正常模式且未登录：不应该到达这里（app.py会强制登录）
+        # 但为了安全起见，返回空列表
+        return []
 
     # 过滤模块列表
     filtered_modules = []
     for module in all_modules:
-        if module == '用户管理':
-            # 用户管理模块只有有相应权限的用户才能看到
-            if '用户管理' in user_accessible_modules:
-                filtered_modules.append(module)
-        else:
-            # 其他模块按现有逻辑处理
-            if module in user_accessible_modules:
-                filtered_modules.append(module)
+        if module in user_accessible_modules:
+            filtered_modules.append(module)
 
     return filtered_modules
 

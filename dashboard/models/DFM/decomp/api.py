@@ -370,7 +370,7 @@ def _generate_analysis_results(
         for contrib in contributions:
             impacts_data.append({
                 'variable_name': contrib.variable_name,
-                'industry': var_industry_map.get(contrib.variable_name, 'Other') if var_industry_map else 'Unknown',
+                'industry': industry_aggregator.get_industry(contrib.variable_name),
                 'observed_value': contrib.observed_value,
                 'expected_value': contrib.expected_value,
                 'impact_value': contrib.impact_value,
