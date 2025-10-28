@@ -94,11 +94,12 @@ class DFMTrainer:
             )
 
             # 输出训练配置摘要
-            train_data = data.loc[:self.config.train_end]
+            # 根据training_start切分训练数据
+            train_data = data.loc[self.config.training_start:self.config.train_end]
             val_data = data.loc[self.config.validation_start:self.config.validation_end]
 
             config_summary = format_training_config(
-                train_start=str(data.index.min().date()) if hasattr(data.index.min(), 'date') else str(data.index.min()),
+                train_start=self.config.training_start,
                 train_end=self.config.train_end,
                 validation_start=self.config.validation_start,
                 validation_end=self.config.validation_end,
@@ -117,11 +118,12 @@ class DFMTrainer:
                 # 创建变量筛选专用评估器（使用下月配对RMSE）
                 evaluator = create_variable_selection_evaluator(self.config)
 
-                # 创建变量选择器
+                # 创建变量选择器（传递并行配置）
                 selector = BackwardSelector(
                     evaluator_func=evaluator,
                     criterion='rmse',
-                    min_variables=self.config.min_variables_after_selection or 1
+                    min_variables=self.config.min_variables_after_selection or 1,
+                    parallel_config=self.config.get_parallel_config()
                 )
 
                 # 根据因子选择策略确定k_factors用于变量选择
@@ -143,6 +145,7 @@ class DFMTrainer:
                     validation_start=self.config.validation_start,
                     validation_end=self.config.validation_end,
                     target_freq=self.config.target_freq,
+                    training_start_date=self.config.training_start,
                     train_end_date=self.config.train_end,
                     target_mean_original=target_data.mean(),
                     target_std_original=target_data.std(),
@@ -172,6 +175,7 @@ class DFMTrainer:
                 method=self.config.factor_selection_method,
                 fixed_k=self.config.k_factors,
                 pca_threshold=self.config.pca_threshold or 0.9,
+                train_end=self.config.train_end,
                 progress_callback=progress_callback
             )
 
@@ -183,6 +187,7 @@ class DFMTrainer:
                 predictor_data=predictor_data,
                 target_data=target_data,
                 k_factors=k_factors,
+                training_start=self.config.training_start,
                 train_end=self.config.train_end,
                 validation_start=self.config.validation_start,
                 validation_end=self.config.validation_end,
@@ -229,7 +234,8 @@ class DFMTrainer:
                     file_paths = exporter.export_all(
                         result,
                         self.config,
-                        output_dir=export_dir
+                        output_dir=export_dir,
+                        prepared_data=data  # 传递完整观测数据用于新闻分析
                     )
 
                     result.export_files = file_paths

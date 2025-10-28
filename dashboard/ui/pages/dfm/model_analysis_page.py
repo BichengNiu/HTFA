@@ -17,7 +17,6 @@ import io
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from scipy.cluster import hierarchy as sch
 
 # 统一状态管理器导入
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -69,7 +68,10 @@ from datetime import datetime
 CONFIG_AVAILABLE = False
 
 # Import backend functions
-from dashboard.models.DFM.results.dfm_backend import load_dfm_results_from_uploads
+from dashboard.models.DFM.results.dfm_backend import (
+    load_dfm_results_from_uploads,
+    perform_loadings_clustering
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,26 +286,16 @@ def plot_loadings_heatmap(loadings_df: pd.DataFrame, title: str = "因子载荷�
         st.warning(f"无法绘制热力图：提供的载荷数据无效 ({title})。")
         return
 
-    data_for_clustering = loadings_df.copy() # 变量是行
-    variable_names = data_for_clustering.index.tolist()
-    factor_names = data_for_clustering.columns.tolist()
+    # 使用Backend的聚类函数
+    data_for_clustering, variable_names, clustering_success = perform_loadings_clustering(
+        loadings_df,
+        cluster_vars=cluster_vars
+    )
 
-    # 1. (如果需要) 对变量进行聚类
-    if cluster_vars:
-        try:
-            if data_for_clustering.shape[0] <= 1: # 如果只有一个变量，无法聚类
-                 print("[DFM UI] 只有一个变量，跳过聚类。")
-            else:
-                from scipy.cluster import hierarchy as sch
-                linked = sch.linkage(data_for_clustering.values, method='ward', metric='euclidean')
-                dendro = sch.dendrogram(linked, no_plot=True)
-                clustered_indices = dendro['leaves']
-                data_for_clustering = data_for_clustering.iloc[clustered_indices, :]
-                variable_names = data_for_clustering.index.tolist() # 获取聚类后的变量顺序
-                title += " (变量聚类排序)"
-        except Exception as e_cluster:
-            st.warning(f"变量聚类失败: {e_cluster}. 将按原始顺序显示。")
-            # 如果聚类失败，variable_names 保持原始顺序
+    if clustering_success:
+        title += " (变量聚类排序)"
+
+    factor_names = data_for_clustering.columns.tolist()
 
     # 2. 转置数据以便绘图 (因子在 X 轴, 变量在 Y 轴)
     plot_data_transposed = data_for_clustering.T # 转置后：因子是行，（聚类后）变量是列
@@ -374,12 +366,11 @@ def render_file_upload_section(st_instance):
     
     # 执行状态清理
     cleanup_invalid_file_states()
-    
-    st_instance.markdown("##### [DATA] 上传模型文件")
-    st_instance.markdown("请上传训练完成的DFM模型文件和元数据文件以进行结果分析。")
-    
+
+    st_instance.markdown("### 模型文件上传")
+
     # 创建两列布局
-    col_model, col_metadata = st_instance.columns(2)
+    col_model, col_metadata = st_instance.columns(2)  
     
     with col_model:
         st_instance.markdown("**DFM 模型文件 (.joblib)**")
@@ -392,7 +383,6 @@ def render_file_upload_section(st_instance):
         
         if uploaded_model_file:
             set_dfm_state("dfm_model_file_indep", uploaded_model_file)
-            st_instance.success(f"[SUCCESS] 已上传: {uploaded_model_file.name}")
         else:
             existing_model_file = get_dfm_state('dfm_model_file_indep', None)
             if existing_model_file is not None:
@@ -414,7 +404,6 @@ def render_file_upload_section(st_instance):
         
         if uploaded_metadata_file:
             set_dfm_state("dfm_metadata_file_indep", uploaded_metadata_file)
-            st_instance.success(f"[SUCCESS] 已上传: {uploaded_metadata_file.name}")
         else:
             existing_metadata_file = get_dfm_state('dfm_metadata_file_indep', None)
             if existing_metadata_file is not None:
@@ -444,7 +433,6 @@ def render_file_upload_section(st_instance):
     metadata_file_exists = is_valid_file_object(metadata_file)
 
     if model_file_exists and metadata_file_exists:
-        st_instance.success("[SUCCESS] 所有必需文件已上传完成，可以进行模型分析。")
         return True
     else:
         missing_files = []
@@ -492,27 +480,19 @@ def render_dfm_tab(st):
     if model is None or metadata is None:
         st.warning("未能成功加载 DFM 模型或元数据。请检查文件内容或格式。")
         return
-    
-    st.success("成功加载 DFM 模型和元数据！")
 
-
-    st.write(f"- **目标变量:** {metadata.get('target_variable', 'N/A')}")
-    train_start = metadata.get('training_start_date', 'N/A')
-    # 修正训练结束日期键名 - 训练模块使用 'training_end_date'
-    train_end = metadata.get('training_end_date', metadata.get('train_end_date', 'N/A'))
+    # 获取验证期信息（用于后续绘图标记，不显示）
     val_start = metadata.get('validation_start_date', 'N/A')
     val_end = metadata.get('validation_end_date', 'N/A')
-    st.write(f"- **训练期:** {train_start} 至 {train_end}")
-    st.write(f"- **验证期:** {val_start} 至 {val_end}")
-    
-    best_params_dict = metadata.get('best_params', {})
-    var_select_method = best_params_dict.get('variable_selection_method', '未指定') 
-    tuning_objective = best_params_dict.get('tuning_objective', '未指定')
-    st.write(f"- **变量选择方法:** {var_select_method} (优化目标: {tuning_objective})") # Removed trailing space from original
-    if var_select_method == '未指定' or tuning_objective == '未指定':
-        st.caption(":grey[注：未能从元数据 'best_params' 字典中找到 'variable_selection_method' 或 'tuning_objective'。]")
-    st.markdown("---") # 分隔线
-    
+
+    # 也尝试从train_end_date获取训练期结束日期
+    train_end = metadata.get('train_end_date', metadata.get('train_end', 'N/A'))
+
+    logger.info(f"[CHART DEBUG] 从metadata获取的日期配置:")
+    logger.info(f"[CHART DEBUG]   train_end={train_end}")
+    logger.info(f"[CHART DEBUG]   val_start={val_start}")
+    logger.info(f"[CHART DEBUG]   val_end={val_end}")
+
     # 从元数据获取指标
     # 修复因子数量获取逻辑 - 多重回退策略
     k_factors = 'N/A'
@@ -598,10 +578,12 @@ def render_dfm_tab(st):
 
     row1_col1, row1_col2 = st.columns(2)
     with row1_col1:
-        display_k = k_factors if isinstance(k_factors, int) else 'N/A'
+        # 兼容numpy整数类型和Python整数类型
+        display_k = int(k_factors) if isinstance(k_factors, (int, np.integer)) else 'N/A'
         st.metric("最终因子数 (k)", display_k)
     with row1_col2:
-        display_n = n_vars if isinstance(n_vars, int) else 'N/A'
+        # 兼容numpy整数类型和Python整数类型
+        display_n = int(n_vars) if isinstance(n_vars, (int, np.integer)) else 'N/A'
         st.metric("最终变量数 (N)", display_n)
 
     row2_col1, row2_col2 = st.columns(2)
@@ -711,10 +693,41 @@ def render_dfm_tab(st):
                     f'<b>{target_display_name}</b>: %{{y:.2f}}<extra></extra>'
                 ))
 
+        # 添加验证期黄色背景标记
+        try:
+            # 从metadata获取验证期日期
+            validation_start = metadata.get('validation_start_date')
+            validation_end = metadata.get('validation_end_date')
+
+            if validation_start and validation_end and validation_start != 'N/A' and validation_end != 'N/A':
+                # 转换为datetime对象
+                val_start_dt = pd.to_datetime(validation_start)
+                val_end_dt = pd.to_datetime(validation_end)
+
+                # 添加黄色半透明背景区域
+                fig.add_vrect(
+                    x0=val_start_dt,
+                    x1=val_end_dt,
+                    fillcolor="yellow",
+                    opacity=0.2,
+                    layer="below",
+                    line_width=0,
+                    annotation_text="验证期",
+                    annotation_position="top left",
+                    annotation_font_size=10,
+                    annotation_font_color="gray"
+                )
+                logger.info(f"已添加验证期标记: {val_start_dt} 到 {val_end_dt}")
+        except Exception as e:
+            logger.warning(f"添加验证期标记失败: {e}")
+
         # 设置图表布局
         fig.update_layout(
             title=f'周度 {nowcast_display_name} vs. {target_display_name}',
-            xaxis_title="日期",
+            xaxis=dict(
+                title="",
+                type='date'
+            ),
             yaxis_title="(%)",
             legend=dict(
                 orientation="h",
@@ -727,19 +740,6 @@ def render_dfm_tab(st):
             height=500,
             margin=dict(t=50, b=100, l=50, r=50)
         )
-
-        # 添加验证期标记
-        try:
-            val_start_dt = pd.to_datetime(val_start) if pd.notna(val_start) and val_start != 'N/A' else None
-            val_end_dt = pd.to_datetime(val_end) if pd.notna(val_end) and val_end != 'N/A' else None
-            if val_start_dt and val_end_dt:
-                fig.add_vrect(
-                    x0=str(val_start_dt), x1=str(val_end_dt),
-                    fillcolor="yellow", opacity=0.2,
-                    layer="below", line_width=0
-                )
-        except Exception as e_vrect:
-            logger.warning(f"标记验证期时出错: {e_vrect}")
 
         # 显示图表
         st.plotly_chart(fig, use_container_width=True)
@@ -843,10 +843,12 @@ def render_dfm_tab(st):
     pca_results = metadata.get('pca_results_df')
     # 修正因子数量获取，与训练模块的元数据键匹配
     k = metadata.get('best_params', {}).get('k_factors', metadata.get('n_factors', 0))
+    # 兼容numpy整数类型
+    if isinstance(k, (int, np.integer)):
+        k = int(k)
     if not isinstance(k, int) or k <= 0:
-        if not isinstance(k, int) or k <= 0:
-            logger.warning("无法确定最终因子数 k，将尝试从 PCA 数据推断。")
-            k = len(pca_results.index) if pca_results is not None and isinstance(pca_results, pd.DataFrame) else 0
+        logger.warning("无法确定最终因子数 k，将尝试从 PCA 数据推断。")
+        k = len(pca_results.index) if pca_results is not None and isinstance(pca_results, pd.DataFrame) else 0
     
     if pca_results is not None and isinstance(pca_results, pd.DataFrame) and not pca_results.empty:
         pca_df_display = pca_results.head(k if k > 0 else len(pca_results.index)).copy()
@@ -926,31 +928,23 @@ def render_dfm_tab(st):
             logger.error(f"Error generating R2 analysis Excel file: {e}")
 
     st.markdown("---") # Add a separator
-    st.markdown("**因子载荷热力图**")
 
     factor_loadings_df = metadata.get('factor_loadings_df') # Assuming this key exists
 
     if factor_loadings_df is not None and isinstance(factor_loadings_df, pd.DataFrame) and not factor_loadings_df.empty:
-        
-        data_for_clustering = factor_loadings_df.copy() # 变量为行，因子为列
-        variable_names_original = data_for_clustering.index.tolist()
-        factor_names_original = data_for_clustering.columns.tolist()
-        
-        y_labels_heatmap = variable_names_original # 默认使用原始顺序
-        clustering_performed_successfully = False
 
-        # 1. 对变量进行聚类 (如果变量多于1个)
-        if data_for_clustering.shape[0] > 1:
-            linked = sch.linkage(data_for_clustering.values, method='ward', metric='euclidean')
-            dendro = sch.dendrogram(linked, no_plot=True)
-            clustered_indices = dendro['leaves']
-            data_for_clustering = data_for_clustering.iloc[clustered_indices, :]
-            y_labels_heatmap = data_for_clustering.index.tolist() # 聚类成功后更新
-            clustering_performed_successfully = True
+        # 使用Backend的聚类函数
+        data_for_clustering, y_labels_heatmap, clustering_performed_successfully = perform_loadings_clustering(
+            factor_loadings_df,
+            cluster_vars=True
+        )
+
+        if clustering_performed_successfully:
             logger.info("因子载荷热力图：变量聚类成功。")
         else:
-            logger.info("因子载荷热力图：只有一个变量，跳过聚类。")
-            # y_labels_heatmap 保持为之前初始化的 variable_names_original
+            logger.info("因子载荷热力图：使用原始顺序。")
+
+        factor_names_original = data_for_clustering.columns.tolist()
 
         # 2. 准备绘图数据 (z值, x轴标签, y轴标签)
         z_values = data_for_clustering.values # (num_clustered_vars, num_factors)
@@ -960,7 +954,7 @@ def render_dfm_tab(st):
             z=z_values,
             x=x_labels_heatmap,
             y=y_labels_heatmap, # <--- 确保这里使用的是聚类后的 y_labels_heatmap
-            colorscale='RdBu',  # 修改颜色方案：正值为红色，负值为蓝色
+            colorscale='RdBu_r',  # 反转颜色方案：红色=正相关(正值)，蓝色=负相关(负值)
             zmid=0,
             colorbar=dict(title='载荷值'),
             xgap=1,
@@ -1028,7 +1022,6 @@ def render_dfm_tab(st):
             st.error(f"生成因子载荷下载文件时出错: {e_csv_loadings}")
         
         st.markdown("---")
-        st.markdown("**因子时间序列演变图**")
         
         # 获取因子时间序列数据
         factor_series_data = metadata.get('factor_series')

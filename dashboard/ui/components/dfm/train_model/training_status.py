@@ -18,8 +18,8 @@ from datetime import datetime
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
 from dashboard.core import get_global_dfm_manager
 
-# train_model已被删除,所有功能已迁移到train_ref
-# 这个组件将被废弃或重构为使用train_ref
+# train_model已被删除，所有功能已迁移到train模块
+# 这个组件提供训练状态监控和结果管理
 
 ENHANCED_SYSTEMS_AVAILABLE = False
 # 使用标准日志

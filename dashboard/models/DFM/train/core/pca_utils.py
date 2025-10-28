@@ -21,6 +21,7 @@ def select_num_factors(
     fixed_k: int,
     pca_threshold: float = 0.9,
     elbow_threshold: float = 0.1,
+    train_end: Optional[str] = None,
     progress_callback: Optional[Callable] = None
 ) -> Tuple[int, Optional[Dict]]:
     """
@@ -38,12 +39,13 @@ def select_num_factors(
         fixed_k: 固定因子数（method='fixed'时使用）
         pca_threshold: PCA累积方差阈值（method='cumulative'时使用，默认0.9）
         elbow_threshold: Elbow边际方差阈值（method='elbow'时使用，默认0.1）
+        train_end: 训练集结束日期（用于标准化参数计算，避免数据泄露）
         progress_callback: 进度回调函数
 
     Returns:
         (k_factors, pca_analysis):
             - k_factors: 选定的因子数
-            - pca_analysis: PCA分析结果字典（method='fixed'时为None）
+            - pca_analysis: PCA分析结果字典（包含explained_variance, cumsum_variance, eigenvalues）
 
     Raises:
         ValueError: 如果method不在支持的方法中
@@ -63,19 +65,43 @@ def select_num_factors(
     logger.info("因子数选择")
     logger.info("=" * 60)
 
-    # 方法1: 固定因子数
-    if method == 'fixed':
-        k = fixed_k
-        logger.info(f"使用固定因子数: k={k}")
-        return k, None
+    # 步骤1: 数据标准化（避免数据泄露，仅使用训练集计算标准化参数）
+    data_subset = data[selected_vars].copy()
 
-    # 方法2/3: 基于PCA分析
+    if train_end is not None:
+        # 使用训练集数据计算标准化参数
+        try:
+            train_data = data_subset.loc[:train_end]
+            global_mean = train_data.mean(axis=0)
+            global_std = train_data.std(axis=0)
+            logger.info(f"使用训练集数据计算标准化参数 (截止到 {train_end}, {len(train_data)} 样本)")
+        except (KeyError, IndexError) as e:
+            logger.warning(f"无法提取训练集进行标准化: {e}，回退到全数据集")
+            global_mean = data_subset.mean(axis=0)
+            global_std = data_subset.std(axis=0)
+    else:
+        # 如果没有提供train_end，使用全部数据
+        global_mean = data_subset.mean(axis=0)
+        global_std = data_subset.std(axis=0)
+        logger.warning("未提供train_end参数，使用全部数据计算标准化参数（可能导致数据泄露）")
+
+    # 处理标准差为0的列（避免除零错误）
+    zero_std_cols = global_std[global_std == 0].index.tolist()
+    if zero_std_cols:
+        logger.warning(f"以下列标准差为0，将被移除: {zero_std_cols}")
+        data_subset = data_subset.drop(columns=zero_std_cols)
+        global_mean = global_mean.drop(labels=zero_std_cols)
+        global_std = global_std.drop(labels=zero_std_cols)
+
+    # 应用标准化
+    data_standardized = (data_subset - global_mean) / global_std
+    logger.info(f"数据标准化完成. Shape: {data_standardized.shape}")
+
+    # 步骤2: 填充NaN
+    data_for_pca = data_standardized.fillna(0)
+
+    # 步骤3: 执行PCA分析（所有方法都需要PCA结果用于UI显示）
     logger.info(f"执行PCA分析 (method={method})...")
-
-    # 准备数据（填充NaN）
-    data_for_pca = data[selected_vars].fillna(0)
-
-    # PCA分析
     pca = PCA()
     pca.fit(data_for_pca)
 
@@ -87,6 +113,13 @@ def select_num_factors(
         'cumsum_variance': cumsum_variance,
         'eigenvalues': pca.explained_variance_
     }
+
+    # 方法1: 固定因子数
+    if method == 'fixed':
+        k = fixed_k
+        logger.info(f"使用固定因子数: k={k}")
+        logger.info(f"对应累积方差: {cumsum_variance[k-1]:.1%}")
+        return k, pca_analysis
 
     # 方法2: 累积方差贡献率
     if method == 'cumulative':

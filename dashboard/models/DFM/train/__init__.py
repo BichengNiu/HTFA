@@ -54,9 +54,9 @@ __all__ = [
 
     # ============ 高级API（进阶使用） ============
     # 如需使用以下组件，可从子模块显式导入：
-    # from train_ref.core import DFMModel, KalmanFilter
-    # from train_ref.selection import BackwardSelector
-    # from train_ref.export import TrainingResultExporter
+    # from dashboard.models.DFM.train.core import DFMModel, KalmanFilter
+    # from dashboard.models.DFM.train.selection import BackwardSelector
+    # from dashboard.models.DFM.train.export import TrainingResultExporter
 
     # 数据模型（仅导出常用的，其他按需从子模块导入）
     'DFMModelResult',       # DFM模型结果

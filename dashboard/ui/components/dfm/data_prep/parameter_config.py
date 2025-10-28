@@ -210,7 +210,7 @@ class ParameterConfigComponent(DFMComponent):
         
         with row1_col1:
             start_date = st_obj.date_input(
-                "数据开始日期 (系统边界)",
+                "数据开始日期",
                 value=self._get_state('dfm_param_data_start_date', date(2020, 1, 1)),
                 key=f"{self.get_state_key_prefix()}_start_date",
                 help="设置系统处理数据的最早日期边界。训练期、验证期必须在此日期之后。"
@@ -219,7 +219,7 @@ class ParameterConfigComponent(DFMComponent):
         
         with row1_col2:
             end_date = st_obj.date_input(
-                "数据结束日期 (系统边界)",
+                "数据结束日期",
                 value=self._get_state('dfm_param_data_end_date', date(2025, 12, 31)),
                 key=f"{self.get_state_key_prefix()}_end_date",
                 help="设置系统处理数据的最晚日期边界。训练期、验证期必须在此日期之前。"

@@ -11,6 +11,8 @@ from typing import List, Dict, Tuple, Callable, Optional
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import SelectionResult
 from dashboard.models.DFM.train.evaluation.metrics import calculate_combined_score
+from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
+from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_removals_with_fallback
 
 logger = get_logger(__name__)
 
@@ -33,7 +35,8 @@ class BackwardSelector:
         self,
         evaluator_func: Callable,
         criterion: str = 'rmse',
-        min_variables: int = 1
+        min_variables: int = 1,
+        parallel_config: Optional[ParallelConfig] = None
     ):
         """
         Args:
@@ -43,10 +46,12 @@ class BackwardSelector:
             )
             criterion: 优化准则,'rmse'(Hit Rate已弃用)
             min_variables: 最少保留的变量数
+            parallel_config: 并行配置（None表示使用默认串行）
         """
         self.evaluator_func = evaluator_func
         self.criterion = criterion
         self.min_variables = max(1, min_variables)
+        self.parallel_config = parallel_config or ParallelConfig(enabled=False)
 
     def select(
         self,
@@ -57,10 +62,11 @@ class BackwardSelector:
         validation_start: str,
         validation_end: str,
         target_freq: str,
+        training_start_date: str,
         train_end_date: str,
-        target_mean_original: float,
-        target_std_original: float,
-        max_iter: int,
+        target_mean_original: float = 0.0,
+        target_std_original: float = 1.0,
+        max_iter: int = 30,
         max_lags: int = 1,
         progress_callback: Optional[Callable[[str], None]] = None,
         use_optimization: bool = False
@@ -73,10 +79,11 @@ class BackwardSelector:
             target_variable: 目标变量名称
             full_data: 完整数据DataFrame
             params: DFM参数字典(包含k_factors等)
-            validation_start: 验证集开始日期
-            validation_end: 验证集结束日期
+            validation_start: 验证集开始日期（必填）
+            validation_end: 验证集结束日期（必填）
             target_freq: 目标频率
-            train_end_date: 训练集结束日期
+            training_start_date: 训练集开始日期（必填）
+            train_end_date: 训练集结束日期（必填）
             target_mean_original: 目标变量原始均值
             target_std_original: 目标变量原始标准差
             max_iter: 最大EM迭代次数
@@ -95,11 +102,13 @@ class BackwardSelector:
             'validation_start': validation_start,
             'validation_end': validation_end,
             'target_freq': target_freq,
+            'training_start_date': training_start_date,
             'train_end_date': train_end_date,
             'target_mean_original': target_mean_original,
             'target_std_original': target_std_original,
             'max_iter': max_iter,
-            'max_lags': max_lags
+            'max_lags': max_lags,
+            'progress_callback': progress_callback  # 添加progress_callback
         }
 
         total_evaluations = 0
@@ -195,7 +204,7 @@ class BackwardSelector:
         progress_callback: Optional[Callable]
     ) -> Tuple[Tuple[float, float], int, int, float, float]:
         """计算初始基准性能（扩展返回is_rmse和oos_rmse）"""
-        # logger.info(f"计算初始基准性能，变量数: {len(current_predictors)}")
+        logger.info(f"计算初始基准性能，变量数: {len(current_predictors)}")
 
         target_variable = self._eval_params['target_variable']
         initial_vars = [target_variable] + current_predictors
@@ -216,10 +225,10 @@ class BackwardSelector:
                 logger.warning(f"初始基准评估返回无效分数，使用最差分数")
                 score = (-np.inf, -np.inf)
 
-            # logger.info(
-            #     f"初始基准得分 (RMSE={-score[1]:.6f}), "
-            #     f"变量数: {len(current_predictors)}"
-            # )
+            logger.info(
+                f"初始基准得分 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}, "
+                f"变量数: {len(current_predictors)}"
+            )
 
             # 输出基线模型RMSE（精简格式）
             if progress_callback:
@@ -256,9 +265,9 @@ class BackwardSelector:
         progress_callback: Optional[Callable]
     ):
         """记录迭代开始信息"""
-        # logger.info(f"\n{'='*60}")
-        # logger.info(f"变量选择 - 第{iteration}轮 (当前{n_vars}个变量)")
-        # logger.info(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"变量选择 - 第{iteration}轮 (当前{n_vars}个变量)")
+        logger.info(f"{'='*60}")
 
         # 进度显示（简化格式）
         if progress_callback:
@@ -280,44 +289,128 @@ class BackwardSelector:
 
         target_variable = self._eval_params['target_variable']
         k_factors = self._eval_params['params'].get('k_factors', 1)
+        progress_callback = self._eval_params.get('progress_callback')
 
-        for var in current_predictors:
-            temp_predictors = [v for v in current_predictors if v != var]
-            if not temp_predictors:
-                continue
+        # 判断是否使用并行
+        use_parallel = self.parallel_config.should_use_parallel(len(current_predictors))
 
-            temp_variables = [target_variable] + temp_predictors
+        if use_parallel:
+            # 并行评估
+            logger.info(f"  使用并行评估 ({self.parallel_config.get_effective_n_jobs()} 核心)")
+            candidate_results = evaluate_removals_with_fallback(
+                current_predictors=current_predictors,
+                target_variable=target_variable,
+                evaluator_func=self.evaluator_func,
+                eval_params=self._eval_params,
+                k_factors=k_factors,
+                use_parallel=True,
+                n_jobs=self.parallel_config.get_effective_n_jobs(),
+                backend=self.parallel_config.backend,
+                verbose=self.parallel_config.verbose,
+                progress_callback=progress_callback
+            )
+        else:
+            # 串行评估（原有逻辑）
+            candidate_results = []
 
-            # 检查因子数约束
-            if k_factors >= len(temp_variables):
-                logger.debug(f"跳过{var}: k_factors({k_factors}) >= 剩余变量数({len(temp_variables)})")
-                continue
-
-            # 评估移除后的性能
-            try:
-                result_tuple = self.evaluator_func(variables=temp_variables, **self._eval_params)
-                total_evals += 1
-
-                if len(result_tuple) != 9:
-                    logger.warning(f"评估返回了{len(result_tuple)}个值，跳过{var}")
+            for idx, var in enumerate(current_predictors, 1):
+                temp_predictors = [v for v in current_predictors if v != var]
+                if not temp_predictors:
                     continue
 
-                is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
-                if is_svd_error:
-                    total_svd_errors += 1
+                temp_variables = [target_variable] + temp_predictors
 
-                score = calculate_combined_score(is_rmse, oos_rmse, is_hit_rate, oos_hit_rate)
+                # 检查因子数约束
+                if k_factors >= len(temp_variables):
+                    logger.debug(f"  [{idx}/{len(current_predictors)}] 跳过'{var}': k_factors({k_factors}) >= 剩余变量数({len(temp_variables)})")
+                    continue
 
-                # 只要RMSE有限就参与比较
-                if np.isfinite(score[1]) and score > best_score:
-                    best_score = score
-                    best_var = var
-                    best_is_rmse = is_rmse
-                    best_oos_rmse = oos_rmse
+                # 打印正在尝试的变量（同时输出到UI和日志）
+                msg = f"  [{idx}/{len(current_predictors)}] 尝试移除: '{var}'"
+                logger.info(msg)
+                if progress_callback:
+                    progress_callback(msg)
 
-            except Exception as e:
-                logger.error(f"评估移除{var}时出错: {e}")
-                continue
+                # 评估移除后的性能
+                try:
+                    result_tuple = self.evaluator_func(variables=temp_variables, **self._eval_params)
+                    total_evals += 1
+
+                    if len(result_tuple) != 9:
+                        logger.warning(f"    评估返回了{len(result_tuple)}个值，跳过'{var}'")
+                        continue
+
+                    is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+                    if is_svd_error:
+                        total_svd_errors += 1
+                        logger.warning(f"    SVD警告")
+
+                    score = calculate_combined_score(is_rmse, oos_rmse, is_hit_rate, oos_hit_rate)
+
+                    # 打印评估结果（同时输出到UI和日志）
+                    msg = f"    训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}"
+                    logger.info(msg)
+                    if progress_callback:
+                        progress_callback(msg)
+
+                    # 记录候选结果
+                    candidate_results.append({
+                        'var': var,
+                        'is_rmse': is_rmse,
+                        'oos_rmse': oos_rmse,
+                        'is_hit_rate': is_hit_rate,
+                        'oos_hit_rate': oos_hit_rate,
+                        'is_svd_error': is_svd_error
+                    })
+
+                except Exception as e:
+                    logger.error(f"    评估移除'{var}'时出错: {e}")
+                    continue
+
+        # 处理评估结果，计算得分并找出最佳候选
+        for result in candidate_results:
+            total_evals += 1
+            if result.get('is_svd_error', False):
+                total_svd_errors += 1
+
+            score = calculate_combined_score(
+                result['is_rmse'],
+                result['oos_rmse'],
+                result.get('is_hit_rate', 0.0),
+                result.get('oos_hit_rate', 0.0)
+            )
+            result['score'] = score
+
+            # 更新最佳候选
+            if np.isfinite(score[1]) and score > best_score:
+                best_score = score
+                best_var = result['var']
+                best_is_rmse = result['is_rmse']
+                best_oos_rmse = result['oos_rmse']
+
+                if not use_parallel:
+                    # 串行模式下实时标记最佳候选
+                    msg = f"    *** 当前最佳候选 ***"
+                    logger.info(msg)
+                    if progress_callback:
+                        progress_callback(msg)
+
+        # 打印本轮汇总（同时输出到UI和日志）
+        if candidate_results:
+            summary_msg = f"\n  本轮候选汇总 (共{len(candidate_results)}个):"
+            logger.info(summary_msg)
+            if progress_callback:
+                progress_callback(summary_msg)
+
+            for res in candidate_results:
+                is_best = " <- 最佳" if res['var'] == best_var else ""
+                msg = (
+                    f"    '{res['var']}': 训练期RMSE={res['is_rmse']:.4f}, "
+                    f"验证期RMSE={res['oos_rmse']:.4f}{is_best}"
+                )
+                logger.info(msg)
+                if progress_callback:
+                    progress_callback(msg)
 
         return (best_var, best_score, total_evals, total_svd_errors, best_is_rmse, best_oos_rmse)
 
@@ -347,15 +440,15 @@ class BackwardSelector:
             'remaining_count': len(current_predictors)
         })
 
-        # 记录得分改善
-        delta_rmse = -(new_score[1] - old_score[1])
+        # 计算改善量
+        delta_is_rmse = old_is_rmse - new_is_rmse
+        delta_oos_rmse = old_oos_rmse - new_oos_rmse
 
-        # logger.info(
-        #     f"第{iteration}轮完成: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
-        #     f"  移除前RMSE -> {-old_score[1]:.6f}\n"
-        #     f"  移除后RMSE -> {-new_score[1]:.6f}\n"
-        #     f"  改善量ΔRMSE -> {delta_rmse:.6f}"
-        # )
+        logger.info(
+            f"\n第{iteration}轮决策: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
+            f"  训练期RMSE: {old_is_rmse:.4f} -> {new_is_rmse:.4f} (改善: {delta_is_rmse:+.4f})\n"
+            f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f} (改善: {delta_oos_rmse:+.4f})"
+        )
 
         # 精简的回调输出格式
         if progress_callback:

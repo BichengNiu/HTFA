@@ -1,14 +1,17 @@
 <!-- OPENSPEC:START -->
+
 # OpenSpec Instructions
 
 These instructions are for AI assistants working in this project.
 
 Always open `@/openspec/AGENTS.md` when the request:
+
 - Mentions planning or proposals (words like proposal, spec, change, plan)
 - Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
 - Sounds ambiguous and you need the authoritative spec before coding
 
 Use `@/openspec/AGENTS.md` to learn:
+
 - How to create and apply change proposals
 - Spec format and conventions
 - Project structure and guidelines
@@ -92,11 +95,11 @@ dashboard/
 │   ├── components/             # 可复用组件
 │   ├── pages/                  # 页面模块
 │   └── utils/                  # UI工具库
-├── DFM/                # 动态因子模型
-│   ├── data_prep/              # 数据准备
-│   ├── train_ref/              # 重构版训练模块(3,884行)
-│   ├── model_analysis/         # 模型分析
-│   └── news_analysis/          # 新闻分析
+├── models/DFM/         # 动态因子模型
+│   ├── prep/                   # 数据准备
+│   ├── train/                  # 模型训练
+│   ├── decomp/                 # 新闻分析与分解
+│   └── results/                # 结果处理
 ├── preview/            # 数据预览
 ├── explore/            # 数据探索
 └── analysis/           # 监测分析
@@ -130,6 +133,7 @@ state_mgr.clear_dfm_state("train_model", "results")
 ```
 
 **特性**:
+
 - 线程安全(RLock保护)
 - 单例模式(ThreadSafeSingleton)
 - 支持命名空间(避免键冲突)
@@ -140,6 +144,7 @@ state_mgr.clear_dfm_state("train_model", "results")
 导航由NavigationManager统一管理,状态同步机制确保主模块与子模块一致性。
 
 **主模块结构** (dashboard/app.py定义):
+
 ```python
 MODULE_CONFIG = {
     "数据预览": None,
@@ -147,7 +152,7 @@ MODULE_CONFIG = {
         "工业": ["工业增加值", "工业企业利润拆解"]
     },
     "模型分析": {
-        "DFM模型": ["数据准备", "模型训练", "模型分析", "新闻分析"]
+        "DFM模型": ["数据准备", "模型训练", "模型分析", "影响分析"]
     },
     "数据探索": None,
     "用户管理": {
@@ -157,6 +162,7 @@ MODULE_CONFIG = {
 ```
 
 **导航状态键**:
+
 - `selected_main_module` - 主模块
 - `selected_sub_module` - 子模块
 - `selected_detail_module` - 详细模块
@@ -166,6 +172,7 @@ MODULE_CONFIG = {
 **位置**: `data/users.db`
 
 **users表**:
+
 ```sql
 id INTEGER PRIMARY KEY
 username TEXT UNIQUE NOT NULL
@@ -179,6 +186,7 @@ locked_until TEXT                  -- 账户锁定时间
 ```
 
 **user_sessions表**:
+
 ```sql
 session_id TEXT PRIMARY KEY        -- UUID
 user_id INTEGER                    -- 外键
@@ -187,131 +195,312 @@ last_accessed DATETIME
 is_active INTEGER
 ```
 
-## DFM模块重构架构
+## DFM Decomp模块重构架构
 
-DFM模块经过重构，采用清晰的分层设计，共3,884行代码：
+DFM Decomp模块（新闻分析/Nowcast演变）经过重构，采用分层架构设计，共2,000行代码（从原3,200行减少37%）：
+
+### 架构概述
 
 ```
-dashboard/DFM/train_ref/
-├── core/                  # 核心算法层 (1,462行)
-│   ├── models.py          # 统一数据模型定义
-│   ├── kalman.py          # 卡尔曼滤波(预测/平滑)
-│   ├── factor_model.py    # DFM模型实现
-│   ├── estimator.py       # EM参数估计
-│   └── prediction.py      # 目标变量预测
-├── training/              # 训练协调层 (1,007行)
-│   ├── config.py          # 配置管理(TrainingConfig)
-│   ├── trainer.py         # DFMTrainer统一接口
-│   └── pipeline_steps.py  # 训练流程步骤函数
-├── evaluation/            # 评估层 (492行)
-│   ├── evaluator.py       # 模型评估器
-│   └── metrics.py         # 评估指标计算
-├── selection/             # 变量选择层 (386行)
-│   └── backward_selector.py  # 后向逐步变量选择
-├── export/                # 结果导出层 (390行)
-│   └── exporter.py        # 训练结果文件导出(模型/元数据/Excel)
-└── utils/                 # 工具层 (147行)
-    ├── logger.py          # 日志工具
-    └── environment.py     # 环境配置
+dashboard/models/DFM/decomp/
+├── domain/                # 领域模型层
+│   ├── models.py          # 数据类定义(8个dataclass)
+│   └── exceptions.py      # 自定义异常(7个)
+├── utils/                 # 工具层
+│   ├── validators.py      # 验证装饰器与工具
+│   ├── matrix_ops.py      # 矩阵运算优化(LRU缓存)
+│   └── environment.py     # 环境配置(编码/路径/模块别名)
+├── config.py             # 配置管理(无副作用)
+├── core/                 # 核心业务层
+│   ├── nowcast_model.py   # DFM Nowcast模型
+│   ├── evolution_calculator.py  # Nowcast演变计算
+│   ├── news_calculator.py       # 新闻分解计算
+│   └── news_aggregator.py       # 新闻聚合
+├── infrastructure/       # 基础设施层
+│   ├── model_loader.py    # 模型加载器
+│   ├── kalman_runner.py   # 卡尔曼滤波执行器
+│   └── workspace_manager.py  # 工作空间管理(临时文件)
+├── plotting/             # 可视化层
+│   ├── plot_config.py     # 图表配置
+│   ├── base_plotter.py    # 抽象基类
+│   ├── evolution_plotter.py    # 演变图绘制
+│   └── decomposition_plotter.py # 分解图绘制
+└── analysis/             # 分析协调层
+    ├── pipeline.py        # 流水线编排器
+    ├── orchestrator.py    # 图表编排器
+    └── backend.py         # UI后端接口
 ```
 
-**关键配置类**:
-```python
-@dataclass
-class TrainingConfig:
-    # 数据配置
-    data_path: str                  # 数据文件路径
-    target_variable: str            # 目标变量
-    selected_indicators: List[str]  # 选中指标
-    train_end_date: str             # 训练集结束日期
-    validation_end_date: str        # 验证集结束日期
+### 关键改进
 
-    # 模型配置
-    k_factors: int = 2              # 因子个数
-    max_iterations: int = 30        # 最大迭代次数
-    tolerance: float = 1e-6         # 收敛容差
+- **代码行数**: 3,200 → 2,000行（减少37%）
+- **最大文件**: 1,106 → 300行（减少73%）
+- **最大方法**: 266 → 50行（减少81%）
+- **单一职责**: 每个类/函数职责明确
+- **可测试性**: 组件隔离，支持单元测试
+- **可维护性**: 清晰分层，低耦合
 
-    # 变量选择配置
-    enable_variable_selection: bool = False  # 是否启用变量选择
-    selection_criterion: str = 'rmse'        # 选择准则(rmse/hit_rate)
+### 核心流程
 
-    # 因子数选择配置
-    factor_selection_method: str = 'fixed'   # 因子数选择方法(fixed/cumulative/elbow)
-    pca_threshold: float = 0.85             # PCA累积方差阈值
-```
+分析流水线执行6个步骤：
 
-**训练流程**（两阶段）:
-1. **数据加载与验证** - pipeline_steps.load_and_validate_data
-2. **阶段1：变量选择**（可选） - BackwardSelector
-   - 固定k=块数，后向逐步剔除变量
-   - 优化目标：RMSE或Hit Rate
-3. **阶段2：因子数选择** - PCA分析
-   - fixed: 固定因子数
-   - cumulative: PCA累积方差阈值
-   - elbow: 边际方差肘部法则
-4. **最终模型训练** - DFMModel (core/)
-   - EM算法参数估计 (estimator.py)
-   - 卡尔曼滤波状态估计 (kalman.py)
-5. **模型评估** - ModelEvaluator
-   - 样本内/样本外RMSE, Hit Rate, 相关系数
-6. **结果导出** - TrainingResultExporter
-   - 模型文件(.joblib)、元数据(.pkl)、Excel报告(.xlsx)
+1. **加载模型** (ModelLoader) - 从joblib/pkl文件加载DFM模型和元数据
+2. **运行卡尔曼滤波** (KalmanRunner) - 重新执行Kalman Filter & Smoother
+3. **计算Nowcast演变** (EvolutionCalculator) - 生成时间序列预测演变
+4. **计算新闻分解** (NewsCalculator) - 归因预测变化到数据更新
+5. **生成图表** (PlotOrchestrator) - 创建演变图和分解图(Plotly HTML)
+6. **保存结果** (Pipeline) - 导出CSV和图表文件
 
-**快速开始示例**:
+### 使用示例
+
+#### 方式1: UI后端接口
 
 ```python
-from dashboard.DFM.train_ref import DFMTrainer, TrainingConfig
+from dashboard.models.DFM.decomp import execute_news_analysis
 
-# 1. 构建配置
-config = TrainingConfig(
-    # 数据配置
-    data_path="data/经济数据库.xlsx",
-    target_variable="规模以上工业增加值:当月同比",
-    selected_indicators=["钢铁产量", "发电量", "货运量", ...],
-    train_end_date="2023-12-31",
-    validation_end_date="2024-06-30",
-
-    # 模型配置
-    k_factors=3,
-    max_iterations=50,
-    tolerance=1e-6,
-
-    # 变量选择（可选）
-    enable_variable_selection=True,
-    selection_criterion='rmse',
-
-    # 因子数选择
-    factor_selection_method='cumulative',
-    pca_threshold=0.85
+# 执行新闻分析
+result = execute_news_analysis(
+    dfm_model_file_content=model_bytes,
+    dfm_metadata_file_content=metadata_bytes,
+    target_month="2024-06",
+    plot_start_date="2023-01-01",
+    plot_end_date="2024-06-30",
+    base_workspace_dir=None  # 使用系统临时目录
 )
 
-# 2. 训练模型
-trainer = DFMTrainer(config)
-
-def progress_callback(msg):
-    print(f"[训练进度] {msg}")
-
-results = trainer.train(progress_callback=progress_callback)
-
-# 3. 查看结果
-print(f"样本外RMSE: {results.metrics.rmse_oos:.4f}")
-print(f"样本外Hit Rate: {results.metrics.hit_rate_oos:.2%}")
-print(f"选定变量数: {len(results.selected_variables)}")
-print(f"因子个数: {results.k_factors}")
-
-# 4. 生成分析报告（可选）
-from dashboard.DFM.train_ref.analysis import AnalysisReporter
-reporter = AnalysisReporter()
-reporter.generate_report_with_params(results, output_dir="results/")
+# 访问PipelineResult对象
+if result.returncode == 0:
+    print(f"演变图: {result.plot_paths['evolution']}")
+    print(f"分解图: {result.plot_paths['decomposition']}")
+    print(f"演变CSV: {result.csv_paths['evolution']}")
+    print(f"新闻CSV: {result.csv_paths['news']}")
+    print(f"演变数据: {result.evolution_df.shape}")
+else:
+    print(f"错误: {result.error_message}")
 ```
 
-详细使用说明请参考: dashboard/DFM/train_ref/README.md
+#### 方式2: 编程接口
+
+```python
+from dashboard.models.DFM.decomp import NowcastPipeline, create_default_config
+
+# 1. 创建配置
+config = create_default_config()
+
+# 2. 创建流水线
+pipeline = NowcastPipeline(config)
+
+# 3. 执行分析
+result = pipeline.execute(
+    model_files_dir="/path/to/model",
+    output_dir="/path/to/output",
+    target_month="2024-06",
+    plot_start_date="2023-01-01",
+    plot_end_date="2024-06-30"
+)
+
+# 4. 访问结果
+print(f"Nowcast演变数据形状: {result.evolution_df.shape}")
+print(f"新闻分解项数: {len(result.news_decomposition.items)}")
+print(f"图表路径: {result.plot_paths['evolution']}")
+```
+
+#### 方式3: 低级API
+
+```python
+from dashboard.models.DFM.decomp.infrastructure import ModelLoader, KalmanRunner
+from dashboard.models.DFM.decomp.core import EvolutionCalculator, NewsCalculator
+from dashboard.models.DFM.decomp import create_default_config
+
+config = create_default_config()
+
+# 步骤1: 加载模型
+loader = ModelLoader(config)
+context = loader.load("/path/to/model", target_month="2024-06")
+
+# 步骤2: 运行卡尔曼滤波
+kalman = KalmanRunner(config)
+context = kalman.run(context)
+
+# 步骤3: 计算演变
+evo_calc = EvolutionCalculator(config)
+evolution_df = evo_calc.calculate(context)
+
+# 步骤4: 计算新闻
+news_calc = NewsCalculator(config)
+news_decomposition = news_calc.calculate(context, evolution_df)
+```
+
+### 关键数据类
+
+```python
+# domain/models.py
+@dataclass
+class AnalysisContext:
+    """分析上下文（不可变）"""
+    model: DFMNowcastModel
+    metadata: Dict[str, Any]
+    prepared_data: pd.DataFrame
+    target_month: pd.Timestamp
+    analysis_start_date: pd.Timestamp
+    analysis_end_date: pd.Timestamp
+
+@dataclass
+class NewsItem:
+    """单个新闻项"""
+    update_date: pd.Timestamp
+    updated_variable: str
+    observed: float          # 观测值
+    forecast_prev: float     # 先验预测
+    news: float              # 新息(observed - forecast_prev)
+    weight: float            # 卡尔曼增益
+    impact: float            # 对目标变量的影响
+
+@dataclass
+class PipelineResult:
+    """流水线执行结果"""
+    evolution_df: pd.DataFrame
+    news_decomposition: NewsDecomposition
+    plot_paths: Dict[str, str]
+    csv_paths: Dict[str, str]
+    returncode: int
+    error_message: Optional[str]
+```
+
+### 技术特性
+
+- **矩阵运算优化**: MatrixPowerCache使用LRU缓存加速A^k计算
+- **验证装饰器**: @require_valid_context确保数据完整性
+- **工作空间管理**: WorkspaceManager自动管理临时文件生命周期
+- **策略模式**: BasePlotter抽象基类支持多种图表类型
+- **依赖注入**: 组件通过构造函数接收config和logger
+- **上下文管理器**: 支持with语句自动清理资源
+- **显式配置**: 移除全局单例，使用工厂函数create_default_config()
+
+### 影响分解公式（CRITICAL）
+
+**核心公式**（已于2025-10-27修复）：
+
+```
+Δy_t = λ_y' × K_t[:, i] × v_i,t
+```
+
+其中：
+- `λ_y` - 目标变量的因子载荷向量 (n_factors,)，从观测矩阵H中提取
+- `K_t` - 第t期卡尔曼增益矩阵 (n_factors, n_variables)
+- `K_t[:, i]` - 变量i对应的卡尔曼增益列向量 (n_factors,)
+- `v_i,t` - 变量i在第t期的新息（观测值 - 先验预测）
+- `Δy_t` - 变量i的数据更新对目标变量y的影响（标量）
+
+**数学推导**：
+
+根据卡尔曼滤波更新公式：
+
+```
+f_t|t = f_t|t-1 + K_t × v_t              [因子状态更新]
+y_t = H × f_t|t                          [观测方程]
+```
+
+当变量i更新时：
+
+```
+Δf_t = K_t[:, i] × v_i,t                 [因子状态增量]
+Δy_t = λ_y' × Δf_t                       [传递到目标变量]
+```
+
+**数据要求（重要）**：
+
+1. **训练模块必须保存K_t历史**: 从2025-10-27起，训练模块会自动保存完整的卡尔曼增益历史到元数据中
+2. **旧模型不兼容**: 2025-10-27之前训练的模型无法进行影响分解分析
+3. **重新训练**: 使用旧模型时会收到警告提示，需要重新训练模型
+
+**实现位置**：
+
+- 核心算法: `dashboard/models/DFM/decomp/core/impact_analyzer.py:85-176`
+- K_t保存: `dashboard/models/DFM/train/core/kalman.py:98-188`
+- K_t导出: `dashboard/models/DFM/train/export/exporter.py:189-200`
+- K_t加载: `dashboard/models/DFM/decomp/core/model_loader.py:230-253`
+
+**数据流**：
+
+```
+训练阶段 (train):
+  1. kalman.py: 卡尔曼滤波时保存每个时刻K_t → kalman_gains_history
+  2. factor_model.py: DFMModelResult携带kalman_gains_history
+  3. exporter.py: 将kalman_gains_history写入元数据.pkl文件
+
+分析阶段 (decomp):
+  1. model_loader.py: 从元数据.pkl加载kalman_gains_history
+  2. impact_analyzer.py: 使用K_t计算影响 Δy = λ_y' × K_t[:, i] × v_i
+```
+
+**向后兼容说明**：
+
+- 旧模型：元数据中没有`kalman_gains_history`字段
+- 加载器行为：返回None并打印警告信息
+- 影响分析器：检测到None时抛出DataFormatError，提示用户重新训练模型
+- 不提供fallback逻辑：避免使用错误的H矩阵导致计算结果错误
+
+**验证方法**：
+
+```python
+# 检查模型是否包含K_t历史
+import joblib
+metadata = joblib.load("dfm_metadata.pkl")
+has_kt = 'kalman_gains_history' in metadata
+print(f"模型支持影响分解: {has_kt}")
+
+if has_kt:
+    kt_history = metadata['kalman_gains_history']
+    print(f"K_t历史长度: {len(kt_history)}")
+    print(f"K_t矩阵形状: {kt_history[-1].shape}")  # (n_factors, n_variables)
+```
+
+### 与UI层集成
+
+新闻分析页面通过统一接口调用：
+
+```python
+# dashboard/ui/pages/dfm/news_analysis_page.py
+from dashboard.models.DFM.decomp import execute_news_analysis
+
+result = execute_news_analysis(
+    dfm_model_file_content=uploaded_model.getvalue(),
+    dfm_metadata_file_content=uploaded_metadata.getvalue(),
+    target_month=target_month,
+    plot_start_date=start_date,
+    plot_end_date=end_date
+)
+
+if result.returncode == 0:
+    # 访问PipelineResult对象属性
+    evolution_plot = result.plot_paths['evolution']
+    evo_csv = result.csv_paths['evolution']
+
+    # 显示图表和数据
+    with open(evolution_plot, 'r', encoding='utf-8') as f:
+        st.components.v1.html(f.read(), height=500)
+    st.dataframe(pd.read_csv(evo_csv))
+else:
+    st.error(f"分析失败: {result.error_message}")
+```
+
+### 测试策略
+
+关键路径测试覆盖：
+- ✅ 模型加载与验证
+- ✅ 卡尔曼滤波执行
+- ✅ Nowcast演变计算
+- ✅ 新闻分解计算
+- ✅ 图表生成
+- ✅ 端到端流水线
 
 ## 数据预览模块
 
 **频率支持**: 周度、月度、日度、旬度、年度
 
 **配置文件**: `dashboard/preview/config.py`
+
 ```python
 UNIFIED_FREQUENCY_CONFIGS = {
     "周度": {
@@ -325,6 +514,7 @@ UNIFIED_FREQUENCY_CONFIGS = {
 ```
 
 **关键功能**:
+
 - Excel文件自动解析 (data_loader.py)
 - 频率转换与对齐 (frequency_utils.py)
 - 基于文件名的缓存机制
@@ -365,15 +555,16 @@ monitor.report()
 
 ### 添加新模块步骤
 
-1. 在`dashboard/`下创建模块目录
-2. 创建`__init__.py`导出公共接口
-3. 在`dashboard/ui/pages/`创建对应UI页面
-4. 在`app.py`的`MODULE_CONFIG`中注册
-5. 在`permissions.py`的`PERMISSION_MODULE_MAP`中添加权限映射
+1. 在 `dashboard/`下创建模块目录
+2. 创建 `__init__.py`导出公共接口
+3. 在 `dashboard/ui/pages/`创建对应UI页面
+4. 在 `app.py`的 `MODULE_CONFIG`中注册
+5. 在 `permissions.py`的 `PERMISSION_MODULE_MAP`中添加权限映射
 
 ### UI样式注意
 
 每次页面渲染都需要重新注入CSS(Streamlit特性),使用:
+
 ```python
 from dashboard.ui.utils.style_loader import inject_custom_css
 inject_custom_css()
@@ -389,6 +580,7 @@ inject_custom_css()
 ## 权限系统
 
 **权限模块映射** (dashboard/auth/permissions.py):
+
 ```python
 PERMISSION_MODULE_MAP = {
     "数据预览": ["data_preview"],
@@ -400,6 +592,7 @@ PERMISSION_MODULE_MAP = {
 ```
 
 **检查用户权限**:
+
 ```python
 from dashboard.auth.permissions import has_permission
 
@@ -410,12 +603,14 @@ if has_permission(user, "model_analysis"):
 ## Docker部署
 
 **Dockerfile关键配置**:
+
 - 基础镜像: python:3.11.5-slim
 - 工作目录: /app
 - 环境变量: PYTHONPATH=/app
 - 健康检查: 30秒间隔HTTP检查
 
 **持久化卷**:
+
 - `./data:/app/data` - 数据文件
 - `./logs:/app/logs` - 日志文件
 - `./config:/app/config` - 配置文件
@@ -423,6 +618,7 @@ if has_permission(user, "model_analysis"):
 ## 依赖关系
 
 **核心依赖**:
+
 - streamlit >= 1.50.0 (Web框架)
 - pandas >= 2.3.0, numpy >= 2.3.0 (数据处理)
 - scipy >= 1.16.0, statsmodels >= 0.14.0 (科学计算)
@@ -432,30 +628,21 @@ if has_permission(user, "model_analysis"):
 - plotly >= 6.3.0, matplotlib >= 3.10.0 (可视化)
 
 **安装**:
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ## 关键文件路径参考
 
-| 功能 | 文件路径 | 说明 |
-|------|---------|------|
-| 主入口 | dashboard/app.py:713 | 应用启动入口 |
-| 状态管理 | dashboard/core/unified_state.py:14 | UnifiedStateManager类 |
-| 导航管理 | dashboard/core/navigation_manager.py | NavigationManager类 |
-| 用户数据库 | dashboard/auth/database.py | AuthDatabase类 |
-| **DFM训练器** | dashboard/DFM/train_ref/training/trainer.py | DFMTrainer类(439行) |
-| **DFM配置** | dashboard/DFM/train_ref/training/config.py | TrainingConfig类(175行) |
-| **DFM流程步骤** | dashboard/DFM/train_ref/training/pipeline_steps.py | 训练流程步骤函数(367行) |
-| **数据模型** | dashboard/DFM/train_ref/core/models.py | 统一数据类定义(180行) |
-| **DFM核心算法** | dashboard/DFM/train_ref/core/factor_model.py | DFMModel类(470行) |
-| **卡尔曼滤波** | dashboard/DFM/train_ref/core/kalman.py | KalmanFilter类(326行) |
-| **EM参数估计** | dashboard/DFM/train_ref/core/estimator.py | 参数估计函数(308行) |
-| **目标预测** | dashboard/DFM/train_ref/core/prediction.py | generate_target_forecast(121行) |
-| **变量选择** | dashboard/DFM/train_ref/selection/backward_selector.py | BackwardSelector类(370行) |
-| **模型评估** | dashboard/DFM/train_ref/evaluation/evaluator.py | ModelEvaluator类(226行) |
-| **评估指标** | dashboard/DFM/train_ref/evaluation/metrics.py | 指标计算函数(244行) |
-| **结果导出** | dashboard/DFM/train_ref/export/exporter.py | TrainingResultExporter类(375行) |
-| 数据预览 | dashboard/preview/main.py | 预览模块主逻辑 |
-| 频率配置 | dashboard/preview/config.py | UNIFIED_FREQUENCY_CONFIGS |
-| 平稳性分析 | dashboard/explore/analysis/stationarity.py | ADF/KPSS检验 |
+| 功能                  | 文件路径                                               | 说明                            |
+| --------------------- | ------------------------------------------------------ | ------------------------------- |
+| 主入口                | dashboard/app.py:713                                   | 应用启动入口                    |
+| 状态管理              | dashboard/core/unified_state.py:14                     | UnifiedStateManager类           |
+| 导航管理              | dashboard/core/navigation_manager.py                   | NavigationManager类             |
+| 用户数据库            | dashboard/auth/database.py                             | AuthDatabase类                  |
+| **DFM训练**     | dashboard/models/DFM/train/                            | 模型训练模块                    |
+| **DFM分解**     | dashboard/models/DFM/decomp/                           | 新闻分析与影响分解模块          |
+| 数据预览              | dashboard/preview/main.py                              | 预览模块主逻辑                  |
+| 频率配置              | dashboard/preview/config.py                            | UNIFIED_FREQUENCY_CONFIGS       |
+| 平稳性分析            | dashboard/explore/analysis/stationarity.py             | ADF/KPSS检验                    |

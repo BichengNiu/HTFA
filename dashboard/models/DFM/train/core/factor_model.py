@@ -56,17 +56,24 @@ class DFMModel:
     def fit(
         self,
         data: pd.DataFrame,
-        train_end: Optional[str] = None
+        training_start: str,
+        train_end: str
     ) -> DFMModelResult:
         """拟合DFM模型
 
         Args:
             data: 观测数据 (时间 × 变量)
-            train_end: 训练期结束日期
+            training_start: 训练期开始日期（必填）
+            train_end: 训练期结束日期（必填）
 
         Returns:
             DFMModelResult: 拟合结果
+
+        Raises:
+            ValueError: 如果training_start或train_end未提供
         """
+        if not training_start or not train_end:
+            raise ValueError("training_start和train_end必须提供")
         # 设置确定性随机种子（匹配老代码）
         DFM_SEED = 42
         np.random.seed(DFM_SEED)
@@ -89,22 +96,15 @@ class DFMModel:
 
         Z_orig = data.copy()
 
-        if train_end:
-            Z_train = data.loc[:train_end]
-            # logger.info(f"使用训练期数据初始化: {Z_train.shape}")
-        else:
-            Z_train = data
+        # 根据训练期日期范围切分数据
+        Z_train = data.loc[training_start:train_end]
 
         # 数据预处理：计算中心化和标准化数据（使用训练期参数）
         obs_centered, Z_standardized_full, means, stds = self._preprocess_data(Z_train, data)
 
         # 仅用训练期数据进行PCA
-        if train_end:
-            Z_for_pca = Z_standardized_full[:len(Z_train)]
-            obs_centered_for_pca = obs_centered.iloc[:len(Z_train)]
-        else:
-            Z_for_pca = Z_standardized_full
-            obs_centered_for_pca = obs_centered
+        Z_for_pca = Z_standardized_full[:len(Z_train)]
+        obs_centered_for_pca = obs_centered.iloc[:len(Z_train)]
 
         # PCA初始化：得到因子、载荷和V矩阵（用于R矩阵计算）
         initial_factors, initial_loadings, V = self._initialize_factors_pca(
@@ -451,6 +451,7 @@ class DFMModel:
             R=R,
             factors=factors_smoothed_final,  # (n_factors, n_time)
             factors_smooth=factors_smoothed_final,  # 同上
+            kalman_gains_history=filter_result.kalman_gains_history,  # 保存卡尔曼增益历史
             converged=converged,
             iterations=iteration + 1,
             log_likelihood=loglik_current
@@ -496,7 +497,8 @@ def fit_dfm(
     n_factors: int,
     max_lags: int = 1,
     max_iter: int = 30,
-    train_end: Optional[str] = None
+    training_start: str = None,
+    train_end: str = None
 ) -> DFMModelResult:
     """拟合DFM模型的函数接口
 
@@ -505,10 +507,14 @@ def fit_dfm(
         n_factors: 因子数量
         max_lags: 最大滞后阶数
         max_iter: 最大迭代次数
-        train_end: 训练期结束日期
+        training_start: 训练期开始日期（必填）
+        train_end: 训练期结束日期（必填）
 
     Returns:
         DFMModelResult: 拟合结果
+
+    Raises:
+        ValueError: 如果training_start或train_end未提供
     """
     model = DFMModel(
         n_factors=n_factors,
@@ -516,4 +522,4 @@ def fit_dfm(
         max_iter=max_iter
     )
 
-    return model.fit(data, train_end)
+    return model.fit(data, training_start, train_end)

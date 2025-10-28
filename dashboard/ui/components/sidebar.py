@@ -619,7 +619,7 @@ def render_staged_data_section(staged_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def render_data_upload_section(main_module: str, sub_module: str) -> Dict[str, Any]:
     """
-    渲染数据上传部分 - 支持DFM模块和其他模块
+    渲染数据上传部分 - 支持其他模块（DFM已移至数据准备tab）
 
     Args:
         main_module: 主模块名称
@@ -633,24 +633,11 @@ def render_data_upload_section(main_module: str, sub_module: str) -> Dict[str, A
     if not upload_config['show_upload']:
         return {'show_upload': False}
 
+    # DFM模型的数据上传已移至数据准备tab，不在sidebar显示
     if main_module == "模型分析" and sub_module == "DFM 模型":
-        logger.debug(f"侧边栏选择 - 主模块: '{main_module}', 子模块: '{sub_module}'")
-        dfm_upload_sidebar = DFMDataUploadSidebar()
-        stable_upload_key = 'dfm_sidebar_upload_stable'
-        upload_result = dfm_upload_sidebar.render(st, upload_key=stable_upload_key)
-        logger.debug(f"DFM上传组件渲染结果: {upload_result.get('has_file', False)}")
+        return {'show_upload': False}
 
-        return {
-            'show_upload': True,
-            'main_module': main_module,
-            'sub_module': sub_module,
-            'upload_type': 'dfm_data',
-            'upload_result': upload_result,
-            'upload_title': upload_config['title'],
-            'upload_description': upload_config['description']
-        }
-
-    elif main_module != "数据探索":
+    if main_module != "数据探索":
         st.subheader(upload_config['title'])
         st.write(upload_config['description'])
 
@@ -751,13 +738,8 @@ def get_upload_section_config(main_module: str, sub_module: str) -> Dict[str, An
             'show_upload': True,
             'title': '数据探索 - 数据上传',
             'description': '上传数据文件进行探索性分析'
-        },
-        ('模型分析', 'DFM 模型'): {
-            'show_upload': True,
-            'title': 'DFM 模型数据上传',
-            'description': '上传Excel数据文件，用于DFM模型的数据准备、训练和分析',
-            'upload_type': 'dfm_data'
         }
+        # DFM模型的数据上传已移至数据准备tab中
     }
 
     key = (main_module, sub_module)

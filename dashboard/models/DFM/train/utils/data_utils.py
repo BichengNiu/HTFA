@@ -76,41 +76,49 @@ def load_and_validate_data(
 
     # 确定预测变量
     if selected_indicators:
-        predictor_vars = [
-            v for v in selected_indicators
-            if v != target_variable and v in data.columns
-        ]
+        logger.info(f"用户选择的指标数量: {len(selected_indicators)}")
+
+        # 构建不区分大小写的列名映射 (小写 -> 原始列名)
+        import unicodedata
+        column_mapping = {}
+        for col in data.columns:
+            normalized_col = unicodedata.normalize('NFKC', str(col)).strip().lower()
+            column_mapping[normalized_col] = col
+
+        # 匹配变量（不区分大小写）
+        predictor_vars = []
+        missing_vars = []
+
+        for var in selected_indicators:
+            if var == target_variable:
+                continue
+
+            # 先尝试精确匹配
+            if var in data.columns:
+                predictor_vars.append(var)
+            else:
+                # 尝试不区分大小写匹配
+                normalized_var = unicodedata.normalize('NFKC', str(var)).strip().lower()
+                if normalized_var in column_mapping:
+                    actual_col = column_mapping[normalized_var]
+                    predictor_vars.append(actual_col)
+                    logger.info(f"变量名大小写匹配: '{var}' -> '{actual_col}'")
+                else:
+                    missing_vars.append(var)
+
+        if missing_vars:
+            logger.warning(f"以下变量不在数据文件中，将被跳过: {missing_vars}")
+
+        logger.info(f"在数据文件中找到的预测变量数: {len(predictor_vars)}")
     else:
         predictor_vars = [
             v for v in data.columns
             if v != target_variable
         ]
 
-    # 数据质量检查和清理
-    valid_predictor_vars = []
-    removed_vars = []
-
-    for var in predictor_vars:
-        var_data = data[var]
-        valid_count = var_data.notna().sum()
-
-        # 过滤全NaN或有效数据过少的列
-        if valid_count < MIN_REQUIRED_DATA_POINTS:
-            removed_vars.append((var, valid_count))
-            logger.warning(
-                f"移除变量'{var}': 有效数据点({valid_count}) < "
-                f"最小要求({MIN_REQUIRED_DATA_POINTS})"
-            )
-        else:
-            valid_predictor_vars.append(var)
-
-    predictor_vars = valid_predictor_vars
-
-    if removed_vars:
-        logger.info(
-            f"数据清理: 移除了{len(removed_vars)}个无效变量, "
-            f"剩余{len(predictor_vars)}个有效变量"
-        )
+    # 数据质量检查和清理 - 已禁用自动过滤
+    # 注意: 不再自动移除有效数据点少的变量，保留用户选择的所有变量
+    logger.info(f"跳过数据质量自动过滤，保留所有用户选择的变量")
 
     # 验证是否还有足够的预测变量
     if len(predictor_vars) < 2:

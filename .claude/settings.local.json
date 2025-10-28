@@ -7,7 +7,9 @@
       "Bash(npm --version)",
       "Bash(git ls-tree:*)",
       "Bash(awk:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Read(//c/Users/Administrator/Desktop/**)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

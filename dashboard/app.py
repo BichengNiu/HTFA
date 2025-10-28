@@ -66,6 +66,15 @@ def _suppress_streamlit_warnings():
 # 立即执行警告抑制
 _suppress_streamlit_warnings()
 
+# 配置全局日志级别，抑制INFO级别日志
+logging.basicConfig(
+    level=logging.WARNING,
+    format='%(levelname)s: %(message)s',
+    force=True
+)
+# 禁用dashboard模块的INFO日志
+logging.getLogger('dashboard').setLevel(logging.WARNING)
+
 # 添加项目根目录到Python路径，确保能正确导入dashboard包
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)  # 上一级目录

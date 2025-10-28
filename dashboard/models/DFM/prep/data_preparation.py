@@ -16,7 +16,7 @@ from dashboard.models.DFM.prep.modules.main_data_processor import prepare_data a
 from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
 
 # 设置日志
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.WARNING, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
 
 def prepare_data(

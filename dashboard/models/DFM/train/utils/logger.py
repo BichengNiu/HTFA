@@ -10,7 +10,7 @@ from typing import Optional
 
 
 def setup_logging(
-    level: str = 'INFO',
+    level: str = 'WARNING',
     log_file: Optional[str] = None,
     format_string: Optional[str] = None
 ) -> None:
@@ -22,7 +22,7 @@ def setup_logging(
         format_string: 日志格式
     """
     if format_string is None:
-        format_string = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        format_string = '%(levelname)s: %(message)s'
 
     handlers = [logging.StreamHandler(sys.stdout)]
 

@@ -2,7 +2,7 @@
 """
 统一数据模型定义
 
-整合所有train_ref模块使用的数据类，确保类型一致性和可维护性
+整合所有train模块使用的数据类，确保类型一致性和可维护性
 """
 
 import numpy as np
@@ -60,6 +60,7 @@ class DFMModelResult:
     # 卡尔曼滤波结果
     factors: np.ndarray = None  # 因子时间序列（滤波）
     factors_smooth: np.ndarray = None  # 平滑因子
+    kalman_gains_history: Optional[List[np.ndarray]] = None  # 卡尔曼增益历史（用于新闻分解）
 
     # 预测结果
     forecast_is: np.ndarray = None  # 样本内预测
@@ -82,6 +83,7 @@ class KalmanFilterResult:
     P_predicted: np.ndarray     # 预测协方差
     loglikelihood: float        # 对数似然
     innovation: np.ndarray      # 新息序列
+    kalman_gains_history: Optional[List[np.ndarray]] = None  # 卡尔曼增益历史（每个时刻的K_t矩阵）
 
 
 @dataclass

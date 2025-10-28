@@ -17,9 +17,10 @@ logger = get_logger(__name__)
 def generate_target_forecast(
     model_result: DFMModelResult,
     target_data: pd.Series,
+    training_start: str,
     train_end: str,
-    validation_start: Optional[str] = None,
-    validation_end: Optional[str] = None,
+    validation_start: str,
+    validation_end: str,
     progress_callback: Optional[callable] = None
 ) -> DFMModelResult:
     """
@@ -34,9 +35,10 @@ def generate_target_forecast(
     Args:
         model_result: DFM模型结果
         target_data: 目标变量数据（原始尺度）
-        train_end: 训练结束日期
-        validation_start: 验证开始日期
-        validation_end: 验证结束日期
+        training_start: 训练开始日期（必填）
+        train_end: 训练结束日期（必填）
+        validation_start: 验证开始日期（必填）
+        validation_end: 验证结束日期（必填）
         progress_callback: 进度回调函数
 
     Returns:
@@ -46,9 +48,10 @@ def generate_target_forecast(
         # 提取因子（时间 x 因子数）- 因子是中心化的（mean≈0）
         factors = model_result.factors.T  # (n_time, n_factors)
 
-        # 步骤1: 计算目标变量的训练期统计量（用于最后的缩放）
+        # 步骤1: 计算目标变量的训练期统计量（用于标准化和反标准化）
+        training_start_date = pd.to_datetime(training_start)
         train_end_date = pd.to_datetime(train_end)
-        target_train = target_data.loc[:train_end_date]
+        target_train = target_data.loc[training_start_date:train_end_date]
 
         target_mean = target_train.mean()
         target_std = target_train.std()
@@ -63,12 +66,15 @@ def generate_target_forecast(
 
         logger.debug(f"目标变量标准化参数: mean={target_mean:.4f}, std={target_std:.4f}")
 
-        # 步骤2: 对齐目标变量和因子的时间索引（使用原始尺度的目标）
-        common_index = target_data.index[:factors.shape[0]]
+        # 步骤2: 标准化目标变量（匹配老代码逻辑）
+        target_data_standardized = (target_data - target_mean) / target_std
 
-        # 步骤2.1: 应用季节性掩码（与老代码一致）
+        # 步骤3: 对齐目标变量和因子的时间索引（使用标准化后的目标）
+        common_index = target_data_standardized.index[:factors.shape[0]]
+
+        # 步骤3.1: 应用季节性掩码（在标准化后的数据上）
         # 将1-2月数据掩码为NaN（春节因素）
-        target_data_masked = target_data.loc[common_index].copy()
+        target_data_masked = target_data_standardized.loc[common_index].copy()
         month_indices = target_data_masked.index.month
         mask_jan_feb = (month_indices == 1) | (month_indices == 2)
         nan_before = target_data_masked.isna().sum()
@@ -76,16 +82,16 @@ def generate_target_forecast(
         nan_after = target_data_masked.isna().sum()
         logger.debug(f"季节性掩码: 1-2月数据被掩码，新增NaN: {nan_after - nan_before}")
 
-        y_orig = target_data_masked.values  # 原始尺度 + 季节性掩码
+        y_std = target_data_masked.values  # 标准化尺度 + 季节性掩码
         X = factors[:len(common_index), :]
 
-        # 步骤3: 严格限制在训练期（匹配老代码）
+        # 步骤4: 严格限制在训练期（匹配老代码）
         train_mask = common_index <= train_end_date
-        y_train_orig = y_orig[train_mask]  # 原始尺度
+        y_train_std = y_std[train_mask]  # 标准化尺度
         X_train = X[train_mask, :]
 
         # 移除NaN值（仅在训练集）
-        y_isnan = np.isnan(y_train_orig)
+        y_isnan = np.isnan(y_train_std)
         X_has_nan = np.any(np.isnan(X_train), axis=1)
         valid_mask = ~(y_isnan | X_has_nan)
 
@@ -93,13 +99,13 @@ def generate_target_forecast(
             logger.error("训练集没有找到有效的数据点用于回归")
             raise ValueError("训练集中目标变量和因子都没有有效的对齐数据点")
 
-        y_clean = y_train_orig[valid_mask]  # 原始尺度
+        y_clean = y_train_std[valid_mask]  # 标准化尺度
         X_clean = X_train[valid_mask, :]
 
-        logger.debug(f"训练集有效数据点: {len(y_clean)}/{len(y_train_orig)}")
+        logger.debug(f"训练集有效数据点: {len(y_clean)}/{len(y_train_std)}")
 
-        # 步骤4: 无截距回归（因子中心化，回归结果mean≈0）
-        # y_orig = factors_centered @ beta + epsilon
+        # 步骤5: 无截距回归（标准化数据）
+        # y_std = factors_centered @ beta + epsilon
         from sklearn.linear_model import LinearRegression
         reg_model = LinearRegression(fit_intercept=False)  # 无截距
         reg_model.fit(X_clean, y_clean)
@@ -109,41 +115,40 @@ def generate_target_forecast(
 
         logger.debug(f"目标变量回归完成: beta shape={beta.shape}, R²={r2_score:.4f}")
 
-        # 步骤5: 生成预测（全样本），结果mean≈0
-        forecast_raw = X @ beta
+        # 保存目标变量的因子载荷（用于新闻分解分析）
+        model_result.target_factor_loading = beta.copy()
 
-        # 步骤6: "反标准化"（实际是重新添加目标的均值和尺度）
-        # 匹配老代码： nowcast_final = nowcast_raw * target_std + target_mean
-        forecast_full = forecast_raw * target_std + target_mean
+        # 步骤6: 生成预测（全样本，标准化尺度）
+        forecast_standardized = X @ beta
+
+        # 步骤7: 反标准化到原始尺度
+        # 匹配老代码： nowcast_orig = nowcast_std * target_std + target_mean
+        forecast_full = forecast_standardized * target_std + target_mean
 
         logger.debug("预测值已反标准化到原始尺度")
 
         # 步骤8: 分割样本内和样本外
-        train_end_date = pd.to_datetime(train_end)
-        train_data_filtered = target_data[:train_end_date]
+        train_data_filtered = target_data.loc[training_start_date:train_end_date]
         train_end_idx = len(train_data_filtered) - 1
 
         # 样本内预测
         forecast_is = forecast_full[:train_end_idx + 1]
 
         # 样本外预测
-        if validation_start and validation_end:
-            val_start_date = pd.to_datetime(validation_start)
-            val_end_date = pd.to_datetime(validation_end)
+        val_start_date = pd.to_datetime(validation_start)
+        val_end_date = pd.to_datetime(validation_end)
 
-            val_data_filtered = target_data[val_start_date:val_end_date]
-            if len(val_data_filtered) > 0:
-                val_start_idx = target_data.index.get_loc(val_data_filtered.index[0])
-                val_end_idx = target_data.index.get_loc(val_data_filtered.index[-1])
+        val_data_filtered = target_data[val_start_date:val_end_date]
+        if len(val_data_filtered) > 0:
+            val_start_idx = target_data.index.get_loc(val_data_filtered.index[0])
+            val_end_idx = target_data.index.get_loc(val_data_filtered.index[-1])
 
-                if val_start_idx < len(forecast_full) and val_end_idx < len(forecast_full):
-                    forecast_oos = forecast_full[val_start_idx:val_end_idx + 1]
-                else:
-                    forecast_oos = None
+            if val_start_idx < len(forecast_full) and val_end_idx < len(forecast_full):
+                forecast_oos = forecast_full[val_start_idx:val_end_idx + 1]
             else:
                 forecast_oos = None
         else:
-            forecast_oos = forecast_full[train_end_idx + 1:] if train_end_idx + 1 < len(forecast_full) else None
+            forecast_oos = None
 
         # 更新model_result
         model_result.forecast_is = forecast_is

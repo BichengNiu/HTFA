@@ -8,6 +8,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from pathlib import Path
+from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig, create_default_parallel_config
 
 
 @dataclass
@@ -16,15 +17,20 @@ class TrainingConfig:
 
     包含DFM模型训练所需的全部配置参数,与trainer.py配合使用
     """
+    # ========== 必填字段（无默认值） ==========
     # 核心配置
     data_path: str
     target_variable: str
-    selected_indicators: List[str] = field(default_factory=list)
 
     # 训练/验证期配置
-    train_end: Optional[str] = None
-    validation_start: Optional[str] = None
-    validation_end: Optional[str] = None
+    training_start: str  # 训练期开始日期
+    train_end: str  # 训练期结束日期
+    validation_start: str  # 验证期开始日期
+    validation_end: str  # 验证期结束日期
+
+    # ========== 可选字段（有默认值） ==========
+    # 核心配置
+    selected_indicators: List[str] = field(default_factory=list)
     target_freq: str = 'W-FRI'
 
     # 模型参数
@@ -42,8 +48,17 @@ class TrainingConfig:
     factor_selection_method: str = 'fixed'  # fixed, cumulative
     pca_threshold: Optional[float] = 0.9  # cumulative方法的阈值
 
+    # 并行计算配置
+    enable_parallel: bool = False  # 是否启用并行计算
+    n_jobs: int = -1  # 并行任务数（-1=所有核心，1=串行）
+    parallel_backend: str = 'loky'  # 并行后端（loky, multiprocessing, threading）
+    min_variables_for_parallel: int = 5  # 启用并行的最小变量数
+
     # 输出配置
     output_dir: Optional[str] = None
+
+    # 行业映射（变量名 -> 行业名）
+    industry_map: Optional[Dict[str, str]] = field(default_factory=dict)
 
     def __post_init__(self):
         """后初始化验证"""
@@ -87,6 +102,16 @@ class TrainingConfig:
                     f"当前值: {self.variable_selection_method}"
                 )
 
+        # 验证并行配置
+        if self.n_jobs == 0:
+            raise ValueError("n_jobs不能为0，使用-1表示所有核心，1表示串行")
+        valid_backends = ['loky', 'multiprocessing', 'threading']
+        if self.parallel_backend not in valid_backends:
+            raise ValueError(
+                f"parallel_backend必须是{valid_backends}之一,"
+                f"当前值: {self.parallel_backend}"
+            )
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':
         """从字典创建配置
@@ -125,6 +150,20 @@ class TrainingConfig:
             errors.append(str(e))
 
         return errors
+
+    def get_parallel_config(self) -> ParallelConfig:
+        """获取并行配置对象
+
+        Returns:
+            ParallelConfig对象
+        """
+        return ParallelConfig(
+            enabled=self.enable_parallel,
+            n_jobs=self.n_jobs,
+            backend=self.parallel_backend,
+            verbose=0,
+            min_variables_for_parallel=self.min_variables_for_parallel
+        )
 
     def __repr__(self) -> str:
         """字符串表示"""

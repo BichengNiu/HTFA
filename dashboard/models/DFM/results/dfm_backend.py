@@ -4,24 +4,12 @@ import pickle
 import io
 import logging
 import numpy as np
-import sys
-import os
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.cluster import hierarchy as sch
 
-# 添加训练模块路径以支持joblib模型加载
-current_dir = os.path.dirname(os.path.abspath(__file__))
-train_model_dir = os.path.join(os.path.dirname(current_dir), 'train_model')
-if train_model_dir not in sys.path:
-    sys.path.append(train_model_dir)
-
 logger = logging.getLogger(__name__)
 
-# 已移除 _calculate_revised_monthly_metrics 函数
-# UI模块现在直接使用训练模块中通过 calculate_metrics_with_lagged_target 计算的标准指标
-# 这确保了指标计算方法的一致性
 
-# @st.cache_data(ttl=3600) # Streamlit caching is UI-specific, remove from backend
 def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
     """
     Receives already loaded DFM model and metadata objects.
@@ -92,50 +80,19 @@ def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
 
     return model, metadata, load_errors
 
-# 删除了regenerate_missing_data函数 - 不再需要复杂的数据重新生成逻辑
 
-# Placeholder for future DFM data processing logic related to the third (data) file
-def process_dfm_data(uploaded_data_file):
-    """
-    Processes the uploaded DFM-related data file (Excel/CSV).
-    Placeholder: Implement actual data processing logic here.
-    """
-    df = None
-    processing_errors = []
-    if uploaded_data_file is not None:
-        try:
-            file_name = uploaded_data_file.name
-            if file_name.endswith('.csv'):
-                df = pd.read_csv(uploaded_data_file)
-            elif file_name.endswith(('.xls', '.xlsx')):
-                df = pd.read_excel(uploaded_data_file)
-            else:
-                processing_errors.append(f"不支持的文件类型: {file_name}。请上传 CSV 或 Excel 文件。")
-            
-            if df is not None:
-                logger.info(f"成功处理数据文件 '{file_name}'。")
-                # Placeholder for further processing if needed
-        except Exception as e:
-            error_msg = f"处理数据文件 '{uploaded_data_file.name}' 时出错: {e}"
-            logger.error(error_msg)
-            processing_errors.append(error_msg)
-    else:
-        processing_errors.append("未提供 DFM 相关数据文件。")
-        
-    return df, processing_errors 
-
-
-def perform_loadings_clustering(loadings_df: pd.DataFrame, cluster_vars: bool = True):
+def perform_loadings_clustering(loadings_df: pd.DataFrame, cluster_vars: bool = True, normalize: bool = True):
     """
     对因子载荷矩阵进行变量聚类计算。
-    
+
     Args:
         loadings_df: 包含因子载荷的 DataFrame (原始形式：变量为行，因子为列)
         cluster_vars: 是否对变量进行聚类排序
-    
+        normalize: 是否对载荷进行行标准化（每个变量标准化到单位长度），默认True
+
     Returns:
         tuple: (clustered_loadings_df, variable_order, clustering_success)
-            - clustered_loadings_df: 聚类后的载荷矩阵
+            - clustered_loadings_df: 聚类后的载荷矩阵（如normalize=True则已标准化）
             - variable_order: 聚类后的变量顺序列表
             - clustering_success: 聚类是否成功的布尔值
     """
@@ -144,6 +101,20 @@ def perform_loadings_clustering(loadings_df: pd.DataFrame, cluster_vars: bool = 
         return loadings_df, loadings_df.index.tolist() if not loadings_df.empty else [], False
 
     data_for_clustering = loadings_df.copy()  # 变量是行
+
+    # 标准化：将每个变量的载荷向量标准化到单位长度
+    if normalize:
+        logger.info("对因子载荷进行行标准化（单位长度）...")
+        norms = np.linalg.norm(data_for_clustering.values, axis=1, keepdims=True)
+        # 避免除零
+        norms = np.where(norms > 1e-10, norms, 1.0)
+        data_for_clustering = pd.DataFrame(
+            data_for_clustering.values / norms,
+            index=data_for_clustering.index,
+            columns=data_for_clustering.columns
+        )
+        logger.info("载荷标准化完成")
+
     variable_names_original = data_for_clustering.index.tolist()
     clustering_success = False
 

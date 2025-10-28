@@ -313,7 +313,7 @@ class FactorAnalysisComponent(DFMComponent):
             metadata: 元数据
         """
         st_obj.markdown("---")
-        st_obj.markdown("**因子时间序列演变图**")
+        st_obj.markdown("*因子时间序列图*")
 
         factor_series_data = metadata.get('factor_series')
 

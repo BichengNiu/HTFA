@@ -27,9 +27,10 @@ def train_dfm_with_forecast(
     predictor_data: pd.DataFrame,
     target_data: pd.Series,
     k_factors: int,
+    training_start: str,
     train_end: str,
-    validation_start: Optional[str] = None,
-    validation_end: Optional[str] = None,
+    validation_start: str,
+    validation_end: str,
     max_iter: int = 30,
     max_lags: int = 1,
     tolerance: float = 1e-6,
@@ -47,9 +48,10 @@ def train_dfm_with_forecast(
         predictor_data: 预测变量数据 (DataFrame, columns=变量名, index=日期)
         target_data: 目标变量数据 (Series, index=日期)
         k_factors: 因子个数
-        train_end: 训练集结束日期
-        validation_start: 验证集开始日期 (可选)
-        validation_end: 验证集结束日期 (可选)
+        training_start: 训练集开始日期（必填）
+        train_end: 训练集结束日期（必填）
+        validation_start: 验证集开始日期（必填）
+        validation_end: 验证集结束日期（必填）
         max_iter: EM算法最大迭代次数
         max_lags: 因子自回归最大滞后阶数
         tolerance: EM算法收敛容差
@@ -100,6 +102,7 @@ def train_dfm_with_forecast(
     try:
         model_result = dfm.fit(
             data=predictor_data,
+            training_start=training_start,
             train_end=train_end
         )
 
@@ -119,6 +122,7 @@ def train_dfm_with_forecast(
         model_result = generate_target_forecast(
             model_result=model_result,
             target_data=target_data,
+            training_start=training_start,
             train_end=train_end,
             validation_start=validation_start,
             validation_end=validation_end,
@@ -144,8 +148,8 @@ def evaluate_model_performance(
     model_result: DFMModelResult,
     target_data: pd.Series,
     train_end: str,
-    validation_start: Optional[str] = None,
-    validation_end: Optional[str] = None
+    validation_start: str,
+    validation_end: str
 ) -> EvaluationMetrics:
     """
     统一的模型性能评估函数
@@ -158,9 +162,9 @@ def evaluate_model_performance(
     Args:
         model_result: DFM模型结果，包含预测值
         target_data: 目标变量的真实值 (Series with DatetimeIndex)
-        train_end: 训练集结束日期
-        validation_start: 验证集开始日期 (可选)
-        validation_end: 验证集结束日期 (可选)
+        train_end: 训练集结束日期（必填）
+        validation_start: 验证集开始日期（必填）
+        validation_end: 验证集结束日期（必填）
 
     Returns:
         EvaluationMetrics: 包含所有评估指标的对象
@@ -180,14 +184,7 @@ def evaluate_model_performance(
     try:
         # 1. 分割样本内和样本外数据
         train_data = target_data.loc[:train_end]
-
-        if validation_start and validation_end:
-            val_data = target_data.loc[validation_start:validation_end]
-        else:
-            # 如果未指定验证期，使用训练期之后的所有数据
-            val_data = target_data.loc[train_end:]
-            if len(val_data) > 0:
-                val_data = val_data.iloc[1:]  # 排除训练期最后一天
+        val_data = target_data.loc[validation_start:validation_end]
 
         # 2. 样本内评估
         if model_result.forecast_is is not None and len(train_data) > 0:

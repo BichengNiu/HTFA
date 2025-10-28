@@ -1,32 +1,24 @@
 # -*- coding: utf-8 -*-
 """
-DFM新闻分析页面组件
+DFM新闻分析页面 - 纽约联储风格
 
-完全重构版本，与dfm_old_ui/news_analysis_front_end.py保持完全一致
+完全重构版本，采用上下布局：图在上，表在下
 """
 
 import streamlit as st
 import pandas as pd
 import os
-import sys
 import traceback
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
-
-# 添加路径以导入统一状态管理
-current_dir = os.path.dirname(os.path.abspath(__file__))
-dashboard_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..', '..'))
-if dashboard_root not in sys.path:
-    sys.path.insert(0, dashboard_root)
+from datetime import datetime
+from typing import Dict, Any
 
 # 导入统一状态管理
 from dashboard.core import get_global_dfm_manager
-
-print("[DFM News Analysis] [SUCCESS] 统一状态管理器导入成功")
+from dashboard.models.DFM.decomp import execute_news_analysis
 
 
 def get_dfm_manager():
-    """获取DFM模块管理器实例（使用全局单例）"""
+    """获取DFM模块管理器实例"""
     try:
         dfm_manager = get_global_dfm_manager()
         if dfm_manager is None:
@@ -38,498 +30,434 @@ def get_dfm_manager():
 
 
 def get_dfm_state(key, default=None):
-    """获取DFM状态值（简化版本）"""
+    """获取DFM状态值 - 仅从news_analysis命名空间读取"""
     dfm_manager = get_dfm_manager()
-
-    # 数据相关的键从data_prep命名空间获取
-    data_keys = [
-        'dfm_prepared_data_df',
-        'dfm_transform_log_obj',
-        'dfm_industry_map_obj',
-        'dfm_removed_vars_log_obj',
-        'dfm_var_type_map_obj'
-    ]
-
-    if key in data_keys:
-        return dfm_manager.get_dfm_state('data_prep', key, default)
-
-    # 模型文件相关从model_analysis获取
-    model_keys = ['dfm_model_file_indep', 'dfm_metadata_file_indep']
-    if key in model_keys:
-        return dfm_manager.get_dfm_state('model_analysis', key, default)
-
-    # 其他键从news_analysis命名空间获取
+    # 所有键都从news_analysis命名空间获取（不再跨命名空间读取）
     return dfm_manager.get_dfm_state('news_analysis', key, default)
 
 
 def set_dfm_state(key, value):
-    """设置DFM状态值（只使用统一状态管理）"""
+    """设置DFM状态值"""
     dfm_manager = get_dfm_manager()
-
-    success = dfm_manager.set_dfm_state('news_analysis', key, value)
-    if not success:
-        print(f"[DFM News Analysis] [WARNING] 统一状态管理器设置失败: {key}")
-    return success
-
-
-# 导入后端执行函数
-from dashboard.models.DFM.decomp.news_analysis_backend import execute_news_analysis
-backend_available = True
-print("[News Frontend] Successfully imported news_analysis_backend.execute_news_analysis")
-
-
-def render_news_analysis_tab(st_instance):
-    """
-    渲染新闻分析标签页
-
-    Args:
-        st_instance: Streamlit实例
-    """
-
-    if not backend_available:
-        st_instance.error("新闻分析后端不可用，请检查模块导入。")
-        return
-
-    # === 参数设置区域 ===
-    st_instance.markdown("##### 分析参数设置")
-
-    # 目标月份选择
-    target_month_date_selected = st_instance.date_input(
-        "目标月份",
-        value=datetime.now().replace(day=1),  # 默认当月第一天
-        min_value=datetime(2000, 1, 1),      # 合理的最小可选日期
-        max_value=datetime.now().replace(day=1) + timedelta(days=365*5),  # 限制可选的最大日期
-        key="news_target_month_date_selector_frontend",
-        help="选择您希望进行新闻归因分析的目标月份。"
-    )
-    st_instance.caption("选择目标月份后，程序将自动使用该年和月份进行分析。")
-
-    # === 文件检查区域 ===
-    st_instance.markdown("##### 模型文件检查")
-
-    model_file = get_dfm_state('dfm_model_file_indep', None)
-    metadata_file = get_dfm_state('dfm_metadata_file_indep', None)
-
-    # 显示文件状态
-    col_file1, col_file2 = st_instance.columns(2)
-    with col_file1:
-        if model_file is not None:
-            file_name = getattr(model_file, 'name', '未知文件')
-            st_instance.success(f"模型文件: {file_name}")
-        else:
-            st_instance.error("未找到模型文件")
-
-    with col_file2:
-        if metadata_file is not None:
-            file_name = getattr(metadata_file, 'name', '未知文件')
-            st_instance.success(f"元数据文件: {file_name}")
-        else:
-            st_instance.error("未找到元数据文件")
-
-    if model_file is None or metadata_file is None:
-        st_instance.warning("请先在 **模型分析** 标签页上传必要的模型文件和元数据文件。")
-        st_instance.info("提示：模型文件通常为 .joblib 格式，元数据文件通常为 .pkl 格式。")
-        return
-
-    # === 执行按钮 ===
-    st_instance.markdown("---")
-
-    # === 执行按钮 ===
-    analysis_triggered = st_instance.button(
-        "运行新闻分析和生成图表",
-        key="run_news_analysis_frontend_button",
-        type="primary",
-        use_container_width=True
-    )
-
-    if analysis_triggered:
-        _execute_news_analysis(st_instance, target_month_date_selected, model_file, metadata_file)
-
-    # === 统一的结果显示区域 ===
-    # 检查是否有分析结果需要显示（无论是刚完成的还是之前缓存的）
-    if get_dfm_state('news_analysis_completed', False):
-        st_instance.markdown("---")
-
-        # 如果是刚刚触发的分析，显示完成信息
-        if analysis_triggered:
-            st_instance.success("新闻分析执行完成！")
-        else:
-            st_instance.info("显示之前的分析结果")
-
-        # 构建结果数据
-        cached_backend_results = {
-            "returncode": 0,
-            "evo_csv_path": get_dfm_state('news_analysis_evo_csv_path'),
-            "news_csv_path": get_dfm_state('news_analysis_news_csv_path'),
-            "evolution_plot_path": get_dfm_state('news_analysis_evolution_plot_path'),
-            "decomposition_plot_path": get_dfm_state('news_analysis_decomposition_plot_path')
-        }
-
-        # 显示图表（下载按钮已集成在图表中）
-        _display_charts(st_instance, cached_backend_results)
-
-
-def _execute_news_analysis(st_instance, target_month_date_selected, model_file, metadata_file):
-    """
-    执行新闻分析的内部函数
-
-    Args:
-        st_instance: Streamlit实例
-        target_month_date_selected: 选择的目标月份
-        model_file: 模型文件
-        metadata_file: 元数据文件
-    """
-
-    with st_instance.spinner("正在执行新闻分析，请稍候..."):
-        try:
-            # 准备参数
-            target_month_str = target_month_date_selected.strftime('%Y-%m') if target_month_date_selected else None
-            plot_start_date_str = None
-            plot_end_date_str = None
-
-            # 调用后端执行
-            backend_results = execute_news_analysis(
-                dfm_model_file_content=model_file.getbuffer(),
-                dfm_metadata_file_content=metadata_file.getbuffer(),
-                target_month=target_month_str,
-                plot_start_date=plot_start_date_str,
-                plot_end_date=plot_end_date_str,
-            )
-
-            # 处理结果（只保存状态，不显示结果）
-            _save_analysis_results(st_instance, backend_results, target_month_str)
-
-        except Exception as e_call_backend:
-            st_instance.error(f"调用后端脚本时发生错误: {e_call_backend}")
-            st_instance.error(f"详细错误信息: {traceback.format_exc()}")
-
-
-def _save_analysis_results(st_instance, backend_results: Dict[str, Any], target_month_str: Optional[str]):
-    """
-    保存分析结果到状态管理器（不显示结果）
-
-    Args:
-        st_instance: Streamlit实例
-        backend_results: 后端返回的结果字典
-        target_month_str: 目标月份字符串
-    """
-
-    if backend_results["returncode"] == 0:
-        # 保存文件路径到统一状态管理器，避免页面刷新时丢失
-        if backend_results.get("evo_csv_path"):
-            set_dfm_state('news_analysis_evo_csv_path', backend_results["evo_csv_path"])
-        if backend_results.get("news_csv_path"):
-            set_dfm_state('news_analysis_news_csv_path', backend_results["news_csv_path"])
-        if backend_results.get("evolution_plot_path"):
-            set_dfm_state('news_analysis_evolution_plot_path', backend_results["evolution_plot_path"])
-        if backend_results.get("decomposition_plot_path"):
-            set_dfm_state('news_analysis_decomposition_plot_path', backend_results["decomposition_plot_path"])
-
-        # 设置标记表示分析已完成
-        set_dfm_state('news_analysis_completed', True)
-        set_dfm_state('news_analysis_target_month', target_month_str)
-
-    else:
-        st_instance.error(f"后端脚本执行失败 (返回码: {backend_results['returncode']})")
-
-        if backend_results.get("error_message"):
-            st_instance.error(f"错误详情: {backend_results['error_message']}")
-
-        # 显示调试信息
-        if backend_results.get("stderr"):
-            with st_instance.expander("查看错误日志", expanded=False):
-                st_instance.code(backend_results["stderr"], language="text")
-
-
-def _display_analysis_results(st_instance, backend_results: Dict[str, Any], target_month_str: Optional[str]):
-    """
-    显示分析结果
-    
-    Args:
-        st_instance: Streamlit实例
-        backend_results: 后端返回的结果字典
-        target_month_str: 目标月份字符串
-    """
-    
-    if backend_results["returncode"] == 0:
-        st_instance.success("后端脚本执行成功！")
-
-        # === 结果展示区域 ===
-        st_instance.markdown("---")
-
-        # 图表展示（下载按钮已集成在图表中）
-        _display_charts(st_instance, backend_results)
-        
-    else:
-        st_instance.error(f"后端脚本执行失败 (返回码: {backend_results['returncode']})")
-        
-        if backend_results.get("error_message"):
-            st_instance.error(f"错误详情: {backend_results['error_message']}")
-        
-        # 显示调试信息
-        if backend_results.get("stderr"):
-            with st_instance.expander("查看错误日志", expanded=False):
-                st_instance.code(backend_results["stderr"], language="text")
-
-
-def _display_charts(st_instance, backend_results: Dict[str, Any]):
-    """
-    显示图表
-    
-    Args:
-        st_instance: Streamlit实例
-        backend_results: 后端返回的结果字典
-    """
-    
-    col_left_chart, col_right_chart = st_instance.columns(2)
-    
-    # 先预加载和缓存所有文件数据，确保数据持久化
-    evo_csv_path = get_dfm_state('news_analysis_evo_csv_path') or backend_results.get("evo_csv_path")
-    news_csv_path = get_dfm_state('news_analysis_news_csv_path') or backend_results.get("news_csv_path")
-    _prepare_download_data(evo_csv_path, news_csv_path)
-
-    # 左列：演变图
-    with col_left_chart:
-        st_instance.markdown("##### Nowcast 演变图")
-        # 优先从状态管理器获取，避免页面刷新时丢失
-        evo_plot_path = get_dfm_state('news_analysis_evolution_plot_path') or backend_results.get("evolution_plot_path")
-
-        if evo_plot_path and os.path.exists(evo_plot_path):
-            if evo_plot_path.lower().endswith(".html"):
-                try:
-                    with open(evo_plot_path, 'r', encoding='utf-8') as f_html_evo:
-                        html_content_evo = f_html_evo.read()
-                    st_instance.components.v1.html(html_content_evo, height=500, scrolling=True)
-                    print(f"[News Frontend] Displayed Evolution HTML plot: {evo_plot_path}")
-                except Exception as e_html_evo:
-                    st_instance.error(f"读取或显示演变图时出错: {e_html_evo}")
-            else:
-                st_instance.warning(f"演变图文件格式未知: {evo_plot_path}")
-        else:
-            st_instance.warning("未找到 Nowcast 演变图文件或路径无效。")
-
-        # 在图表下方直接添加下载按钮
-        _render_single_download(st_instance, evo_csv_path, "evo", "Nowcast 演变数据")
-    
-    # 右列：分解图
-    with col_right_chart:
-        st_instance.markdown("##### 新闻贡献分解图")
-        # 优先从状态管理器获取，避免页面刷新时丢失
-        decomp_plot_path = get_dfm_state('news_analysis_decomposition_plot_path') or backend_results.get("decomposition_plot_path")
-
-        if decomp_plot_path and os.path.exists(decomp_plot_path):
-            if decomp_plot_path.lower().endswith(".html"):
-                try:
-                    with open(decomp_plot_path, 'r', encoding='utf-8') as f_html_decomp:
-                        html_content_decomp = f_html_decomp.read()
-                    st_instance.components.v1.html(html_content_decomp, height=500, scrolling=True)
-                    print(f"[News Frontend] Displayed Decomposition HTML plot: {decomp_plot_path}")
-                except Exception as e_html_decomp:
-                    st_instance.error(f"读取或显示分解图时出错: {e_html_decomp}")
-            else:
-                st_instance.warning(f"分解图文件格式未知: {decomp_plot_path}")
-        else:
-            st_instance.warning("未找到新闻贡献分解图文件或路径无效。")
-
-        # 在图表下方直接添加下载按钮
-        news_csv_path = get_dfm_state('news_analysis_news_csv_path') or backend_results.get("news_csv_path")
-        _render_single_download(st_instance, news_csv_path, "news", "新闻分解数据")
-
-
-def _display_download_section(st_instance, backend_results: Dict[str, Any]):
-    """
-    显示下载区域
-
-    Args:
-        st_instance: Streamlit实例
-        backend_results: 后端返回的结果字典
-    """
-
-    # 优先从状态管理器获取文件路径，避免页面刷新时丢失
-    evo_csv_path = get_dfm_state('news_analysis_evo_csv_path') or backend_results.get("evo_csv_path")
-    news_csv_path = get_dfm_state('news_analysis_news_csv_path') or backend_results.get("news_csv_path")
-
-    st_instance.markdown("##### 数据下载")
-    
-    # 预加载和缓存所有文件数据，确保数据持久化
-    _prepare_download_data(evo_csv_path, news_csv_path)
-    
-    # 使用expander来包装下载区域，减少页面刷新的影响
-    with st_instance.expander("下载选项", expanded=True):
-        col_dl1, col_dl2 = st_instance.columns(2)
-
-        with col_dl1:
-            _render_single_download(st_instance, evo_csv_path, "evo", "Nowcast 演变数据")
-
-        with col_dl2:
-            _render_single_download(st_instance, news_csv_path, "news", "新闻分解数据")
-
-
-def _prepare_download_data(evo_csv_path: Optional[str], news_csv_path: Optional[str]):
-    """
-    预加载和缓存下载数据
-    
-    Args:
-        evo_csv_path: 演变数据文件路径
-        news_csv_path: 新闻数据文件路径
-    """
-    
-    print(f"[News Analysis Debug] _prepare_download_data called with:")
-    print(f"[News Analysis Debug]   evo_csv_path: {evo_csv_path}")
-    print(f"[News Analysis Debug]   news_csv_path: {news_csv_path}")
-    
-    # 处理演变数据文件
-    if evo_csv_path and os.path.exists(evo_csv_path):
-        try:
-            print(f"[News Analysis Debug] Processing evo file: {evo_csv_path}")
-            cached_evo_data = get_dfm_state('news_analysis_evo_csv_data')
-            cached_evo_path = get_dfm_state('news_analysis_evo_csv_cached_path')
-            
-            print(f"[News Analysis Debug] Cached evo path: {cached_evo_path}")
-            print(f"[News Analysis Debug] Cached evo data exists: {cached_evo_data is not None}")
-            
-            if cached_evo_path != evo_csv_path or cached_evo_data is None:
-                print(f"[News Analysis Debug] Caching new evo data...")
-                with open(evo_csv_path, "rb") as fp_evo:
-                    file_data = fp_evo.read()
-                print(f"[News Analysis Debug] Read evo file size: {len(file_data)} bytes")
-                success = set_dfm_state('news_analysis_evo_csv_data', file_data)
-                set_dfm_state('news_analysis_evo_csv_cached_path', evo_csv_path)
-                print(f"[News Analysis Debug] Evo data cached successfully: {success}")
-            else:
-                print(f"[News Analysis Debug] Using existing cached evo data")
-        except Exception as e:
-            print(f"[News Analysis] Error caching evo data: {e}")
-            import traceback
-            traceback.print_exc()
-    else:
-        print(f"[News Analysis Debug] Evo file not found or invalid path")
-    
-    # 处理新闻数据文件
-    if news_csv_path and os.path.exists(news_csv_path):
-        try:
-            print(f"[News Analysis Debug] Processing news file: {news_csv_path}")
-            cached_news_data = get_dfm_state('news_analysis_news_csv_data')
-            cached_news_path = get_dfm_state('news_analysis_news_csv_cached_path')
-            
-            print(f"[News Analysis Debug] Cached news path: {cached_news_path}")
-            print(f"[News Analysis Debug] Cached news data exists: {cached_news_data is not None}")
-            
-            if cached_news_path != news_csv_path or cached_news_data is None:
-                print(f"[News Analysis Debug] Caching new news data...")
-                with open(news_csv_path, "rb") as fp_news:
-                    file_data = fp_news.read()
-                print(f"[News Analysis Debug] Read news file size: {len(file_data)} bytes")
-                success = set_dfm_state('news_analysis_news_csv_data', file_data)
-                set_dfm_state('news_analysis_news_csv_cached_path', news_csv_path)
-                print(f"[News Analysis Debug] News data cached successfully: {success}")
-            else:
-                print(f"[News Analysis Debug] Using existing cached news data")
-        except Exception as e:
-            print(f"[News Analysis] Error caching news data: {e}")
-            import traceback
-            traceback.print_exc()
-    else:
-        print(f"[News Analysis Debug] News file not found or invalid path")
-
-
-def _render_single_download(st_instance, file_path: Optional[str], file_type: str, description: str):
-    """
-    渲染单个下载区域
-    
-    Args:
-        st_instance: Streamlit实例
-        file_path: 文件路径
-        file_type: 文件类型标识 ("evo" 或 "news")
-        description: 文件描述
-    """
-    
-    st_instance.markdown(f"**{description}**")
-    
-    if not file_path or not os.path.exists(file_path):
-        st_instance.caption("CSV 文件未生成")
-        return
-    
-    try:
-        print(f"[News Analysis Debug] _render_single_download called for {file_type}")
-        print(f"[News Analysis Debug]   file_path: {file_path}")
-        print(f"[News Analysis Debug]   file_exists: {os.path.exists(file_path) if file_path else False}")
-        
-        # 从缓存获取文件数据
-        cached_data_key = f'news_analysis_{file_type}_csv_data'
-        print(f"[News Analysis Debug]   cached_data_key: {cached_data_key}")
-        
-        file_data = get_dfm_state(cached_data_key)
-        print(f"[News Analysis Debug]   cached_data_exists: {file_data is not None}")
-        if file_data:
-            print(f"[News Analysis Debug]   cached_data_size: {len(file_data)} bytes")
-        
-        if file_data is None:
-            st_instance.error(f"文件数据未缓存，请重新运行分析")
-            print(f"[News Analysis Debug] ERROR: No cached data found for {file_type}")
-            return
-            
-        # 显示文件信息
-        file_size_mb = len(file_data) / (1024 * 1024)
-        st_instance.caption(f"{os.path.basename(file_path)} ({file_size_mb:.2f} MB)")
-        
-        # 使用稳定的键，基于文件路径和类型
-        # 避免使用时间戳，确保键的稳定性
-        stable_key = f"download_{file_type}_csv_{abs(hash(file_path + file_type)) % 99999}"
-        
-        # 直接使用download_button，但使用稳定的键
-        st_instance.download_button(
-            label=f"下载 CSV",
-            data=file_data,
-            file_name=os.path.basename(file_path),
-            mime="text/csv",
-            key=stable_key,
-            use_container_width=True,
-            help=f"下载 {description} CSV 文件"
-        )
-            
-    except Exception as e:
-        st_instance.error(f"准备下载文件时出错: {e}")
-        print(f"[News Analysis] Download error for {file_type}: {e}")
+    return dfm_manager.set_dfm_state('news_analysis', key, value)
 
 
 def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
     """
-    渲染DFM新闻分析页面
+    渲染纽约联储风格的新闻分析页面
 
     Args:
         st_module: Streamlit模块
 
     Returns:
-        Dict[str, Any]: 渲染结果
+        渲染结果字典
     """
     try:
-        # 调用主要的UI渲染函数
-        render_news_analysis_tab(st_module)
 
-        return {
-            'status': 'success',
-            'page': 'news_analysis',
-            'components': ['parameter_setting', 'file_check', 'analysis_execution', 'results_display']
-        }
+        # 文件上传区域
+        st_module.markdown("### 模型文件上传")
+        st_module.info("请上传模型训练模块导出的模型文件和元数据文件")
+
+        col_model, col_metadata = st_module.columns(2)
+
+        with col_model:
+            st_module.markdown("**模型文件 (.joblib)**")
+            uploaded_model_file = st_module.file_uploader(
+                "选择模型文件",
+                type=['joblib'],
+                key="news_model_upload",
+                help="上传模型训练模块导出的DFM模型文件"
+            )
+
+            if uploaded_model_file:
+                set_dfm_state("dfm_model_file_news", uploaded_model_file)
+            else:
+                existing_model = get_dfm_state('dfm_model_file_news', None)
+                if existing_model is not None and hasattr(existing_model, 'name'):
+                    st_module.info(f"当前文件: {existing_model.name}")
+
+        with col_metadata:
+            st_module.markdown("**元数据文件 (.pkl)**")
+            uploaded_metadata_file = st_module.file_uploader(
+                "选择元数据文件",
+                type=['pkl'],
+                key="news_metadata_upload",
+                help="上传模型训练模块导出的元数据文件"
+            )
+
+            if uploaded_metadata_file:
+                set_dfm_state("dfm_metadata_file_news", uploaded_metadata_file)
+            else:
+                existing_metadata = get_dfm_state('dfm_metadata_file_news', None)
+                if existing_metadata is not None and hasattr(existing_metadata, 'name'):
+                    st_module.info(f"当前文件: {existing_metadata.name}")
+
+        st_module.markdown("---")
+
+        # 检查文件是否已上传
+        model_file = get_dfm_state('dfm_model_file_news', None)
+        metadata_file = get_dfm_state('dfm_metadata_file_news', None)
+
+        if model_file is None or metadata_file is None:
+            missing = []
+            if model_file is None:
+                missing.append("模型文件")
+            if metadata_file is None:
+                missing.append("元数据文件")
+            st_module.warning(f"缺少必要文件: {', '.join(missing)}。请上传后再继续。")
+            return {'status': 'error', 'error': '缺少模型文件'}
+
+        # 参数设置区域，获取用户选择的目标月份
+        selected_target_month = _render_parameter_section(st_module)
+
+        # 执行按钮和结果渲染
+        if st_module.button("执行新闻分析", type="primary", use_container_width=True, key="execute_news_analysis_btn"):
+            result = _execute_analysis(st_module, model_file, metadata_file, selected_target_month)
+            # 如果分析成功，直接渲染结果，不使用rerun
+            if result and result.get('returncode') == 0:
+                _render_results_direct(st_module, result)
+        else:
+            # 非按钮点击时，检查是否有已完成的分析结果
+            if get_dfm_state('news_analysis_completed', False):
+                _render_results(st_module)
+
+        return {'status': 'success', 'page': 'news_analysis'}
 
     except Exception as e:
-        st_module.error(f"新闻分析页面渲染失败: {str(e)}")
-        return {
-            'status': 'error',
-            'page': 'news_analysis',
-            'error': str(e)
-        }
+        st_module.error(f"页面渲染失败: {str(e)}")
+        return {'status': 'error', 'error': str(e)}
 
 
+def _render_parameter_section(st_module):
+    """渲染参数设置区域，返回用户选择的目标月份"""
+
+    # 从状态中获取已选择的目标月份，如果没有则使用当前月份
+    current_target_month = get_dfm_state('news_target_month', None)
+    if current_target_month:
+        # 解析已保存的月份字符串
+        try:
+            default_value = datetime.strptime(current_target_month, '%Y-%m').replace(day=1)
+        except:
+            default_value = datetime.now().replace(day=1)
+    else:
+        default_value = datetime.now().replace(day=1)
+
+    target_date = st_module.date_input(
+        "**目标月份**",
+        value=default_value,
+        key="news_target_month_selector",
+        help="选择要分析的目标月份"
+    )
+
+    # 更新状态并返回选择的月份
+    selected_month = target_date.strftime('%Y-%m')
+    set_dfm_state('news_target_month', selected_month)
+    print(f"[UI DEBUG] 用户选择的目标月份: {selected_month}")
+
+    return selected_month
+
+
+def _execute_analysis(st_module, model_file, metadata_file, target_month):
+    """执行新闻分析，返回结果"""
+    with st_module.spinner("正在执行新闻分析，请稍候..."):
+        try:
+            print(f"[UI DEBUG] 执行分析使用的目标月份: {target_month}")
+
+            # 调用后端API
+            result = execute_news_analysis(
+                dfm_model_file_content=model_file.getbuffer(),
+                dfm_metadata_file_content=metadata_file.getbuffer(),
+                target_month=target_month,
+                plot_start_date=None,
+                plot_end_date=None
+            )
+
+            if result['returncode'] == 0:
+                # 确保result是可序列化的字典
+                serializable_result = {
+                    'returncode': result.get('returncode', 0),
+                    'csv_paths': result.get('csv_paths', {}),
+                    'csv_contents': result.get('csv_contents', {}),  # 保存CSV内容到状态
+                    'plot_paths': result.get('plot_paths', {}),
+                    'summary': result.get('summary', {}),
+                    'data_flow': result.get('data_flow', []),
+                    'workspace_dir': result.get('workspace_dir', '')
+                }
+
+                # 保存结果到状态（用于页面刷新后恢复）
+                set_dfm_state('news_analysis_completed', True)
+                set_dfm_state('news_analysis_result', serializable_result)
+                set_dfm_state('news_target_month_executed', target_month)
+
+                st_module.success("分析执行成功！")
+                return serializable_result
+            else:
+                st_module.error(f"分析执行失败: {result.get('error_message', '未知错误')}")
+                return None
+
+        except Exception as e:
+            st_module.error(f"执行过程中发生错误: {str(e)}")
+            st_module.code(traceback.format_exc(), language="python")
+            return None
+
+
+def _render_results_direct(st_module, result):
+    """直接渲染分析结果（不从状态读取）"""
+    if not result or result.get('returncode') != 0:
+        st_module.error("分析结果不可用")
+        return
+
+    st_module.markdown("---")
+    st_module.markdown("### 分析结果")
+
+    # 1. 统计摘要卡片（关键指标和行业分解）
+    _render_summary_cards(st_module, result)
+
+    st_module.markdown("---")
+
+    # 2. 数据流表格区域
+    _render_data_flow_table(st_module, result)
+
+    st_module.markdown("---")
+
+    # 3. 数据下载区域
+    _render_download_section(st_module, result)
+
+
+def _render_results(st_module):
+    """渲染分析结果（从状态读取）"""
+    result = get_dfm_state('news_analysis_result', {})
+
+    if not result or result.get('returncode') != 0:
+        st_module.error("分析结果不可用")
+        return
+
+    st_module.markdown("---")
+
+    # 1. 统计摘要卡片（关键指标和行业分解）
+    _render_summary_cards(st_module, result)
+
+    st_module.markdown("---")
+
+    # 2. 数据流表格区域
+    _render_data_flow_table(st_module, result)
+
+    st_module.markdown("---")
+
+    # 3. 数据下载区域
+    _render_download_section(st_module, result)
+
+
+def _render_data_flow_table(st_module, result):
+    """渲染数据流表格"""
+    data_flow = result.get('data_flow', [])
+
+    if not data_flow:
+        st_module.info("没有数据流信息")
+        return
+
+    # 获取用户选择的目标月份
+    target_month = get_dfm_state('news_target_month_executed', datetime.now().strftime('%Y-%m'))
+
+    # 调试信息：显示data_flow的前几个日期
+    if data_flow:
+        print(f"[DEBUG] data_flow总数: {len(data_flow)}")
+        print(f"[DEBUG] target_month: {target_month}")
+        print(f"[DEBUG] 前5个date_entry的日期: {[entry['date'] for entry in data_flow[:5]]}")
+
+    # 计算目标月份的日期范围
+    try:
+        target_date = pd.to_datetime(target_month + '-01')
+        # 目标月份的第一天和最后一天
+        month_start = target_date
+        # 计算下个月的第一天，然后减一天得到当月最后一天
+        if target_date.month == 12:
+            month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
+        else:
+            month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
+
+        print(f"[DEBUG] 目标月份日期范围: {month_start.strftime('%Y-%m-%d')} 到 {month_end.strftime('%Y-%m-%d')}")
+    except Exception as e:
+        st_module.error(f"日期解析失败: {e}")
+        return
+
+    # 过滤目标月份的数据
+    filtered_data_flow = []
+    for date_entry in data_flow:
+        date_str = date_entry['date']
+        try:
+            entry_date = pd.to_datetime(date_str)
+            # 判断日期是否在目标月份范围内
+            if month_start <= entry_date <= month_end:
+                filtered_data_flow.append(date_entry)
+                print(f"[DEBUG] 匹配日期: {date_str}")
+        except Exception as e:
+            print(f"[DEBUG] 日期解析失败: {date_str}, 错误: {e}")
+            continue
+
+    print(f"[DEBUG] 过滤后的数据流数量: {len(filtered_data_flow)}")
+
+    if not filtered_data_flow:
+        # data_flow是按降序排列的（最新在前），所以[-1]是最早日期，[0]是最新日期
+        st_module.info(f"目标月份 {target_month} 没有数据发布（数据覆盖范围: {data_flow[-1]['date'] if data_flow else 'N/A'} - {data_flow[0]['date'] if data_flow else 'N/A'}）")
+        return
+
+    st_module.markdown(f"##### 数据发布影响明细 - {target_month} ({len(filtered_data_flow)} 个日期)")
+
+    for date_entry in filtered_data_flow:
+        date_str = date_entry['date']
+        nowcast_value = date_entry.get('nowcast_value')
+        releases = date_entry.get('releases', [])
+
+        # 日期标题
+        if nowcast_value is not None:
+            st_module.markdown(f"**{date_str}** - Nowcast: {nowcast_value:.4f}")
+        else:
+            st_module.markdown(f"**{date_str}**")
+
+        # 发布列表
+        if releases:
+            release_data = []
+            for release in releases:
+                release_data.append({
+                    '变量名称': release['variable'],
+                    '所属行业': release['industry'],
+                    '观测值': f"{release['actual']:.4f}",
+                    '贡献值(%)': f"{release['contribution']:.2f}",
+                    '影响值': f"{release['impact']:+.4f}",
+                    '方向': '↑' if release['is_positive'] else '↓'
+                })
+
+            df = pd.DataFrame(release_data)
+            st_module.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st_module.caption("无发布数据")
+
+    # 添加计算说明
+    with st_module.expander("指标说明"):
+        st_module.markdown("""
+**贡献值（Contribution %）**：表示该数据发布对目标变量预测变动的相对贡献度。
+
+- 计算公式：`贡献值(%) = |该变量的影响值| / Σ|所有变量的影响值| × 100`
+- 所有变量的贡献值总和为100%
+- 贡献值越大，说明该变量对预测变动的解释力越强
+
+**影响值（Impact）**：表示该数据发布导致目标变量预测值的绝对变动量。
+
+- 计算公式：`影响值 = λ_y' × K_t[:, i] × (观测值 - 期望值)`
+  - `λ_y`：目标变量的因子载荷向量
+  - `K_t`：第t期卡尔曼增益矩阵
+  - `观测值 - 期望值`：新息（News）
+- 影响值为正表示该数据发布提升了预测值，为负表示降低了预测值
+- 所有变量的影响值总和等于预测值的总变动量
+
+**示例**：如果GDP增长率预测从5.0%变为5.2%，某变量的影响值为+0.15，贡献值为75%，说明：
+- 该变量使预测值提升了0.15个百分点
+- 在总变动0.2个百分点中，该变量解释了75%的变化
+        """)
+
+
+def _render_summary_cards(st_module, result):
+    """渲染统计摘要卡片"""
+    summary = result.get('summary', {})
+
+    st_module.markdown("##### 关键指标")
+
+    col1, col2, col3, col4 = st_module.columns(4)
+
+    with col1:
+        st_module.metric(
+            label="总影响",
+            value=f"{summary.get('total_impact', 0):.4f}",
+            help="所有数据发布对nowcast的累积影响"
+        )
+
+    with col2:
+        st_module.metric(
+            label="数据发布数",
+            value=f"{summary.get('total_releases', 0)}",
+            help="分析期内发布的数据点数量"
+        )
+
+    with col3:
+        st_module.metric(
+            label="正向影响",
+            value=f"{summary.get('positive_impact_sum', 0):.4f}",
+            delta="+",
+            help="提升nowcast值的数据发布总影响"
+        )
+
+    with col4:
+        st_module.metric(
+            label="负向影响",
+            value=f"{summary.get('negative_impact_sum', 0):.4f}",
+            delta="-",
+            delta_color="inverse",
+            help="降低nowcast值的数据发布总影响"
+        )
+
+    # 行业分解
+    industry_breakdown = summary.get('industry_breakdown', {})
+    if industry_breakdown:
+        st_module.markdown("##### 按行业分解")
+
+        industry_data = []
+        for industry, stats in industry_breakdown.items():
+            industry_data.append({
+                '行业': industry,
+                '总影响': stats['impact'],
+                '数据发布数': stats['count'],
+                '正向影响': stats['positive_impact'],
+                '负向影响': stats['negative_impact'],
+                '贡献度(%)': stats['contribution_pct']
+            })
+
+        industry_df = pd.DataFrame(industry_data)
+        industry_df = industry_df.sort_values(by='总影响', key=abs, ascending=False)
+        st_module.dataframe(industry_df, use_container_width=True, hide_index=True)
+
+
+def _render_download_section(st_module, result):
+    """渲染下载区域"""
+    csv_paths = result.get('csv_paths', {})
+    csv_contents = result.get('csv_contents', {})
+
+    st_module.markdown("##### 数据导出")
+
+    col1, col2 = st_module.columns(2)
+
+    with col1:
+        impacts_path = csv_paths.get('impacts')
+        impacts_data = csv_contents.get('impacts')
+        if impacts_data:
+            st_module.download_button(
+                label="下载数据发布影响CSV",
+                data=impacts_data,
+                file_name=os.path.basename(impacts_path) if impacts_path else 'data_release_impacts.csv',
+                mime="text/csv",
+                use_container_width=True,
+                key="download_impacts_csv"
+            )
+        else:
+            st_module.info("数据发布影响CSV未生成")
+
+    with col2:
+        contributions_path = csv_paths.get('contributions')
+        contributions_data = csv_contents.get('contributions')
+        if contributions_data:
+            st_module.download_button(
+                label="下载贡献分解CSV",
+                data=contributions_data,
+                file_name=os.path.basename(contributions_path) if contributions_path else 'contributions_decomposition.csv',
+                mime="text/csv",
+                use_container_width=True,
+                key="download_contributions_csv"
+            )
+        else:
+            st_module.info("贡献分解CSV未生成")
+
+
+# 兼容性接口
 def render_dfm_news_analysis_tab(st_module: Any) -> Dict[str, Any]:
-    """
-    兼容性接口：渲染DFM新闻分析标签页
-
-    Args:
-        st_module: Streamlit模块
-
-    Returns:
-        Dict[str, Any]: 渲染结果
-    """
+    """兼容性接口"""
     return render_dfm_news_analysis_page(st_module)

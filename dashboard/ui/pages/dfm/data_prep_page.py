@@ -158,82 +158,62 @@ def render_dfm_data_prep_tab(st):
     if get_dfm_state('dfm_processed_outputs') is None:
         set_dfm_state("dfm_processed_outputs", None)
 
-    # 检查侧边栏是否已经上传了文件
-    print("[HOT] [文件检查] 开始检查侧边栏上传的文件状态...")
+    # 数据文件上传区域
+    st.markdown("### 数据文件上传")
+
+    # 检查已有文件
     existing_file = get_dfm_state('dfm_training_data_file')
-    existing_file_bytes = get_dfm_state('dfm_training_data_bytes')
     existing_file_path = get_dfm_state('dfm_uploaded_excel_file_path')
 
-    print(f"[HOT] [文件检查] existing_file: {existing_file is not None}")
-    print(f"[HOT] [文件检查] existing_file_bytes: {existing_file_bytes is not None and len(existing_file_bytes) > 0 if existing_file_bytes else False}")
-    print(f"[HOT] [文件检查] existing_file 类型: {type(existing_file)}")
-    if existing_file:
-        print(f"[HOT] [文件检查] existing_file.name: {getattr(existing_file, 'name', 'N/A')}")
-    print(f"[HOT] [文件检查] existing_file_path: {existing_file_path}")
+    # 显示当前文件状态
+    if existing_file and existing_file_path:
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.success(f"已加载文件: {existing_file_path}")
+        with col2:
+            if st.button("重新上传", key="dfm_reupload_btn"):
+                set_dfm_state("dfm_training_data_file", None)
+                set_dfm_state("dfm_uploaded_excel_file_path", None)
+                set_dfm_state("dfm_training_data_bytes", None)
+                set_dfm_state("dfm_file_processed", False)
+                set_dfm_state("dfm_date_detection_needed", True)
+                st.rerun()
 
-    if existing_file_bytes and existing_file_path:
-        # 从字节内容重建文件对象
-        print(f"[HOT] [文件检查] 从字节内容重建文件对象: {existing_file_path}")
-        import io
+    # 文件上传组件
+    uploaded_file_new = st.file_uploader(
+        "选择Excel数据文件",
+        type=['xlsx', 'xls'],
+        key="dfm_data_prep_file_uploader",
+        help="请上传包含时间序列数据的Excel文件（支持.xlsx, .xls格式）"
+    )
 
-        class UploadedFileFromBytes:
-            """从字节内容模拟 Streamlit UploadedFile 对象"""
-            def __init__(self, name: str, data: bytes):
-                self.name = name
-                self._data = data
+    # 处理新上传的文件
+    uploaded_file = None
+    if uploaded_file_new is not None:
+        # 保存新文件到状态
+        file_bytes = uploaded_file_new.getvalue()
+        set_dfm_state("dfm_training_data_file", uploaded_file_new)
+        set_dfm_state("dfm_training_data_bytes", file_bytes)
+        set_dfm_state("dfm_uploaded_excel_file_path", uploaded_file_new.name)
+        set_dfm_state("dfm_use_full_data_preparation", True)
+        set_dfm_state("dfm_file_processed", False)
+        set_dfm_state("dfm_date_detection_needed", True)
 
-            def getvalue(self):
-                return self._data
-
-            def read(self):
-                return self._data
-
-        uploaded_file = UploadedFileFromBytes(existing_file_path, existing_file_bytes)
-        print(f"[HOT] [文件检查] 文件对象重建成功，字节大小: {len(existing_file_bytes)}")
-    elif existing_file and existing_file_path:
-        # 使用已存在的文件对象（用于当前会话）
-        print(f"[HOT] [文件检查] 找到已上传文件对象: {existing_file_path}")
-        uploaded_file = existing_file
+        print(f"[UI] 新文件上传: {uploaded_file_new.name}，字节大小: {len(file_bytes)}")
+        uploaded_file = uploaded_file_new
     elif existing_file:
-        # 如果有文件对象但没有路径，仍然使用文件对象
-        print(f"[HOT] [文件检查] 找到文件对象但路径为空，仍然使用文件")
+        # 使用已存在的文件
         uploaded_file = existing_file
-    else:
-        # 如果侧边栏没有上传文件，显示简洁提示
-        print("[HOT] [文件检查] 未找到已上传文件，显示警告")
-        st.warning("[WARNING] 请先在侧边栏上传数据文件")
-        uploaded_file = None
 
-    if uploaded_file is not None:
-        # 检查是否是新文件上传（避免重复处理）
-        current_file = get_dfm_state('dfm_training_data_file')
-        file_changed = (
-            current_file is None or
-            current_file.name != uploaded_file.name or
-            get_dfm_state('dfm_file_processed', False) == False
-        )
+    st.markdown("---")
 
-        # 如果是从备用上传器上传的新文件，需要保存到状态管理
-        if file_changed and uploaded_file != existing_file:
-            set_dfm_state("dfm_training_data_file", uploaded_file)
-            # 保存Excel文件路径用于训练模块
-            set_dfm_state("dfm_uploaded_excel_file_path", uploaded_file.name)
-            set_dfm_state("dfm_use_full_data_preparation", True)
-
-            print(f"[UI] 检测到新文件上传: {uploaded_file.name}，标记需要重新检测...")
-            set_dfm_state("dfm_file_processed", False)  # 重置处理标记
-            set_dfm_state("dfm_date_detection_needed", True)  # 标记需要日期检测
-
-            # 标记文件已处理
-            set_dfm_state("dfm_file_processed", True)
-
-
-    else:
-        st.info("请上传训练数据集。")
+    if uploaded_file is None:
+        st.info("请上传训练数据集以开始数据准备。")
+        return
 
     # 根据数据文件的实际日期范围进行检测
     def detect_data_date_range(uploaded_file):
-        """从上传的文件中检测数据的真实日期范围 - 获取所有sheet的日期并集"""
+        """从上传的文件中检测所有数据工作表的真实日期范围"""
         try:
             if uploaded_file is None:
                 return None, None
@@ -250,7 +230,6 @@ def render_dfm_data_prep_tab(st):
                 return None, None
 
             excel_file = io.BytesIO(file_bytes)
-
             all_dates_found = []
 
             # 获取所有工作表名称
@@ -259,9 +238,9 @@ def render_dfm_data_prep_tab(st):
                 sheet_names = xl_file.sheet_names
                 print(f"检测到工作表: {sheet_names}")
             except:
-                sheet_names = [0]  # 回退到第一个工作表
+                sheet_names = [0]
 
-            # 检查每个工作表寻找真实的日期数据
+            # 检查所有数据工作表
             for sheet_name in sheet_names:
                 try:
                     excel_file.seek(0)  # 重置文件指针
@@ -304,7 +283,7 @@ def render_dfm_data_prep_tab(st):
                     # 收集有效日期
                     if len(date_values) > 0:
                         valid_dates = date_values[date_values.notna()]
-                        if len(valid_dates) > 5:  # 至少要有5个有效日期
+                        if len(valid_dates) > 5:
                             all_dates_found.extend(valid_dates.tolist())
                             print(f"  {sheet_name}: 找到 {len(valid_dates)} 个日期")
 
@@ -312,28 +291,26 @@ def render_dfm_data_prep_tab(st):
                     print(f"  处理 {sheet_name} 时出错: {str(e)}")
                     continue
 
-            # 汇总所有真实日期，返回实际的数据范围（并集）
+            # 汇总所有数据工作表的日期范围
             if all_dates_found:
                 all_dates = pd.to_datetime(all_dates_found)
 
-                # 过滤掉异常早期的日期（如1970年代的默认值/缺失值标记）
-                # 只保留2000年1月1日之后的日期
-                cutoff_date = pd.Timestamp('2000-01-01')
+                # 过滤掉1990年之前的异常日期（如1970-01-01等缺失值标记）
+                cutoff_date = pd.Timestamp('1990-01-01')
                 valid_dates = all_dates[all_dates >= cutoff_date]
 
                 if len(valid_dates) > 0:
                     actual_start = valid_dates.min().date()
                     actual_end = valid_dates.max().date()
-                    print(f"检测到的总体日期范围: {actual_start} 到 {actual_end}")
+                    print(f"所有数据工作表的真实日期范围: {actual_start} 到 {actual_end}")
 
-                    # 如果过滤掉了很多早期日期，给出提示
                     if len(all_dates) > len(valid_dates):
                         filtered_count = len(all_dates) - len(valid_dates)
-                        print(f"  (已过滤 {filtered_count} 个2000年之前的异常日期)")
+                        print(f"  (已过滤 {filtered_count} 个1990年之前的异常日期)")
 
                     return actual_start, actual_end
                 else:
-                    print("未能检测到2000年之后的有效日期数据")
+                    print("未能检测到1990年之后的有效日期数据")
                     return None, None
             else:
                 print("未能检测到有效的日期数据")
@@ -399,8 +376,8 @@ def render_dfm_data_prep_tab(st):
             set_dfm_state("dfm_detected_start_date", detected_start)
             set_dfm_state("dfm_detected_end_date", detected_end)
 
-    # 设置默认值：优先使用检测到的日期，否则使用硬编码默认值
-    default_start_date = detected_start if detected_start else datetime(2020, 1, 1).date()
+    # 设置默认值：开始日期固定为2020-01-01（系统边界），结束日期使用检测到的日期
+    default_start_date = datetime(2020, 1, 1).date()  # 固定为2020-01-01，不管检测到什么
     default_end_date = detected_end if detected_end else datetime(2025, 4, 30).date()
 
     param_defaults = {
@@ -414,23 +391,22 @@ def render_dfm_data_prep_tab(st):
         'dfm_param_data_end_date': default_end_date
     }
 
-    # 只在首次初始化或文件更新时设置默认值
+    # 只在首次初始化时设置默认值，不自动覆盖用户已设置的值
     # 优化：批量获取参数以减少重复调用
     dfm_manager = get_dfm_manager()
     for key, default_value in param_defaults.items():
         current_value = dfm_manager.get_dfm_state('data_prep', key, None)
         if current_value is None:
+            # 首次初始化：使用默认值
             dfm_manager.set_dfm_state('data_prep', key, default_value)
-        elif key in ['dfm_param_data_start_date', 'dfm_param_data_end_date'] and detected_start and detected_end:
-            # 如果检测到新的日期范围，更新日期设置
-            if key == 'dfm_param_data_start_date':
-                dfm_manager.set_dfm_state('data_prep', key, default_start_date)
-            elif key == 'dfm_param_data_end_date':
-                dfm_manager.set_dfm_state('data_prep', key, default_end_date)
+        elif key == 'dfm_param_data_end_date' and detected_end:
+            # 结束日期特殊处理：如果检测到新的结束日期，自动更新（用户通常希望使用最新数据）
+            dfm_manager.set_dfm_state('data_prep', key, default_end_date)
+        # 注意：开始日期不再自动更新，保持用户设置或默认值2020-01-01
 
     # 显示检测结果
     if detected_start and detected_end:
-        st.success(f"[SUCCESS] 已自动检测文件日期范围: {detected_start} 到 {detected_end}")
+        st.success(f"[SUCCESS] 已检测数据文件的真实日期范围: {detected_start} 到 {detected_end}")
     elif current_file:
         st.warning("[WARNING] 无法自动检测文件日期范围，使用默认值。请手动调整日期设置。")
 
@@ -440,8 +416,8 @@ def render_dfm_data_prep_tab(st):
     # 优化：批量获取参数值以减少重复调用
     dfm_manager = get_dfm_manager()
     param_values = {
-        'data_start_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', None),
-        'data_end_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', None),
+        'data_start_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', default_start_date),
+        'data_end_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', default_end_date),
         'target_sheet_name': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_sheet_name', None),
         'target_variable': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_variable', None)
     }
@@ -460,7 +436,7 @@ def render_dfm_data_prep_tab(st):
     row1_col1, row1_col2 = st.columns(2)
     with row1_col1:
         start_date_value = st.date_input(
-            "数据开始日期 (系统边界)",
+            "数据开始日期",
             value=param_values['data_start_date'],
             min_value=min_date,  # 使用动态计算的最小日期
             max_value=max_date,  # 使用动态计算的最大日期
@@ -474,7 +450,7 @@ def render_dfm_data_prep_tab(st):
             sync_dates_to_train_model()
     with row1_col2:
         set_dfm_state("dfm_param_data_end_date", st.date_input(
-            "数据结束日期 (系统边界)",
+            "数据结束日期",
             value=param_values['data_end_date'],
             min_value=min_date,  # 使用动态计算的最小日期
             max_value=max_date,  # 使用动态计算的最大日期
@@ -808,7 +784,7 @@ def render_dfm_data_prep_tab(st):
             st.info(f"共有 {len(removed_vars_log)} 个变量被移除")
 
             # 使用expander显示详细信息
-            with st.expander("查看详细信息", expanded=True):
+            with st.expander("查看详细信息", expanded=False):
                 for reason, entries in reason_groups.items():
                     st.markdown(f"**{reason}** ({len(entries)}个变量)")
                     for entry in entries:

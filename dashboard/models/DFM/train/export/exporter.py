@@ -13,10 +13,11 @@ import os
 import tempfile
 import pickle
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, Tuple
 import numpy as np
 import pandas as pd
 import joblib
+from sklearn.linear_model import LinearRegression
 from dashboard.models.DFM.train.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -29,7 +30,8 @@ class TrainingResultExporter:
         self,
         result,  # TrainingResult
         config,  # TrainingConfig
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        prepared_data: Optional[pd.DataFrame] = None
     ) -> Dict[str, str]:
         """
         导出所有结果文件
@@ -38,6 +40,7 @@ class TrainingResultExporter:
             result: 训练结果
             config: 训练配置
             output_dir: 输出目录（None=创建临时目录）
+            prepared_data: 预处理后的完整观测数据矩阵（用于新闻分析）
 
         Returns:
             文件路径字典 {
@@ -72,7 +75,7 @@ class TrainingResultExporter:
 
         try:
             metadata_path = os.path.join(output_dir, f'final_dfm_metadata_{timestamp}.pkl')
-            self._export_metadata(result, config, metadata_path, timestamp)
+            self._export_metadata(result, config, metadata_path, timestamp, prepared_data)
             file_paths['metadata'] = metadata_path
             logger.info(f"元数据文件已导出: {os.path.basename(metadata_path)}")
         except Exception as e:
@@ -103,9 +106,9 @@ class TrainingResultExporter:
         file_size = os.path.getsize(path) / (1024 * 1024)
         logger.debug(f"模型文件大小: {file_size:.2f} MB")
 
-    def _export_metadata(self, result, config, path: str, timestamp: str) -> None:
+    def _export_metadata(self, result, config, path: str, timestamp: str, prepared_data: Optional[pd.DataFrame] = None) -> None:
         """导出元数据文件"""
-        metadata = self._build_metadata(result, config, timestamp)
+        metadata = self._build_metadata(result, config, timestamp, prepared_data)
         self._validate_metadata(metadata)
 
         with open(path, 'wb') as f:
@@ -119,7 +122,7 @@ class TrainingResultExporter:
 
     # ========== 元数据构建方法 ==========
 
-    def _build_metadata(self, result, config, timestamp: str) -> Dict[str, Any]:
+    def _build_metadata(self, result, config, timestamp: str, prepared_data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
         """构建元数据字典（与results模块格式一致）"""
         logger.debug("开始构建元数据")
 
@@ -134,8 +137,8 @@ class TrainingResultExporter:
 
             # 模型参数
             'best_params': {
-                'k_factors': result.k_factors,
-                'variable_selection_method': '后向逐步' if config.enable_variable_selection else '全选',
+                'k_factors': int(result.k_factors),  # 转换为Python int，避免numpy类型问题
+                'variable_selection_method': getattr(config, 'variable_selection_method', 'backward') if config.enable_variable_selection else '全选',
                 'tuning_objective': 'RMSE' if config.enable_variable_selection else 'N/A',
             },
 
@@ -151,7 +154,7 @@ class TrainingResultExporter:
 
             # 训练统计
             'total_runtime_seconds': float(getattr(result, 'training_time', 0.0)),
-            'var_industry_map': {var: '综合' for var in result.selected_variables},
+            'var_industry_map': config.industry_map if config.industry_map else {var: '综合' for var in result.selected_variables},
         }
 
         # 评估指标（使用results模块需要的字段名）
@@ -165,19 +168,51 @@ class TrainingResultExporter:
                 'revised_oos_mae': float(result.metrics.oos_mae),
             })
 
-        # 因子载荷DataFrame
+        # 因子载荷DataFrame（预测变量）
         metadata['factor_loadings_df'] = self._extract_factor_loadings(result, config)
 
-        # 因子序列DataFrame
+        # 目标变量的因子载荷（用于新闻分解分析）
+        if result.model_result and hasattr(result.model_result, 'target_factor_loading'):
+            target_loading = result.model_result.target_factor_loading
+            if target_loading is not None:
+                metadata['target_factor_loading'] = target_loading
+                logger.info(f"保存目标变量因子载荷: 形状={target_loading.shape}")
+            else:
+                metadata['target_factor_loading'] = None
+                logger.warning("目标变量因子载荷为None")
+        else:
+            metadata['target_factor_loading'] = None
+            logger.warning("模型结果中未找到目标变量因子载荷")
+
+        # 因子序列DataFrame (需要转置：因子应该是列，时间是行)
         if result.model_result and hasattr(result.model_result, 'factors'):
             factors_data = result.model_result.factors
             if isinstance(factors_data, np.ndarray):
-                factor_names = [f'Factor_{i+1}' for i in range(factors_data.shape[1])]
-                metadata['factor_series'] = pd.DataFrame(factors_data, columns=factor_names)
+                # factors_data 的形状是 (n_factors, n_timesteps)
+                # 需要转置为 (n_timesteps, n_factors) 以便 DataFrame 中时间是行，因子是列
+                if factors_data.ndim == 2:
+                    factors_transposed = factors_data.T
+                    factor_names = [f'Factor_{i+1}' for i in range(factors_transposed.shape[1])]
+                    metadata['factor_series'] = pd.DataFrame(factors_transposed, columns=factor_names)
+                else:
+                    metadata['factor_series'] = None
             else:
                 metadata['factor_series'] = factors_data.copy() if isinstance(factors_data, pd.DataFrame) else None
         else:
             metadata['factor_series'] = None
+
+        # 保存卡尔曼增益历史（用于新闻分解分析）
+        if result.model_result and hasattr(result.model_result, 'kalman_gains_history'):
+            kalman_gains = result.model_result.kalman_gains_history
+            if kalman_gains is not None:
+                metadata['kalman_gains_history'] = kalman_gains
+                logger.info(f"保存卡尔曼增益历史: {len(kalman_gains)} 个时间步")
+            else:
+                metadata['kalman_gains_history'] = None
+                logger.warning("卡尔曼增益历史为None，跳过保存")
+        else:
+            metadata['kalman_gains_history'] = None
+            logger.warning("模型结果中未找到卡尔曼增益历史")
 
         # PCA结果DataFrame
         if result.pca_analysis:
@@ -188,9 +223,27 @@ class TrainingResultExporter:
         # 对齐表格（核心数据）
         metadata['complete_aligned_table'] = self._generate_aligned_table(result, config, metadata)
 
+        # 保存完整观测数据矩阵（用于新闻分析的数据发布提取）
+        if prepared_data is not None:
+            metadata['prepared_data'] = prepared_data
+            logger.info(f"保存完整观测数据: 形状={prepared_data.shape}, 时间范围={prepared_data.index[0]}至{prepared_data.index[-1]}")
+        else:
+            metadata['prepared_data'] = None
+            logger.warning("未提供prepared_data，新闻分析功能可能受限")
+
         # R²分析结果（可选）
-        metadata['industry_r2_results'] = None
-        metadata['factor_industry_r2_results'] = None
+        var_industry_map = metadata.get('var_industry_map', {})
+        if var_industry_map:
+            logger.info("开始计算行业R²分析...")
+            industry_r2, factor_industry_r2 = self._calculate_industry_r2(result, config, var_industry_map)
+            metadata['industry_r2_results'] = industry_r2
+            metadata['factor_industry_r2_results'] = factor_industry_r2
+            if industry_r2 is not None:
+                logger.info(f"成功生成R²分析结果: {len(industry_r2)} 个行业")
+        else:
+            logger.warning("缺少var_industry_map，跳过R²分析")
+            metadata['industry_r2_results'] = None
+            metadata['factor_industry_r2_results'] = None
 
         logger.info(f"元数据构建完成,包含 {len(metadata)} 个字段")
         return metadata
@@ -336,7 +389,10 @@ class TrainingResultExporter:
         将PCA分析结果转换为DataFrame格式
 
         Args:
-            pca_analysis: PCA分析结果字典
+            pca_analysis: PCA分析结果字典，包含:
+                - explained_variance: 各主成分解释方差值
+                - cumsum_variance: 累计解释方差（百分比）
+                - eigenvalues: 特征值
             n_components: 主成分数量
 
         Returns:
@@ -346,24 +402,38 @@ class TrainingResultExporter:
             if not pca_analysis:
                 return pd.DataFrame()
 
-            # 从pca_analysis中提取数据
+            # 从pca_analysis中提取数据（适配pca_utils.py的返回格式）
             explained_variance = pca_analysis.get('explained_variance', [])
-            explained_variance_ratio = pca_analysis.get('explained_variance_ratio', [])
+            cumsum_variance = pca_analysis.get('cumsum_variance', [])
+            eigenvalues = pca_analysis.get('eigenvalues', [])
 
-            if not explained_variance or not explained_variance_ratio:
-                logger.warning("PCA分析结果缺少必要数据")
+            # Fix: 正确检查数组/列表是否为空
+            if explained_variance is None or (hasattr(explained_variance, '__len__') and len(explained_variance) == 0):
+                logger.warning("PCA分析结果缺少explained_variance数据")
                 return pd.DataFrame()
 
-            # 转换为百分比
-            explained_variance_ratio_pct = [v * 100 for v in explained_variance_ratio[:n_components]]
-            cumulative_explained_variance_pct = np.cumsum(explained_variance_ratio_pct)
+            # explained_variance 已经是比率（来自pca.explained_variance_ratio_），直接转换为百分比
+            explained_variance_ratio_pct = [v * 100 for v in explained_variance[:n_components]]
 
-            # 构建DataFrame（格式与train_model完全一致）
+            # 使用cumsum_variance（如果可用），否则重新计算
+            # cumsum_variance也是比率，需要转换为百分比
+            if cumsum_variance is not None and len(cumsum_variance) >= n_components:
+                cumulative_explained_variance_pct = [v * 100 for v in cumsum_variance[:n_components]]
+            else:
+                cumulative_explained_variance_pct = np.cumsum(explained_variance_ratio_pct).tolist()
+
+            # 使用eigenvalues（如果可用）
+            if eigenvalues is not None and len(eigenvalues) >= n_components:
+                eigenvalues_list = list(eigenvalues[:n_components])
+            else:
+                eigenvalues_list = [0.0] * n_components
+
+            # 构建DataFrame
             pca_results_df = pd.DataFrame({
                 '主成分 (PC)': [f'PC{i+1}' for i in range(n_components)],
                 '解释方差 (%)': explained_variance_ratio_pct,
                 '累计解释方差 (%)': cumulative_explained_variance_pct,
-                '特征值 (Eigenvalue)': explained_variance[:n_components]
+                '特征值 (Eigenvalue)': eigenvalues_list
             })
 
             logger.debug(f"PCA结果转换完成，包含 {len(pca_results_df)} 个主成分")
@@ -390,35 +460,72 @@ class TrainingResultExporter:
             DataFrame包含两列: 'Nowcast (Original Scale)' 和目标变量名
         """
         try:
-            logger.debug("开始生成complete_aligned_table...")
+            logger.info("=" * 60)
+            logger.info("开始生成complete_aligned_table，合并训练期和验证期数据...")
+            logger.info("=" * 60)
 
-            # 1. 获取Nowcast数据（原始尺度）
-            nowcast_data = None
-            if result.model_result and hasattr(result.model_result, 'forecast_oos'):
-                forecast_oos = result.model_result.forecast_oos
-                if forecast_oos is not None:
-                    # 反标准化到原始尺度
-                    target_mean = metadata.get('target_mean_original', 0.0)
-                    target_std = metadata.get('target_std_original', 1.0)
+            # 1. 获取训练期和验证期的Nowcast数据（原始尺度）
+            forecast_is = None
+            forecast_oos = None
 
-                    if isinstance(forecast_oos, pd.Series):
-                        nowcast_data = forecast_oos * target_std + target_mean
-                    elif isinstance(forecast_oos, np.ndarray):
-                        nowcast_data = pd.Series(forecast_oos * target_std + target_mean)
+            if result.model_result:
+                # 获取训练期预测
+                if hasattr(result.model_result, 'forecast_is'):
+                    forecast_is = result.model_result.forecast_is
+                    logger.info(f"forecast_is类型: {type(forecast_is)}, 长度: {len(forecast_is) if forecast_is is not None else None}")
 
-            if nowcast_data is None or len(nowcast_data) == 0:
+                # 获取验证期预测
+                if hasattr(result.model_result, 'forecast_oos'):
+                    forecast_oos = result.model_result.forecast_oos
+                    logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
+
+            # 2. 获取完整的日期索引（训练期+验证期）
+            is_index = self._get_is_date_index(config)
+            oos_index = self._get_oos_date_index(config)
+
+            # 3. 构建完整的Nowcast时间序列
+            nowcast_series_list = []
+
+            if forecast_is is not None and is_index is not None and len(is_index) == len(forecast_is):
+                is_series = pd.Series(forecast_is, index=is_index, name='Nowcast')
+                nowcast_series_list.append(is_series)
+                logger.info(f"训练期数据: {len(is_series)} 个点，时间范围 {is_index.min()} 到 {is_index.max()}")
+            else:
+                logger.warning("无法生成训练期Nowcast序列")
+
+            if forecast_oos is not None and oos_index is not None and len(oos_index) == len(forecast_oos):
+                oos_series = pd.Series(forecast_oos, index=oos_index, name='Nowcast')
+                nowcast_series_list.append(oos_series)
+                logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
+            else:
+                logger.warning("无法生成验证期Nowcast序列")
+
+            # 合并训练期和验证期
+            if len(nowcast_series_list) == 0:
                 logger.warning("无法获取Nowcast数据，complete_aligned_table将为空")
                 return pd.DataFrame(columns=['Nowcast (Original Scale)', config.target_variable])
+
+            nowcast_data = pd.concat(nowcast_series_list).sort_index()
+            logger.info(f"完整Nowcast数据: {len(nowcast_data)} 个点，时间范围 {nowcast_data.index.min()} 到 {nowcast_data.index.max()}")
+
+            logger.info(f"nowcast_data已准备: 长度={len(nowcast_data)}, 有索引={hasattr(nowcast_data, 'index')}")
+            if hasattr(nowcast_data, 'index'):
+                logger.info(f"nowcast_data索引类型: {type(nowcast_data.index)}, 前5个: {list(nowcast_data.index[:5])}")
 
             # 2. 获取目标变量实际值
             target_data = None
             if hasattr(config, 'data_path') and config.data_path:
                 try:
+                    logger.info(f"尝试从数据文件读取目标变量: {config.data_path}")
                     data = self._read_data_file(config.data_path)
+                    logger.info(f"数据文件读取成功，形状: {data.shape}, 列数: {len(data.columns)}")
                     if config.target_variable in data.columns:
                         target_data = data[config.target_variable].dropna()
+                        logger.info(f"目标变量'{config.target_variable}'读取成功，长度: {len(target_data)}")
+                    else:
+                        logger.warning(f"数据文件中未找到目标变量'{config.target_variable}'")
                 except Exception as e:
-                    logger.warning(f"从数据文件读取目标变量失败: {e}")
+                    logger.warning(f"从数据文件读取目标变量失败: {e}", exc_info=True)
 
             if target_data is None or len(target_data) == 0:
                 logger.warning("无法获取目标变量实际值")
@@ -513,6 +620,284 @@ class TrainingResultExporter:
         except Exception as e:
             logger.error(f"对齐Nowcast和Target失败: {e}")
             return pd.DataFrame(columns=['Nowcast (Original Scale)', target_variable_name])
+
+    def _get_is_date_index(self, config) -> Optional[pd.DatetimeIndex]:
+        """
+        从数据文件中获取训练期（In-Sample）的日期索引
+
+        Args:
+            config: 训练配置
+
+        Returns:
+            训练期的日期索引，如果无法获取则返回None
+        """
+        try:
+            if not hasattr(config, 'data_path') or not config.data_path:
+                return None
+
+            if not hasattr(config, 'training_start') or not config.training_start:
+                logger.warning("config缺少training_start字段")
+                return None
+
+            if not hasattr(config, 'train_end') or not config.train_end:
+                return None
+
+            # 读取数据文件
+            data = self._read_data_file(config.data_path)
+
+            # 确保索引是DatetimeIndex
+            if not isinstance(data.index, pd.DatetimeIndex):
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception:
+                    logger.warning("无法将数据索引转换为DatetimeIndex")
+                    return None
+
+            # 解析训练期日期
+            training_start = pd.to_datetime(config.training_start)
+            train_end = pd.to_datetime(config.train_end)
+
+            # 获取训练期的索引（training_start 到 train_end）
+            is_index = data.index[(data.index >= training_start) & (data.index <= train_end)]
+
+            if len(is_index) == 0:
+                logger.warning(f"训练期 {training_start} 到 {train_end} 没有数据")
+                return None
+
+            logger.debug(f"获取训练期日期索引成功: {len(is_index)} 个日期，范围 {is_index.min()} 到 {is_index.max()}")
+            return is_index
+
+        except Exception as e:
+            logger.warning(f"获取训练期日期索引失败: {e}")
+            return None
+
+    def _get_oos_date_index(self, config) -> Optional[pd.DatetimeIndex]:
+        """
+        从数据文件中获取OOS期（验证期）的日期索引
+
+        Args:
+            config: 训练配置
+
+        Returns:
+            验证期的日期索引，如果无法获取则返回None
+        """
+        try:
+            if not hasattr(config, 'data_path') or not config.data_path:
+                return None
+
+            if not hasattr(config, 'validation_start') or not config.validation_start:
+                logger.warning("config缺少validation_start字段")
+                return None
+
+            if not hasattr(config, 'validation_end') or not config.validation_end:
+                logger.warning("config缺少validation_end字段")
+                return None
+
+            # 读取数据文件
+            data = self._read_data_file(config.data_path)
+
+            # 确保索引是DatetimeIndex
+            if not isinstance(data.index, pd.DatetimeIndex):
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception:
+                    logger.warning("无法将数据索引转换为DatetimeIndex")
+                    return None
+
+            # 解析验证期日期
+            validation_start = pd.to_datetime(config.validation_start)
+            validation_end = pd.to_datetime(config.validation_end)
+
+            # 获取验证期的索引（validation_start 到 validation_end）
+            oos_index = data.index[(data.index >= validation_start) & (data.index <= validation_end)]
+
+            if len(oos_index) == 0:
+                logger.warning(f"验证期 {validation_start} 到 {validation_end} 没有数据")
+                return None
+
+            logger.debug(f"获取验证期日期索引成功: {len(oos_index)} 个日期，范围 {oos_index.min()} 到 {oos_index.max()}")
+            return oos_index
+
+        except Exception as e:
+            logger.error(f"获取验证期日期索引失败: {e}")
+            return None
+
+    def _calculate_industry_r2(
+        self,
+        result,
+        config,
+        var_industry_map: Dict[str, str]
+    ) -> Tuple[Optional[pd.Series], Optional[Dict]]:
+        """
+        计算行业整体R²和因子对行业的Pooled R²
+
+        Args:
+            result: 训练结果
+            config: 训练配置
+            var_industry_map: 变量到行业的映射字典
+
+        Returns:
+            tuple: (industry_r2_series, factor_industry_r2_dict)
+                - industry_r2_series: pd.Series，index为行业名称，value为整体R²
+                - factor_industry_r2_dict: dict，可转换为DataFrame，行业×因子的R²矩阵
+        """
+        try:
+            # 1. 检查必要数据
+            if not result.model_result or not hasattr(result.model_result, 'factors'):
+                logger.warning("缺少模型结果或因子数据，无法计算R²")
+                return None, None
+
+            if not result.selected_variables:
+                logger.warning("缺少选定变量，无法计算R²")
+                return None, None
+
+            # 2. 提取因子时间序列 (n_timesteps, n_factors)
+            factors_data = result.model_result.factors
+            if isinstance(factors_data, np.ndarray):
+                if factors_data.ndim == 2:
+                    # factors_data shape: (n_factors, n_timesteps) -> 转置
+                    factors_df = pd.DataFrame(
+                        factors_data.T,
+                        columns=[f'Factor_{i+1}' for i in range(factors_data.shape[0])]
+                    )
+                else:
+                    logger.warning(f"因子数据维度不正确: {factors_data.ndim}")
+                    return None, None
+            elif isinstance(factors_data, pd.DataFrame):
+                factors_df = factors_data
+            else:
+                logger.warning(f"因子数据类型不支持: {type(factors_data)}")
+                return None, None
+
+            # 3. 读取变量数据
+            data = self._read_data_file(config.data_path)
+
+            # 确保索引是DatetimeIndex
+            if not isinstance(data.index, pd.DatetimeIndex):
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception:
+                    logger.warning("无法将数据索引转换为DatetimeIndex")
+                    return None, None
+
+            # 4. 对齐因子和变量数据
+            # 因子应该与完整数据的索引对齐（因子是从完整数据中提取的）
+            if len(factors_df) != len(data):
+                logger.warning(f"因子数据长度({len(factors_df)})与完整数据长度({len(data)})不匹配")
+                # 尝试对齐
+                min_len = min(len(factors_df), len(data))
+                factors_df = factors_df.iloc[:min_len].copy()
+                data = data.iloc[:min_len].copy()
+
+            # 赋予因子DataFrame正确的日期索引
+            factors_df.index = data.index
+
+            # 5. 截取训练集期间的数据
+            train_end = pd.to_datetime(config.train_end) if hasattr(config, 'train_end') else data.index.max()
+            train_data = data[data.index <= train_end]
+            factors_train = factors_df[factors_df.index <= train_end]
+
+            # 5. 按行业分组变量
+            industry_groups = {}
+            for var in result.selected_variables:
+                if var not in var_industry_map:
+                    continue
+                industry = var_industry_map[var]
+                if industry not in industry_groups:
+                    industry_groups[industry] = []
+                industry_groups[industry].append(var)
+
+            if not industry_groups:
+                logger.warning("没有有效的行业分组")
+                return None, None
+
+            logger.info(f"识别到 {len(industry_groups)} 个行业: {list(industry_groups.keys())}")
+
+            # 6. 计算每个行业的R²
+            industry_r2_results = {}
+            factor_industry_r2_results = {f'Factor_{i+1}': {} for i in range(len(factors_train.columns))}
+
+            for industry, variables in industry_groups.items():
+                # 提取该行业的所有变量数据
+                industry_vars = [v for v in variables if v in train_data.columns]
+                if not industry_vars:
+                    logger.warning(f"行业 '{industry}' 没有有效变量")
+                    continue
+
+                industry_data = train_data[industry_vars].dropna(how='all')
+
+                # 对齐因子和行业数据
+                common_index = factors_train.index.intersection(industry_data.index)
+                if len(common_index) == 0:
+                    logger.warning(f"行业 '{industry}' 的数据无法与因子对齐")
+                    continue
+
+                X = factors_train.loc[common_index].values  # (n_samples, n_factors)
+                Y = industry_data.loc[common_index].values  # (n_samples, n_vars)
+
+                # 移除含有NaN的样本
+                valid_mask = ~np.isnan(Y).any(axis=1) & ~np.isnan(X).any(axis=1)
+                X_clean = X[valid_mask]
+                Y_clean = Y[valid_mask]
+
+                if len(X_clean) < 10:
+                    logger.warning(f"行业 '{industry}' 有效样本太少: {len(X_clean)}")
+                    continue
+
+                # 6.1 计算整体R² (所有因子)
+                try:
+                    model = LinearRegression()
+                    model.fit(X_clean, Y_clean)
+                    Y_pred = model.predict(X_clean)
+
+                    # Pooled R²: 1 - sum(RSS) / sum(TSS)
+                    rss = np.sum((Y_clean - Y_pred) ** 2)
+                    tss = np.sum((Y_clean - np.mean(Y_clean, axis=0)) ** 2)
+
+                    if tss > 0:
+                        r2_overall = 1 - rss / tss
+                        industry_r2_results[industry] = float(r2_overall)
+                        logger.debug(f"行业 '{industry}' 整体R²: {r2_overall:.4f}")
+                    else:
+                        industry_r2_results[industry] = 0.0
+                except Exception as e:
+                    logger.warning(f"计算行业 '{industry}' 整体R²失败: {e}")
+                    continue
+
+                # 6.2 计算每个因子的R²
+                for i, factor_name in enumerate(factors_train.columns):
+                    try:
+                        X_single = X_clean[:, i:i+1]  # (n_samples, 1)
+                        model_single = LinearRegression()
+                        model_single.fit(X_single, Y_clean)
+                        Y_pred_single = model_single.predict(X_single)
+
+                        rss_single = np.sum((Y_clean - Y_pred_single) ** 2)
+
+                        if tss > 0:
+                            r2_single = 1 - rss_single / tss
+                            factor_industry_r2_results[factor_name][industry] = float(r2_single)
+                            logger.debug(f"行业 '{industry}' {factor_name} R²: {r2_single:.4f}")
+                        else:
+                            factor_industry_r2_results[factor_name][industry] = 0.0
+                    except Exception as e:
+                        logger.warning(f"计算行业 '{industry}' {factor_name} R²失败: {e}")
+                        continue
+
+            # 7. 转换为所需格式
+            if not industry_r2_results:
+                logger.warning("没有成功计算任何行业的R²")
+                return None, None
+
+            industry_r2_series = pd.Series(industry_r2_results)
+            industry_r2_series.name = "Industry R2 (All Factors)"
+
+            logger.info(f"成功计算 {len(industry_r2_results)} 个行业的R²分析")
+            return industry_r2_series, factor_industry_r2_results
+
+        except Exception as e:
+            logger.error(f"计算行业R²失败: {e}", exc_info=True)
+            return None, None
 
 
 __all__ = ['TrainingResultExporter']

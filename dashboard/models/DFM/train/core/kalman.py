@@ -98,11 +98,15 @@ class KalmanFilter:
         innovation = np.zeros((n_time, self.n_obs))
         loglikelihood = 0.0
 
+        # 保存卡尔曼增益历史（用于新闻分解分析）
+        kalman_gains_history = []
+
         # 初始化
         x_filt[0, :] = self.x0
         P_filt[0] = self.P0.copy()
         x_pred[0, :] = self.x0
         P_pred[0] = self.P0.copy()
+        kalman_gains_history.append(None)  # t=0时刻没有更新步
 
         # 从t=1开始循环（匹配老代码从i=1开始）
         for t in range(1, n_time):
@@ -121,6 +125,7 @@ class KalmanFilter:
                 x_filt[t, :] = x_pred[t, :]
                 P_filt[t] = P_pred[t].copy()
                 innovation[t, :] = np.nan
+                kalman_gains_history.append(None)  # 没有观测时无卡尔曼增益
                 continue
 
             # 提取有效观测和对应的H、R矩阵
@@ -143,6 +148,11 @@ class KalmanFilter:
             except np.linalg.LinAlgError:
                 logger.warning(f"时间步{t}: 新息协方差矩阵奇异，使用伪逆")
                 K_t = P_pred[t] @ H_t.T @ np.linalg.pinv(S_t + jitter)
+
+            # 保存完整的卡尔曼增益矩阵（扩展到所有观测变量维度）
+            K_t_full = np.zeros((self.n_states, self.n_obs))
+            K_t_full[:, ix] = K_t  # 将有效观测的增益填入对应位置
+            kalman_gains_history.append(K_t_full.copy())
 
             x_filt[t, :] = x_pred[t, :] + K_t @ innov_t
             P_filt[t] = (np.eye(self.n_states) - K_t @ H_t) @ P_pred[t]
@@ -173,7 +183,8 @@ class KalmanFilter:
             x_predicted=x_pred,
             P_predicted=P_pred_array,
             loglikelihood=loglikelihood,
-            innovation=innovation
+            innovation=innovation,
+            kalman_gains_history=kalman_gains_history
         )
 
     def smooth(
