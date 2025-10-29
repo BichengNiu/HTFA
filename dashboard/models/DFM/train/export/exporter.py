@@ -19,6 +19,7 @@ import pandas as pd
 import joblib
 from sklearn.linear_model import LinearRegression
 from dashboard.models.DFM.train.utils.logger import get_logger
+from dashboard.models.DFM.train.utils.file_io import read_data_file
 
 logger = get_logger(__name__)
 
@@ -64,23 +65,17 @@ class TrainingResultExporter:
         # 导出各个文件
         file_paths = {}
 
-        try:
-            model_path = os.path.join(output_dir, f'final_dfm_model_{timestamp}.joblib')
-            self._export_model(result, model_path)
-            file_paths['final_model_joblib'] = model_path
-            logger.info(f"模型文件已导出: {os.path.basename(model_path)}")
-        except Exception as e:
-            logger.error(f"导出模型文件失败: {e}", exc_info=True)
-            file_paths['final_model_joblib'] = None
+        # 导出模型文件（不捕获异常，失败时直接抛出）
+        model_path = os.path.join(output_dir, f'final_dfm_model_{timestamp}.joblib')
+        self._export_model(result, model_path)
+        file_paths['final_model_joblib'] = model_path
+        logger.info(f"模型文件已导出: {os.path.basename(model_path)}")
 
-        try:
-            metadata_path = os.path.join(output_dir, f'final_dfm_metadata_{timestamp}.pkl')
-            self._export_metadata(result, config, metadata_path, timestamp, prepared_data)
-            file_paths['metadata'] = metadata_path
-            logger.info(f"元数据文件已导出: {os.path.basename(metadata_path)}")
-        except Exception as e:
-            logger.error(f"导出元数据文件失败: {e}", exc_info=True)
-            file_paths['metadata'] = None
+        # 导出元数据文件（不捕获异常，失败时直接抛出）
+        metadata_path = os.path.join(output_dir, f'final_dfm_metadata_{timestamp}.pkl')
+        self._export_metadata(result, config, metadata_path, timestamp, prepared_data)
+        file_paths['metadata'] = metadata_path
+        logger.info(f"元数据文件已导出: {os.path.basename(metadata_path)}")
 
         # 验证文件
         for file_type, path in file_paths.items():
@@ -134,39 +129,43 @@ class TrainingResultExporter:
             'timestamp': timestamp,
             'target_variable': config.target_variable,
             'best_variables': result.selected_variables,
+            'N_variables': len(result.selected_variables),  # 显式保存变量数N
 
             # 模型参数
             'best_params': {
                 'k_factors': int(result.k_factors),  # 转换为Python int，避免numpy类型问题
-                'variable_selection_method': getattr(config, 'variable_selection_method', 'backward') if config.enable_variable_selection else '全选',
+                'variable_selection_method': config.variable_selection_method if config.enable_variable_selection else '全选',
                 'tuning_objective': 'RMSE' if config.enable_variable_selection else 'N/A',
             },
 
-            # 日期
+            # 日期（不使用默认值，字段缺失时抛出AttributeError）
             'training_start_date': self._calculate_training_start(config),
-            'train_end_date': getattr(config, 'train_end', ''),
+            'train_end_date': config.train_end,
             'validation_start_date': self._calculate_validation_start(config),
-            'validation_end_date': getattr(config, 'validation_end', ''),
+            'validation_end_date': config.validation_end,
 
             # 标准化参数
             'target_mean_original': target_mean,
             'target_std_original': target_std,
 
             # 训练统计
-            'total_runtime_seconds': float(getattr(result, 'training_time', 0.0)),
+            'total_runtime_seconds': float(result.training_time),
             'var_industry_map': config.industry_map if config.industry_map else {var: '综合' for var in result.selected_variables},
         }
 
         # 评估指标（使用results模块需要的字段名）
-        if result.metrics:
-            metadata.update({
-                'revised_is_hr': float(result.metrics.is_hit_rate),
-                'revised_oos_hr': float(result.metrics.oos_hit_rate),
-                'revised_is_rmse': float(result.metrics.is_rmse),
-                'revised_oos_rmse': float(result.metrics.oos_rmse),
-                'revised_is_mae': float(result.metrics.is_mae),
-                'revised_oos_mae': float(result.metrics.oos_mae),
-            })
+        # 不使用if检查，直接访问，字段缺失时抛出异常
+        if result.metrics is None:
+            raise ValueError("训练结果缺少评估指标(metrics)，无法导出元数据")
+
+        metadata.update({
+            'revised_is_hr': float(result.metrics.is_hit_rate),
+            'revised_oos_hr': float(result.metrics.oos_hit_rate),
+            'revised_is_rmse': float(result.metrics.is_rmse),
+            'revised_oos_rmse': float(result.metrics.oos_rmse),
+            'revised_is_mae': float(result.metrics.is_mae),
+            'revised_oos_mae': float(result.metrics.oos_mae),
+        })
 
         # 因子载荷DataFrame（预测变量）
         metadata['factor_loadings_df'] = self._extract_factor_loadings(result, config)
@@ -272,46 +271,22 @@ class TrainingResultExporter:
             return target_mean, target_std
 
         except Exception as e:
-            logger.warning(f"计算目标变量统计参数失败: {e}")
-            return 0.0, 1.0
+            logger.error(f"计算目标变量统计参数失败: {e}")
+            raise ValueError(f"无法计算目标变量统计参数: {e}") from e
 
     def _calculate_training_start(self, config) -> str:
-        """计算训练开始日期"""
-        try:
-            # 优先使用配置的训练开始日期
-            if hasattr(config, 'training_start') and config.training_start:
-                return config.training_start
-
-            # 如果有数据路径，尝试从数据中推断
-            if hasattr(config, 'data_path') and config.data_path:
-                try:
-                    data = self._read_data_file(config.data_path)
-                    if isinstance(data.index, pd.DatetimeIndex) and len(data) > 0:
-                        return data.index.min().strftime('%Y-%m-%d')
-                except Exception:
-                    pass
-
-            return ''
-        except Exception as e:
-            logger.warning(f"计算训练开始日期失败: {e}")
-            return ''
+        """计算训练开始日期（不使用默认值，字段缺失时抛出异常）"""
+        # 直接访问属性，不使用has attr检查
+        if not config.training_start:
+            raise ValueError("配置中缺少training_start字段")
+        return config.training_start
 
     def _calculate_validation_start(self, config) -> str:
-        """计算验证开始日期"""
-        try:
-            if hasattr(config, 'validation_start') and config.validation_start:
-                return config.validation_start
-
-            train_end_value = getattr(config, 'train_end', None)
-            if train_end_value:
-                train_end = pd.to_datetime(train_end_value)
-                validation_start = train_end + pd.DateOffset(weeks=1)
-                return validation_start.strftime('%Y-%m-%d')
-
-            return ''
-        except Exception as e:
-            logger.warning(f"计算验证开始日期失败: {e}")
-            return ''
+        """计算验证开始日期（不使用默认值，字段缺失时抛出异常）"""
+        # 直接访问属性，不使用hasattr检查
+        if not config.validation_start:
+            raise ValueError("配置中缺少validation_start字段")
+        return config.validation_start
 
     def _validate_metadata(self, metadata: Dict) -> None:
         """验证元数据包含所有必需字段"""
@@ -339,13 +314,7 @@ class TrainingResultExporter:
         Returns:
             pd.DataFrame: 读取的数据
         """
-        file_path = str(file_path)
-        if file_path.endswith('.csv'):
-            return pd.read_csv(file_path, index_col=0)
-        elif file_path.endswith(('.xlsx', '.xls')):
-            return pd.read_excel(file_path, index_col=0)
-        else:
-            raise ValueError(f"不支持的文件格式: {file_path}")
+        return read_data_file(file_path, parse_dates=False, check_exists=False)
 
     def _extract_factor_loadings(self, result, config=None) -> pd.DataFrame:
         """提取因子载荷矩阵（H矩阵）"""
@@ -382,7 +351,7 @@ class TrainingResultExporter:
 
         except Exception as e:
             logger.error(f"提取因子载荷失败: {e}")
-            return pd.DataFrame()
+            raise ValueError(f"无法提取因子载荷矩阵: {e}") from e
 
     def _convert_pca_to_dataframe(self, pca_analysis: Dict, n_components: int) -> pd.DataFrame:
         """
@@ -480,8 +449,8 @@ class TrainingResultExporter:
                     logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
 
             # 2. 获取完整的日期索引（训练期+验证期）
-            is_index = self._get_is_date_index(config)
-            oos_index = self._get_oos_date_index(config)
+            is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
+            oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
 
             # 3. 构建完整的Nowcast时间序列
             nowcast_series_list = []
@@ -547,7 +516,7 @@ class TrainingResultExporter:
 
         except Exception as e:
             logger.error(f"生成complete_aligned_table失败: {e}", exc_info=True)
-            return pd.DataFrame(columns=['Nowcast (Original Scale)', config.target_variable])
+            raise ValueError(f"无法生成对齐表格: {e}") from e
 
     def _align_nowcast_target(
         self,
@@ -621,31 +590,39 @@ class TrainingResultExporter:
             logger.error(f"对齐Nowcast和Target失败: {e}")
             return pd.DataFrame(columns=['Nowcast (Original Scale)', target_variable_name])
 
-    def _get_is_date_index(self, config) -> Optional[pd.DatetimeIndex]:
+    def _get_date_index(
+        self,
+        config,
+        start_field: str,
+        end_field: str,
+        period_name: str
+    ) -> Optional[pd.DatetimeIndex]:
         """
-        从数据文件中获取训练期（In-Sample）的日期索引
+        从数据文件中获取指定时间段的日期索引
 
         Args:
             config: 训练配置
+            start_field: 开始日期字段名（如'training_start'或'validation_start'）
+            end_field: 结束日期字段名（如'train_end'或'validation_end'）
+            period_name: 时间段名称，用于日志（如'训练期'或'验证期'）
 
         Returns:
-            训练期的日期索引，如果无法获取则返回None
+            指定时间段的日期索引，如果无法获取则返回None
         """
         try:
             if not hasattr(config, 'data_path') or not config.data_path:
                 return None
 
-            if not hasattr(config, 'training_start') or not config.training_start:
-                logger.warning("config缺少training_start字段")
+            if not hasattr(config, start_field) or not getattr(config, start_field):
+                logger.warning(f"config缺少{start_field}字段")
                 return None
 
-            if not hasattr(config, 'train_end') or not config.train_end:
+            if not hasattr(config, end_field) or not getattr(config, end_field):
+                logger.warning(f"config缺少{end_field}字段")
                 return None
 
-            # 读取数据文件
             data = self._read_data_file(config.data_path)
 
-            # 确保索引是DatetimeIndex
             if not isinstance(data.index, pd.DatetimeIndex):
                 try:
                     data.index = pd.to_datetime(data.index)
@@ -653,73 +630,20 @@ class TrainingResultExporter:
                     logger.warning("无法将数据索引转换为DatetimeIndex")
                     return None
 
-            # 解析训练期日期
-            training_start = pd.to_datetime(config.training_start)
-            train_end = pd.to_datetime(config.train_end)
+            start_date = pd.to_datetime(getattr(config, start_field))
+            end_date = pd.to_datetime(getattr(config, end_field))
 
-            # 获取训练期的索引（training_start 到 train_end）
-            is_index = data.index[(data.index >= training_start) & (data.index <= train_end)]
+            date_index = data.index[(data.index >= start_date) & (data.index <= end_date)]
 
-            if len(is_index) == 0:
-                logger.warning(f"训练期 {training_start} 到 {train_end} 没有数据")
+            if len(date_index) == 0:
+                logger.warning(f"{period_name} {start_date} 到 {end_date} 没有数据")
                 return None
 
-            logger.debug(f"获取训练期日期索引成功: {len(is_index)} 个日期，范围 {is_index.min()} 到 {is_index.max()}")
-            return is_index
+            logger.debug(f"获取{period_name}日期索引成功: {len(date_index)} 个日期，范围 {date_index.min()} 到 {date_index.max()}")
+            return date_index
 
         except Exception as e:
-            logger.warning(f"获取训练期日期索引失败: {e}")
-            return None
-
-    def _get_oos_date_index(self, config) -> Optional[pd.DatetimeIndex]:
-        """
-        从数据文件中获取OOS期（验证期）的日期索引
-
-        Args:
-            config: 训练配置
-
-        Returns:
-            验证期的日期索引，如果无法获取则返回None
-        """
-        try:
-            if not hasattr(config, 'data_path') or not config.data_path:
-                return None
-
-            if not hasattr(config, 'validation_start') or not config.validation_start:
-                logger.warning("config缺少validation_start字段")
-                return None
-
-            if not hasattr(config, 'validation_end') or not config.validation_end:
-                logger.warning("config缺少validation_end字段")
-                return None
-
-            # 读取数据文件
-            data = self._read_data_file(config.data_path)
-
-            # 确保索引是DatetimeIndex
-            if not isinstance(data.index, pd.DatetimeIndex):
-                try:
-                    data.index = pd.to_datetime(data.index)
-                except Exception:
-                    logger.warning("无法将数据索引转换为DatetimeIndex")
-                    return None
-
-            # 解析验证期日期
-            validation_start = pd.to_datetime(config.validation_start)
-            validation_end = pd.to_datetime(config.validation_end)
-
-            # 获取验证期的索引（validation_start 到 validation_end）
-            oos_index = data.index[(data.index >= validation_start) & (data.index <= validation_end)]
-
-            if len(oos_index) == 0:
-                logger.warning(f"验证期 {validation_start} 到 {validation_end} 没有数据")
-                return None
-
-            logger.debug(f"获取验证期日期索引成功: {len(oos_index)} 个日期，范围 {oos_index.min()} 到 {oos_index.max()}")
-            return oos_index
-
-        except Exception as e:
-            logger.error(f"获取验证期日期索引失败: {e}")
+            logger.error(f"获取{period_name}日期索引失败: {e}")
             return None
 
     def _calculate_industry_r2(

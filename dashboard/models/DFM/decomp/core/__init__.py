@@ -9,12 +9,10 @@ from .model_loader import ModelLoader
 from .nowcast_extractor import NowcastExtractor
 from .impact_analyzer import ImpactAnalyzer
 from .news_impact_calculator import NewsImpactCalculator
-from .sequential_analyzer import SequentialAnalyzer
 
 __all__ = [
     'ModelLoader',
     'NowcastExtractor',
     'ImpactAnalyzer',
-    'NewsImpactCalculator',
-    'SequentialAnalyzer'
+    'NewsImpactCalculator'
 ]

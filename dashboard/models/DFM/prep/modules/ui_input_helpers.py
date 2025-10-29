@@ -8,6 +8,7 @@ import pandas as pd
 from typing import List, Dict, Tuple
 
 from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.prep.utils.date_utils import filter_by_date_range as filter_by_date_range_util
 
 
 def map_ui_variables_to_columns(
@@ -80,6 +81,8 @@ def filter_by_date_range(
     """
     按日期范围筛选数据
 
+    此函数是date_utils.filter_by_date_range的包装器，添加了原始行数的返回值和调试日志
+
     Args:
         df: 输入数据
         start_date: 开始日期字符串
@@ -89,23 +92,15 @@ def filter_by_date_range(
         Tuple[pd.DataFrame, int]: (筛选后的数据, 原始行数)
     """
     original_rows = df.shape[0]
-    filtered_df = df.copy()
 
+    # 使用统一的日期筛选工具函数
+    filtered_df = filter_by_date_range_util(df, start_date, end_date)
+
+    # 打印调试信息
     if start_date:
-        try:
-            start_dt = pd.to_datetime(start_date)
-            filtered_df = filtered_df[filtered_df.index >= start_dt]
-            print(f"    应用开始日期后剩余: {filtered_df.shape[0]} 行")
-        except Exception as e:
-            print(f"    [WARNING] 开始日期解析失败: {e}")
-
+        print(f"    应用开始日期后剩余: {filtered_df.shape[0]} 行")
     if end_date:
-        try:
-            end_dt = pd.to_datetime(end_date)
-            filtered_df = filtered_df[filtered_df.index <= end_dt]
-            print(f"    应用结束日期后剩余: {filtered_df.shape[0]} 行")
-        except Exception as e:
-            print(f"    [WARNING] 结束日期解析失败: {e}")
+        print(f"    应用结束日期后剩余: {filtered_df.shape[0]} 行")
 
     return filtered_df, original_rows
 

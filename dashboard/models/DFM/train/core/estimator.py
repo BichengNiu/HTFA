@@ -138,8 +138,15 @@ def estimate_transition_matrix(
         else:
             # 对于max_lags > 1，使用statsmodels VAR
             from statsmodels.tsa.api import VAR
-            var_model = VAR(factors)
-            var_result = var_model.fit(maxlags=max_lags, ic=None, trend='n')
+            import warnings
+
+            # 抑制频率推断警告（输入是numpy数组，无实际日期信息）
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
+                warnings.filterwarnings('ignore', message='.*No frequency information.*')
+                var_model = VAR(factors)
+                var_result = var_model.fit(maxlags=max_lags, ic=None, trend='n')
+
             coef_matrices = var_result.params.T
 
             n_states = n_factors * max_lags

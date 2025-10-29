@@ -134,59 +134,8 @@ def filter_by_date_range(
     return result
 
 
-def get_date_range_info(df: pd.DataFrame) -> dict:
-    """
-    获取DataFrame的日期范围信息
-
-    Args:
-        df: 输入DataFrame，索引应为DatetimeIndex
-
-    Returns:
-        dict: 包含日期范围信息的字典
-            - min_date: 最小日期
-            - max_date: 最大日期
-            - date_count: 日期数量
-            - frequency: 频率（如果可检测）
-            - has_gaps: 是否有间隙
-
-    Examples:
-        >>> df = pd.DataFrame({'value': [1, 2, 3]},
-        ...                   index=pd.date_range('2023-01-01', periods=3, freq='D'))
-        >>> info = get_date_range_info(df)
-        >>> info['date_count']
-        3
-    """
-    if df.empty:
-        return {
-            'min_date': None,
-            'max_date': None,
-            'date_count': 0,
-            'frequency': None,
-            'has_gaps': False
-        }
-
-    try:
-        return {
-            'min_date': df.index.min(),
-            'max_date': df.index.max(),
-            'date_count': len(df.index),
-            'frequency': pd.infer_freq(df.index) if len(df.index) > 1 else None,
-            'has_gaps': len(df.index) != len(df.index.unique())
-        }
-    except Exception as e:
-        print(f"警告: 获取日期范围信息失败: {e}")
-        return {
-            'min_date': None,
-            'max_date': None,
-            'date_count': len(df.index),
-            'frequency': None,
-            'has_gaps': False
-        }
-
-
 __all__ = [
     'standardize_date',
     'parse_date_range',
-    'filter_by_date_range',
-    'get_date_range_info'
+    'filter_by_date_range'
 ]

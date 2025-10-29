@@ -15,8 +15,9 @@ def load_mappings(
     sheet_name: str,
     indicator_col: str = '指标名称',
     type_col: str = '类型',
-    industry_col: Optional[str] = '行业'  # Industry column is optional
-) -> Tuple[Dict[str, str], Dict[str, str]]:
+    industry_col: Optional[str] = '行业',  # Industry column is optional
+    dfm_default_col: Optional[str] = 'DFM变量'  # DFM default selection column is optional
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
     """
     从指定的Excel表格中加载变量类型和行业映射
 
@@ -28,17 +29,19 @@ def load_mappings(
         indicator_col: 指标列名，默认'指标名称'
         type_col: 类型列名，默认'类型'
         industry_col: 行业列名，默认'行业'，可选
+        dfm_default_col: DFM默认选择列名，默认'DFM变量'，可选
 
     Returns:
-        Tuple[Dict[str, str], Dict[str, str]]: (变量类型映射, 变量行业映射)
+        Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]: (变量类型映射, 变量行业映射, DFM默认选择映射)
     """
     var_type_map = {}
     var_industry_map = {}
+    var_dfm_default_map = {}
 
-    print(f"\n--- [Mappings] Loading type/industry maps from: ")
+    print(f"\n--- [Mappings] Loading type/industry/dfm_default maps from: ")
     print(f"    Excel: {excel_path}")
     print(f"    Sheet: {sheet_name}")
-    print(f"    Indicator Col: '{indicator_col}', Type Col: '{type_col}', Industry Col: '{industry_col}'")
+    print(f"    Indicator Col: '{indicator_col}', Type Col: '{type_col}', Industry Col: '{industry_col}', DFM Default Col: '{dfm_default_col}'")
 
     try:
         # 处理不同类型的输入
@@ -66,6 +69,8 @@ def load_mappings(
         type_col = type_col.strip()
         if industry_col:
             industry_col = industry_col.strip()
+        if dfm_default_col:
+            dfm_default_col = dfm_default_col.strip()
 
         # 检查必需列是否存在
         if indicator_col not in indicator_sheet.columns or type_col not in indicator_sheet.columns:
@@ -92,7 +97,7 @@ def load_mappings(
                 indicator_sheet[industry_col].astype(str).str.strip().values,
                 index=indicator_sheet[indicator_col].astype(str).str.strip() # Use indicator_col for index
             ).to_dict()
-            
+
             # 标准化键并过滤NaN/空字符串
             var_industry_map = {
                 normalize_text(k): str(v).strip()
@@ -106,6 +111,26 @@ def load_mappings(
         else:
              print(f"  [Mappings] Industry column not specified. Industry map will be empty.")
 
+        # 创建DFM默认选择映射（可选）
+        if dfm_default_col and dfm_default_col in indicator_sheet.columns:
+            dfm_default_map_temp = pd.Series(
+                indicator_sheet[dfm_default_col].astype(str).str.strip().values,
+                index=indicator_sheet[indicator_col].astype(str).str.strip()
+            ).to_dict()
+
+            # 标准化键并过滤NaN/空字符串
+            var_dfm_default_map = {
+                normalize_text(k): str(v).strip()
+                for k, v in dfm_default_map_temp.items()
+                if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
+                and pd.notna(v) and str(v).strip().lower() not in ['', 'nan']
+            }
+            print(f"  [Mappings] Successfully created DFM default map with {len(var_dfm_default_map)} entries.")
+        elif dfm_default_col:
+             print(f"  [Mappings] Warning: DFM default column '{dfm_default_col}' not found in sheet '{sheet_name}'. DFM default map will be empty.")
+        else:
+             print(f"  [Mappings] DFM default column not specified. DFM default map will be empty.")
+
     except FileNotFoundError as e:
         print(f"Error loading mappings: {e}")
         # Return empty maps on file/sheet not found
@@ -116,8 +141,8 @@ def load_mappings(
         print(f"An unexpected error occurred while loading mappings: {e}")
         # Return empty maps on other errors
 
-    print(f"--- [Mappings] Loading finished. Type map size: {len(var_type_map)}, Industry map size: {len(var_industry_map)} ---")
-    return var_type_map, var_industry_map
+    print(f"--- [Mappings] Loading finished. Type map size: {len(var_type_map)}, Industry map size: {len(var_industry_map)}, DFM default map size: {len(var_dfm_default_map)} ---")
+    return var_type_map, var_industry_map, var_dfm_default_map
 
 def create_industry_map_from_data(
     final_columns: set,

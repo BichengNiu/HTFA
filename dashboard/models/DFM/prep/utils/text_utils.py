@@ -73,50 +73,7 @@ def normalize_column_name(column_name: Union[str, float, None]) -> str:
     return normalize_text(column_name, to_lower=True)
 
 
-def create_normalized_mapping(
-    keys: list,
-    values: list,
-    normalize_keys: bool = True,
-    normalize_values: bool = False
-) -> dict:
-    """
-    创建标准化后的映射字典
-
-    Args:
-        keys: 键列表
-        values: 值列表
-        normalize_keys: 是否标准化键，默认True
-        normalize_values: 是否标准化值，默认False
-
-    Returns:
-        dict: 标准化后的映射字典，过滤掉空键或空值
-
-    Examples:
-        >>> keys = ['  工业  ', 'GDP', None]
-        >>> values = ['Industry', 'gdp', 'empty']
-        >>> create_normalized_mapping(keys, values)
-        {'工业': 'Industry', 'gdp': 'gdp'}
-    """
-    if len(keys) != len(values):
-        raise ValueError(f"键和值的数量不匹配：{len(keys)} vs {len(values)}")
-
-    result = {}
-    for k, v in zip(keys, values):
-        # 标准化键
-        normalized_key = normalize_text(k) if normalize_keys else k
-
-        # 标准化值
-        normalized_value = normalize_text(v, to_lower=False) if normalize_values else v
-
-        # 过滤空键或空值
-        if normalized_key and normalized_value and str(normalized_value).strip().lower() not in ['nan', '']:
-            result[normalized_key] = normalized_value
-
-    return result
-
-
 __all__ = [
     'normalize_text',
-    'normalize_column_name',
-    'create_normalized_mapping'
+    'normalize_column_name'
 ]

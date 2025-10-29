@@ -169,6 +169,7 @@ class DFMTrainer:
                 selection_history = []
 
             # 步骤3: 阶段2因子数选择
+            print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}")
             k_factors, pca_analysis = select_num_factors(
                 data=data,
                 selected_vars=selected_vars,
@@ -178,6 +179,7 @@ class DFMTrainer:
                 train_end=self.config.train_end,
                 progress_callback=progress_callback
             )
+            print(f"[FACTOR_SELECTION] 输出结果: k_factors={k_factors}")
 
             # 步骤4: 最终模型训练（直接调用）
             # 准备数据并训练

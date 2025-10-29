@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from ..utils.exceptions import ComputationError, ValidationError
-from ..utils.helpers import calculate_marginal_contributions, detect_outliers
+from ..utils.helpers import detect_outliers
 from .impact_analyzer import ImpactResult, SequentialImpactResult, DataRelease
 
 

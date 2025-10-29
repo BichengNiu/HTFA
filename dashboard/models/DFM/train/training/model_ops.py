@@ -188,18 +188,20 @@ def evaluate_model_performance(
 
         # 2. 样本内评估
         if model_result.forecast_is is not None and len(train_data) > 0:
-            _evaluate_in_sample(
+            _evaluate_performance(
                 metrics=metrics,
                 forecast=model_result.forecast_is,
-                actual=train_data
+                actual=train_data,
+                period_type="is"
             )
 
         # 3. 样本外评估
         if model_result.forecast_oos is not None and len(val_data) > 0:
-            _evaluate_out_of_sample(
+            _evaluate_performance(
                 metrics=metrics,
                 forecast=model_result.forecast_oos,
-                actual=val_data
+                actual=val_data,
+                period_type="oos"
             )
 
     except Exception as e:
@@ -210,101 +212,60 @@ def evaluate_model_performance(
     return metrics
 
 
-def _evaluate_in_sample(
+def _evaluate_performance(
     metrics: EvaluationMetrics,
     forecast: np.ndarray,
-    actual: pd.Series
+    actual: pd.Series,
+    period_type: str
 ) -> None:
     """
-    计算样本内评估指标
+    计算评估指标（统一的样本内/样本外评估逻辑）
 
     Args:
         metrics: 要更新的EvaluationMetrics对象
         forecast: 预测值数组
         actual: 真实值Series
+        period_type: 时间段类型，'is'表示样本内，'oos'表示样本外
     """
-    # 对齐长度
     min_len = min(len(forecast), len(actual))
     forecast_aligned = forecast[:min_len]
     actual_aligned = actual.values[:min_len]
 
-    # 计算RMSE（保持原逻辑，基于样本内对齐）
-    metrics.is_rmse = calculate_rmse(actual_aligned, forecast_aligned)
+    rmse = calculate_rmse(actual_aligned, forecast_aligned)
 
-    # 创建周度预测和目标值Series - 确保使用DatetimeIndex
     actual_index = pd.to_datetime(actual.index[:min_len])
     pred_series = pd.Series(forecast_aligned, index=actual_index)
     actual_series = pd.Series(actual_aligned, index=actual_index)
 
-    # 计算MAE（新：使用下月配对）
-    try:
-        metrics.is_mae = calculate_next_month_mae(pred_series, actual_series)
-        logger.debug(f"[IS] MAE计算成功: {metrics.is_mae:.4f}")
-    except Exception as e:
-        logger.error(f"[IS] MAE计算失败: {e}")
-        metrics.is_mae = np.inf
+    log_prefix = "IS" if period_type == "is" else "OOS"
 
-    # 计算Hit Rate（新：使用新定义）
     try:
-        metrics.is_hit_rate = calculate_next_month_hit_rate(pred_series, actual_series)
-        logger.debug(f"[IS] Hit Rate计算成功: {metrics.is_hit_rate:.2f}%")
+        mae = calculate_next_month_mae(pred_series, actual_series)
+        logger.debug(f"[{log_prefix}] MAE计算成功: {mae:.4f}")
     except Exception as e:
-        logger.error(f"[IS] Hit Rate计算失败: {e}")
-        metrics.is_hit_rate = np.nan
+        logger.error(f"[{log_prefix}] MAE计算失败: {e}")
+        mae = np.inf
+
+    try:
+        hit_rate = calculate_next_month_hit_rate(pred_series, actual_series)
+        logger.debug(f"[{log_prefix}] Hit Rate计算成功: {hit_rate:.2f}%")
+    except Exception as e:
+        logger.error(f"[{log_prefix}] Hit Rate计算失败: {e}")
+        hit_rate = np.nan
+
+    if period_type == "is":
+        metrics.is_rmse = rmse
+        metrics.is_mae = mae
+        metrics.is_hit_rate = hit_rate
+    else:
+        metrics.oos_rmse = rmse
+        metrics.oos_mae = mae
+        metrics.oos_hit_rate = hit_rate
 
     logger.debug(
-        f"[IS] RMSE={metrics.is_rmse:.4f}, "
-        f"MAE={metrics.is_mae:.4f}, "
-        f"HitRate={metrics.is_hit_rate:.2f}%"
-    )
-
-
-def _evaluate_out_of_sample(
-    metrics: EvaluationMetrics,
-    forecast: np.ndarray,
-    actual: pd.Series
-) -> None:
-    """
-    计算样本外评估指标
-
-    Args:
-        metrics: 要更新的EvaluationMetrics对象
-        forecast: 预测值数组
-        actual: 真实值Series
-    """
-    # 对齐长度
-    min_len = min(len(forecast), len(actual))
-    forecast_aligned = forecast[:min_len]
-    actual_aligned = actual.values[:min_len]
-
-    # 计算RMSE（保持原逻辑，基于样本外对齐）
-    metrics.oos_rmse = calculate_rmse(actual_aligned, forecast_aligned)
-
-    # 创建周度预测和目标值Series - 确保使用DatetimeIndex
-    actual_index = pd.to_datetime(actual.index[:min_len])
-    pred_series = pd.Series(forecast_aligned, index=actual_index)
-    actual_series = pd.Series(actual_aligned, index=actual_index)
-
-    # 计算MAE（新：使用下月配对）
-    try:
-        metrics.oos_mae = calculate_next_month_mae(pred_series, actual_series)
-        logger.debug(f"[OOS] MAE计算成功: {metrics.oos_mae:.4f}")
-    except Exception as e:
-        logger.error(f"[OOS] MAE计算失败: {e}")
-        metrics.oos_mae = np.inf
-
-    # 计算Hit Rate（新：使用新定义）
-    try:
-        metrics.oos_hit_rate = calculate_next_month_hit_rate(pred_series, actual_series)
-        logger.debug(f"[OOS] Hit Rate计算成功: {metrics.oos_hit_rate:.2f}%")
-    except Exception as e:
-        logger.error(f"[OOS] Hit Rate计算失败: {e}")
-        metrics.oos_hit_rate = np.nan
-
-    logger.debug(
-        f"[OOS] RMSE={metrics.oos_rmse:.4f}, "
-        f"MAE={metrics.oos_mae:.4f}, "
-        f"HitRate={metrics.oos_hit_rate:.2f}%"
+        f"[{log_prefix}] RMSE={rmse:.4f}, "
+        f"MAE={mae:.4f}, "
+        f"HitRate={hit_rate:.2f}%"
     )
 
 

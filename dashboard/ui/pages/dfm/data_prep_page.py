@@ -734,10 +734,33 @@ def render_dfm_data_prep_tab(st):
 
                         if industry_map:
                             try:
-                                df_industry_map = pd.DataFrame(list(industry_map.items()), columns=['Indicator', 'Industry'])
-                                processed_outputs['industry_map'] = df_industry_map.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+                                # 读取DFM默认选择映射
+                                dfm_default_map = get_dfm_state('dfm_default_variables_map', {})
+
+                                # 合并行业映射和DFM默认选择到统一映射文件
+                                # 创建包含所有指标的列表（来自行业映射）
+                                all_indicators = list(industry_map.keys())
+
+                                # 构建统一映射数据
+                                unified_mapping_data = []
+                                for indicator in all_indicators:
+                                    industry = industry_map.get(indicator, '')
+                                    dfm_default = dfm_default_map.get(indicator, '')
+                                    unified_mapping_data.append({
+                                        'Indicator': indicator,
+                                        'Industry': industry,
+                                        'DFM_Default': dfm_default
+                                    })
+
+                                # 创建统一映射DataFrame（三列：Indicator, Industry, DFM_Default）
+                                df_unified_map = pd.DataFrame(unified_mapping_data, columns=['Indicator', 'Industry', 'DFM_Default'])
+                                processed_outputs['industry_map'] = df_unified_map.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+
+                                print(f"[DEBUG] 导出统一映射文件: {len(df_unified_map)}条记录")
+                                dfm_yes_count = len(df_unified_map[df_unified_map['DFM_Default'] == '是'])
+                                print(f"[DEBUG] 其中DFM默认变量(是): {dfm_yes_count}个")
                             except Exception as e_im:
-                                st.warning(f"行业映射转换到CSV时出错: {e_im}")
+                                st.warning(f"映射文件转换到CSV时出错: {e_im}")
                                 processed_outputs['industry_map'] = None
 
                         # 保存处理结果到统一状态管理器
@@ -864,20 +887,23 @@ def _auto_load_mapping_data_if_needed(current_file):
         # 加载映射数据
         from dashboard.models.DFM.prep.data_preparation import load_mappings
 
-        var_type_map, var_industry_map_loaded = load_mappings(
+        var_type_map, var_industry_map_loaded, var_dfm_default_map = load_mappings(
             excel_path=current_file,
             sheet_name=mapping_sheet_name,
             indicator_col='指标名称',
             type_col='类型',
-            industry_col='行业'
+            industry_col='行业',
+            dfm_default_col='DFM变量'
         )
 
         # 保存映射数据
         final_industry_map = var_industry_map_loaded if var_industry_map_loaded else {}
         final_type_map = var_type_map if var_type_map else {}
+        final_dfm_default_map = var_dfm_default_map if var_dfm_default_map else {}
 
         set_dfm_state("dfm_var_type_map_obj", final_type_map)
         set_dfm_state("dfm_industry_map_obj", final_industry_map)
+        set_dfm_state("dfm_default_variables_map", final_dfm_default_map)
 
         # 标记为已加载，避免重复加载
         set_dfm_state(cache_key, True)

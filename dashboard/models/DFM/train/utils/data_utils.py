@@ -9,6 +9,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Tuple, List, Optional, Callable
 from dashboard.models.DFM.train.utils.logger import get_logger
+from dashboard.models.DFM.train.utils.file_io import read_data_file
 
 logger = get_logger(__name__)
 
@@ -53,17 +54,7 @@ def load_and_validate_data(
     """
     logger.info(f"加载数据: {data_path}")
 
-    # 加载数据 - 支持Excel和CSV格式
-    file_path = Path(data_path)
-    if not file_path.exists():
-        raise FileNotFoundError(f"数据文件不存在: {data_path}")
-
-    if file_path.suffix.lower() in ['.xlsx', '.xls']:
-        data = pd.read_excel(data_path, index_col=0, parse_dates=True)
-    elif file_path.suffix.lower() == '.csv':
-        data = pd.read_csv(data_path, index_col=0, parse_dates=True)
-    else:
-        raise ValueError(f"不支持的文件格式: {file_path.suffix}，仅支持 .xlsx, .xls, .csv")
+    data = read_data_file(data_path, parse_dates=True, check_exists=True)
 
     # 验证目标变量
     if target_variable not in data.columns:

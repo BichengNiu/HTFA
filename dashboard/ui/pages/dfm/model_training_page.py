@@ -27,6 +27,9 @@ if dashboard_root not in sys.path:
 from dashboard.core import get_global_dfm_manager
 import logging
 
+# 导入文本标准化工具
+from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+
 # 导入组件化训练状态管理
 from dashboard.ui.components.dfm.train_model.training_status import TrainingStatusComponent
 
@@ -320,19 +323,20 @@ def load_mappings_from_unified_state(available_data_columns=None):
         available_data_columns: 实际数据中可用的列名列表（用于过滤）
 
     Returns:
-        tuple: (unique_industries, industry_to_indicators_map, all_indicators_flat)
-               如果没有找到映射数据，返回 (None, None, None)
+        tuple: (unique_industries, industry_to_indicators_map, all_indicators_flat, dfm_default_map)
+               如果没有找到映射数据，返回 (None, None, None, None)
     """
     try:
         var_industry_map = get_dfm_state('dfm_industry_map_obj', None)
+        dfm_default_map = get_dfm_state('dfm_default_variables_map', {})
 
         if var_industry_map is None:
             print("[WARNING] [映射加载] 统一状态管理器中未找到行业映射数据")
-            return None, None, None
+            return None, None, None, None
 
         if not var_industry_map:
             print("[WARNING] [映射加载] 行业映射数据为空")
-            return None, None, None
+            return None, None, None, None
 
         # 如果提供了实际数据列名，进行过滤
         if available_data_columns is not None:
@@ -375,11 +379,11 @@ def load_mappings_from_unified_state(available_data_columns=None):
         industry_to_indicators_map = {k: sorted(v) for k, v in industry_to_indicators_temp.items()}
         all_indicators_flat = sorted(list(var_industry_map.keys()))
 
-        return unique_industries, industry_to_indicators_map, all_indicators_flat
+        return unique_industries, industry_to_indicators_map, all_indicators_flat, dfm_default_map
 
     except Exception as e:
         print(f"[ERROR] [映射加载] 从统一状态管理器加载映射数据失败: {e}")
-        return None, None, None
+        return None, None, None, None
 
 
 def _reset_training_state():
@@ -821,10 +825,23 @@ def render_dfm_train_model_tab(st_instance):
                 # 保存到当前命名空间（仅用于本tab）
                 set_dfm_state('dfm_industry_map_obj', var_industry_map)
                 print(f"[模型训练] 成功加载行业映射: {len(var_industry_map)} 个变量")
+
+                # 读取DFM默认选择列（如果存在）
+                if 'DFM_Default' in industry_map_df.columns:
+                    var_dfm_default_map = {
+                        udata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                        for k, v in zip(industry_map_df['Indicator'], industry_map_df['DFM_Default'])
+                        if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip()
+                    }
+                    set_dfm_state('dfm_default_variables_map', var_dfm_default_map)
+                    dfm_yes_count = sum(1 for v in var_dfm_default_map.values() if v == '是')
+                    print(f"[模型训练] 成功加载DFM默认选择: {len(var_dfm_default_map)} 个变量，其中{dfm_yes_count}个标记为'是'")
+                else:
+                    print(f"[模型训练] 映射文件未包含DFM_Default列（旧格式），跳过DFM默认选择加载")
             else:
-                st_instance.error("行业映射文件格式错误：必须包含 'Indicator' 和 'Industry' 列")
+                st_instance.error("映射文件格式错误：必须包含 'Indicator' 和 'Industry' 列")
         except Exception as e:
-            st_instance.error(f"加载行业映射失败: {e}")
+            st_instance.error(f"加载映射文件失败: {e}")
             import traceback
             st_instance.code(traceback.format_exc(), language="python")
 
@@ -889,8 +906,8 @@ def render_dfm_train_model_tab(st_instance):
     # 优先使用统一状态管理器中的映射数据
     map_data = load_mappings_from_unified_state(available_data_columns)
 
-    if map_data and all(x is not None for x in map_data):
-        unique_industries, var_to_indicators_map_by_industry, _ = map_data
+    if map_data and all(x is not None for x in map_data[:3]):
+        unique_industries, var_to_indicators_map_by_industry, _, dfm_default_map = map_data
 
         # 修复：显示实际可用的指标数量
         actual_indicator_count = sum(len(v) for v in var_to_indicators_map_by_industry.values())
@@ -902,6 +919,7 @@ def render_dfm_train_model_tab(st_instance):
         st_instance.warning("[WARNING] 未找到映射数据，请确保已在'数据准备'模块正确处理数据")
         unique_industries = []
         var_to_indicators_map_by_industry = {}
+        dfm_default_map = {}
 
     # 主布局：现在是上下结构，不再使用列
     # REMOVED: var_selection_col, param_col = st_instance.columns([1, 1.5])
@@ -995,11 +1013,18 @@ def render_dfm_train_model_tab(st_instance):
             if excluded_count > 0:
                 st_instance.text(f"  已自动排除目标变量 '{current_target_var}' (共排除 {excluded_count} 个)")
 
-            # 从状态管理器读取已选指标
-            default_selection_for_industry = current_selection.get(
-                industry_name,
-                []  # 默认为空，不选择任何指标
-            )
+            # 从状态管理器读取已选指标，或使用DFM默认选择
+            default_selection_for_industry = current_selection.get(industry_name, None)
+
+            # 如果状态管理器中没有选择，使用DFM默认选择映射
+            if default_selection_for_industry is None:
+                # 从dfm_default_map中筛选该行业中标记为"是"的指标
+                dfm_default_indicators = [
+                    indicator for indicator in indicators_for_this_industry
+                    if dfm_default_map.get(normalize_text(indicator), '').strip() == '是'
+                ]
+                default_selection_for_industry = dfm_default_indicators
+
             # 确保默认值是实际可选列表的子集
             valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
 
@@ -1457,20 +1482,43 @@ def render_dfm_train_model_tab(st_instance):
                     }
                     mapped_var_selection_method = var_selection_method_map.get(var_selection_method, 'none')
 
-                    # 获取因子选择策略
-                    factor_strategy = get_dfm_state('dfm_factor_selection_strategy', 'fixed_number')
+                    # 获取因子选择策略（严格验证，不使用默认值）
+                    factor_strategy = get_dfm_state('dfm_factor_selection_strategy')
+
+                    if factor_strategy is None:
+                        st_instance.error("因子选择策略未设置，请先在'模型配置'中设置因子选择策略")
+                        print("[ERROR] 因子选择策略未设置")
+                        return
 
                     # 映射factor_selection_strategy到train模块的factor_selection_method
                     if factor_strategy == 'fixed_number':
                         factor_selection_method = 'fixed'
-                        k_factors = get_dfm_state('dfm_fixed_number_of_factors', 3)
+                        k_factors = get_dfm_state('dfm_fixed_number_of_factors')
+
+                        if k_factors is None:
+                            st_instance.error("固定因子数未设置，请先在'模型配置'中设置因子数")
+                            print("[ERROR] 固定因子数未设置")
+                            return
+
                         st.info(f"使用固定因子数策略，因子数：{k_factors}")
+
                     elif factor_strategy == 'cumulative_variance':
                         factor_selection_method = 'cumulative'
-                        k_factors = 4  # 默认值，实际会通过PCA确定
+                        pca_threshold = get_dfm_state('dfm_cumulative_variance_threshold')
+
+                        if pca_threshold is None:
+                            st_instance.error("累积方差阈值未设置，请先在'模型配置'中设置阈值")
+                            print("[ERROR] 累积方差阈值未设置")
+                            return
+
+                        # 将由PCA确定，传入None作为占位符
+                        k_factors = 1  # 占位符，实际值由PCA确定
+                        st.info(f"使用累积方差策略，阈值：{pca_threshold}")
+
                     else:
-                        factor_selection_method = 'fixed'
-                        k_factors = 3
+                        st_instance.error(f"未知的因子选择策略: {factor_strategy}")
+                        print(f"[ERROR] 未知的因子选择策略: {factor_strategy}")
+                        return
 
                     # 保存DataFrame到临时文件（TrainingConfig需要文件路径）
                     temp_file = tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False, encoding='utf-8')
@@ -1541,8 +1589,8 @@ def render_dfm_train_model_tab(st_instance):
 
                         # 模型参数
                         k_factors=k_factors,
-                        max_iterations=get_dfm_state('dfm_max_iter', 30),
-                        max_lags=get_dfm_state('dfm_factor_ar_order', 1),
+                        max_iterations=get_dfm_state('dfm_max_iter') or 30,  # 允许30作为合理默认值
+                        max_lags=get_dfm_state('dfm_factor_ar_order') or 1,  # 允许1作为合理默认值
                         tolerance=1e-6,
 
                         # 变量选择配置
@@ -1551,7 +1599,7 @@ def render_dfm_train_model_tab(st_instance):
 
                         # 因子数选择配置
                         factor_selection_method=factor_selection_method,
-                        pca_threshold=get_dfm_state('dfm_cumulative_variance_threshold', 0.9) if factor_strategy == 'cumulative_variance' else 0.9,
+                        pca_threshold=pca_threshold if factor_strategy == 'cumulative_variance' else 0.9,
 
                         # 并行计算配置
                         enable_parallel=True,
@@ -1564,6 +1612,15 @@ def render_dfm_train_model_tab(st_instance):
                     )
 
                     print(f"[TRAIN_REF] 训练配置: {training_config}")
+                    print(f"[TRAIN_CONFIG] 因子选择策略: {factor_selection_method}")
+                    print(f"[TRAIN_CONFIG] 因子数: {k_factors}")
+                    print(f"[TRAIN_CONFIG] PCA阈值: {training_config.pca_threshold}")
+                    print(f"[TRAIN_CONFIG] 最大迭代次数: {training_config.max_iterations}")
+                    print(f"[TRAIN_CONFIG] AR阶数: {training_config.max_lags}")
+                    print(f"[TRAIN_CONFIG] 训练期: {training_config.training_start} 至 {training_config.train_end}")
+                    print(f"[TRAIN_CONFIG] 验证期: {training_config.validation_start} 至 {training_config.validation_end}")
+                    print(f"[TRAIN_CONFIG] 选择的指标数: {len(training_config.selected_indicators)}")
+                    print(f"[TRAIN_CONFIG] 变量选择: {training_config.enable_variable_selection}")
 
                     # 创建进度回调函数
                     def progress_callback(message: str):

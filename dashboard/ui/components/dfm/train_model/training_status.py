@@ -656,6 +656,13 @@ class TrainingStatusComponent(DFMComponent):
         Args:
             training_config: 训练配置
         """
+        # 抑制后台线程中的 Streamlit 日志警告
+        import logging
+        streamlit_cache_logger = logging.getLogger('streamlit.runtime.caching.cache_data_api')
+        streamlit_cache_logger.setLevel(logging.CRITICAL)
+        streamlit_cache_logger.disabled = True
+        streamlit_cache_logger.propagate = False
+
         training_start_time = datetime.now()
         self._current_training_id = f"training_{training_start_time.strftime('%Y%m%d_%H%M%S')}"
 

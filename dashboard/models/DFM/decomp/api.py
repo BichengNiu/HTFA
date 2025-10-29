@@ -306,39 +306,6 @@ def _extract_real_data_releases(
         return []
 
 
-def _generate_default_data_releases(target_date: pd.Timestamp) -> List[DataRelease]:
-    """生成默认的数据发布事件"""
-    releases = []
-    variable_names = [
-        "规模以上工业增加值", "社会消费品零售总额", "固定资产投资",
-        "出口总额", "进口总额", "CPI", "PPI", "M2", "PMI", "发电量"
-    ]
-
-    current_date = target_date - timedelta(days=30)
-
-    for i, var_name in enumerate(variable_names):
-        days_offset = i * 3  # 每3天一个数据发布
-        release_date = current_date + timedelta(days=days_offset)
-
-        # 生成合理的观测值和期望值
-        base_value = 100.0 + np.random.normal(0, 10)
-        expected_value = base_value + np.random.normal(0, 2)
-        observed_value = expected_value + np.random.normal(0, 3)
-
-        release = DataRelease(
-            timestamp=release_date,
-            variable_name=var_name,
-            observed_value=float(observed_value),
-            expected_value=float(expected_value),
-            measurement_error=1.0,
-            variable_index=i
-        )
-
-        releases.append(release)
-
-    return releases
-
-
 def _generate_analysis_results(
     news_calculator: NewsImpactCalculator,
     contributions: List,
@@ -549,9 +516,3 @@ def _create_visualizations(
         traceback.print_exc()
         # 可视化失败不应该影响整体分析
         return {}
-
-
-# 向后兼容的别名
-def execute_news_analysis_backend(*args, **kwargs):
-    """向后兼容的函数别名"""
-    return execute_news_analysis(*args, **kwargs)
