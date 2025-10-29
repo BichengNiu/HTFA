@@ -84,12 +84,6 @@ def train_dfm_with_forecast(
     if max_lags < 1:
         raise ValueError(f"max_lags必须>=1，当前值: {max_lags}")
 
-    # logger.info(
-    #     f"[ModelOps] 开始训练 - k={k_factors}, "
-    #     f"变量数={predictor_data.shape[1]}, "
-    #     f"样本数={predictor_data.shape[0]}"
-    # )
-
     # 1. 创建并配置DFM模型
     dfm = DFMModel(
         n_factors=k_factors,
@@ -106,13 +100,6 @@ def train_dfm_with_forecast(
             train_end=train_end
         )
 
-        # logger.info(
-        #     f"[ModelOps] 模型训练完成 - "
-        #     f"收敛={model_result.converged}, "
-        #     f"迭代={model_result.iterations}次, "
-        #     f"LogLik={model_result.log_likelihood:.2f}"
-        # )
-
     except Exception as e:
         logger.error(f"[ModelOps] 模型训练失败: {e}")
         raise RuntimeError(f"DFM模型训练失败: {e}") from e
@@ -128,12 +115,6 @@ def train_dfm_with_forecast(
             validation_end=validation_end,
             progress_callback=progress_callback
         )
-
-        # logger.info(
-        #     f"[ModelOps] 预测生成完成 - "
-        #     f"IS预测点数={len(model_result.forecast_is) if model_result.forecast_is is not None else 0}, "
-        #     f"OOS预测点数={len(model_result.forecast_oos) if model_result.forecast_oos is not None else 0}"
-        # )
 
     except Exception as e:
         logger.error(f"[ModelOps] 预测生成失败: {e}")

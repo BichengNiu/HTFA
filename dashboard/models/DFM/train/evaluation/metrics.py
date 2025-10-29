@@ -101,8 +101,6 @@ def align_next_month_weekly_data(
     Returns:
         pd.DataFrame: 对齐后数据，列['month', 'week_date', 'nowcast', 'next_month_target']
     """
-    # logger.debug("[align_next_month_weekly] 开始对齐：m月所有周nowcast与m+1月target")
-
     # 确保索引是DatetimeIndex
     if not isinstance(nowcast_series.index, pd.DatetimeIndex):
         nowcast_series.index = pd.to_datetime(nowcast_series.index)
@@ -144,7 +142,6 @@ def align_next_month_weekly_data(
         return pd.DataFrame(columns=['month', 'week_date', 'nowcast', 'next_month_target'])
 
     df = pd.DataFrame(weekly_data)
-    # logger.info(f"[align_next_month_weekly] 配对完成: {len(df)}个周度数据点")
 
     return df
 
@@ -162,8 +159,6 @@ def align_next_month_last_friday(
     Returns:
         pd.DataFrame: 对齐后数据，列['month', 'last_friday_date', 'nowcast', 'current_target', 'next_target']
     """
-    # logger.debug("[align_next_month_last_friday] 开始对齐：m月最后周五nowcast、m月target与m+1月target")
-
     # 确保索引是DatetimeIndex
     if not isinstance(nowcast_series.index, pd.DatetimeIndex):
         nowcast_series.index = pd.to_datetime(nowcast_series.index)
@@ -214,7 +209,6 @@ def align_next_month_last_friday(
 
     df = pd.DataFrame(monthly_friday_data)
     df = df.set_index('last_friday_date').sort_index()
-    # logger.info(f"[align_next_month_last_friday] 配对完成: {len(df)}个月度数据点")
 
     return df
 
@@ -243,7 +237,6 @@ def calculate_next_month_rmse(
         squared_errors = (aligned_df['nowcast'] - aligned_df['next_month_target']) ** 2
         rmse = np.sqrt(squared_errors.mean())
 
-        # logger.debug(f"[next_month_rmse] RMSE={rmse:.4f}, 数据点数={len(aligned_df)}")
         return float(rmse)
 
     except Exception as e:
@@ -275,7 +268,6 @@ def calculate_next_month_mae(
         abs_errors = np.abs(aligned_df['nowcast'] - aligned_df['next_target'])
         mae = abs_errors.mean()
 
-        # logger.debug(f"[next_month_mae] MAE={mae:.4f}, 数据点数={len(aligned_df)}")
         return float(mae)
 
     except Exception as e:
@@ -325,7 +317,6 @@ def calculate_next_month_hit_rate(
         total = len(aligned_df)
         hit_rate = (hits / total) * 100.0
 
-        # logger.debug(f"[next_month_hit_rate] Hit Rate={hit_rate:.2f}%, 命中={hits}/{total}")
         return float(hit_rate)
 
     except Exception as e:

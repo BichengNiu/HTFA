@@ -10,6 +10,7 @@ import pandas as pd
 from typing import Optional, Tuple
 from dashboard.models.DFM.train.core.models import DFMModelResult
 from dashboard.models.DFM.train.utils.logger import get_logger
+from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT, SEASONAL_MASK_MONTHS
 
 logger = get_logger(__name__)
 
@@ -58,8 +59,8 @@ def generate_target_forecast(
 
         # 处理零标准差
         if target_std == 0 or pd.isna(target_std):
-            logger.warning("目标变量训练期标准差为0或NaN，设置为1.0")
-            target_std = 1.0
+            logger.warning(f"目标变量训练期标准差为0或NaN，设置为{ZERO_STD_REPLACEMENT}")
+            target_std = ZERO_STD_REPLACEMENT
         if pd.isna(target_mean):
             logger.warning("目标变量训练期均值为NaN，设置为0.0")
             target_mean = 0.0
@@ -76,7 +77,7 @@ def generate_target_forecast(
         # 将1-2月数据掩码为NaN（春节因素）
         target_data_masked = target_data_standardized.loc[common_index].copy()
         month_indices = target_data_masked.index.month
-        mask_jan_feb = (month_indices == 1) | (month_indices == 2)
+        mask_jan_feb = month_indices.isin(SEASONAL_MASK_MONTHS)
         nan_before = target_data_masked.isna().sum()
         target_data_masked.loc[mask_jan_feb] = np.nan
         nan_after = target_data_masked.isna().sum()
@@ -153,11 +154,6 @@ def generate_target_forecast(
         # 更新model_result
         model_result.forecast_is = forecast_is
         model_result.forecast_oos = forecast_oos if forecast_oos is not None and len(forecast_oos) > 0 else None
-
-        # logger.info(
-        #     f"预测生成完成: IS={len(forecast_is) if forecast_is is not None else 0}, "
-        #     f"OOS={len(forecast_oos) if forecast_oos is not None else 0}"
-        # )
 
     except Exception as e:
         logger.error(f"生成目标变量预测时出错: {e}")

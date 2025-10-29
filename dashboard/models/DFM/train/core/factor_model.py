@@ -18,6 +18,13 @@ from dashboard.models.DFM.train.core.estimator import (
 )
 from dashboard.models.DFM.train.core.models import DFMModelResult
 from dashboard.models.DFM.train.utils.logger import get_logger
+from dashboard.models.DFM.train.constants import (
+    ZERO_STD_REPLACEMENT,
+    DEFAULT_AR1_COEFFICIENT,
+    DEFAULT_Q_VARIANCE,
+    DEFAULT_B_SCALE,
+    R_MATRIX_MIN_VARIANCE
+)
 
 
 logger = get_logger(__name__)
@@ -145,7 +152,7 @@ class DFMModel:
         stds = train_data.std(skipna=True).values
 
         # 处理零标准差
-        stds = np.where(stds > 0, stds, 1.0)
+        stds = np.where(stds > 0, stds, ZERO_STD_REPLACEMENT)
 
         # 中心化数据（匹配老代码obs_centered）
         obs_centered = full_data - means
@@ -268,16 +275,16 @@ class DFMModel:
             # 单因子情况：使用固定初始值（匹配老代码line 354-355）
             # 不使用AutoReg估计，因为初始PCA因子可能不准确，导致算法发散
             if self.max_lags == 1:
-                A = np.array([[0.95]])
-                Q = np.array([[0.1]])
+                A = np.array([[DEFAULT_AR1_COEFFICIENT]])
+                Q = np.array([[DEFAULT_Q_VARIANCE]])
             else:
                 # AR(p) companion form
                 A = np.zeros((self.max_lags, self.max_lags))
-                A[0, :] = 0.95 / self.max_lags
+                A[0, :] = DEFAULT_AR1_COEFFICIENT / self.max_lags
                 if self.max_lags > 1:
                     A[1:, :-1] = np.eye(self.max_lags - 1)
                 Q = np.zeros((self.max_lags, self.max_lags))
-                Q[0, 0] = 0.1
+                Q[0, 0] = DEFAULT_Q_VARIANCE
         else:
             # 多因子情况：使用VAR模型估计（保持原逻辑，已验证成功）
             from statsmodels.tsa.api import VAR
@@ -300,7 +307,7 @@ class DFMModel:
 
             # 使用VAR残差计算初始Q矩阵（匹配老代码）
             Q = np.cov(var_results.resid, rowvar=False)
-            Q = np.diag(np.maximum(np.diag(Q), 1e-6))
+            Q = np.diag(np.maximum(np.diag(Q), R_MATRIX_MIN_VARIANCE))
 
         # 计算R矩阵（匹配老代码：psi_diag * obs_std^2）
         # 只使用训练期数据计算R矩阵
@@ -319,7 +326,7 @@ class DFMModel:
         P0 = np.eye(n_states)
 
         # 初始化B矩阵（匹配老代码line 393: B_current = np.eye(n_factors) * 0.1）
-        B = np.eye(n_states) * 0.1
+        B = np.eye(n_states) * DEFAULT_B_SCALE
 
         # 生成外部shock矩阵U（完全匹配老代码默认行为）
         # 老代码有个Python陷阱：if error: 将字符串'False'当作True处理！
@@ -487,7 +494,7 @@ class DFMModel:
         psi_diag = np.nanvar(residuals_z, axis=0)  # 标准化残差的方差
         original_std_sq = stds ** 2  # 原始标准差的平方
         R_diag_current = psi_diag * original_std_sq  # 恢复到原始尺度
-        R_diag_current = np.maximum(R_diag_current, 1e-6)  # 确保正定性
+        R_diag_current = np.maximum(R_diag_current, R_MATRIX_MIN_VARIANCE)  # 确保正定性
 
         return np.diag(R_diag_current)
 

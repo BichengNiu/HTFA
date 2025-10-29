@@ -10,6 +10,7 @@ import pandas as pd
 from typing import Tuple, Optional
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import KalmanFilterResult, KalmanSmootherResult
+from dashboard.models.DFM.train.constants import R_MATRIX_MIN_VARIANCE
 
 
 logger = get_logger(__name__)
@@ -117,7 +118,7 @@ class KalmanFilter:
             x_pred[t, :] = self.A @ x_filt[t-1, :] + self.B @ U[t, :]
             P_pred_raw = self.A @ P_filt[t-1] @ self.A.T + self.Q
             # 添加jitter保证数值稳定性
-            p_jitter = np.eye(self.n_states) * 1e-6
+            p_jitter = np.eye(self.n_states) * R_MATRIX_MIN_VARIANCE
             P_pred[t] = P_pred_raw + p_jitter
 
             if len(ix) == 0:

@@ -11,6 +11,15 @@ from typing import Tuple, Optional, Union
 import statsmodels.api as sm
 from sklearn.linear_model import LinearRegression
 from dashboard.models.DFM.train.utils.logger import get_logger
+from dashboard.models.DFM.train.constants import (
+    MIN_EIGENVALUE_EPSILON,
+    SVD_FALLBACK_MIN_VALUE,
+    R_MATRIX_MIN_VARIANCE,
+    DEFAULT_AR1_COEFFICIENT,
+    DEFAULT_Q_VARIANCE,
+    DEFAULT_B_SCALE,
+    ZERO_STD_REPLACEMENT
+)
 
 
 logger = get_logger(__name__)
@@ -131,7 +140,7 @@ def estimate_transition_matrix(
 
             # 添加小的正则化项确保数值稳定性（匹配老代码）
             A = scipy.linalg.solve(
-                (Ftm1_Ftm1 + np.eye(n_factors) * 1e-7).T,
+                (Ftm1_Ftm1 + np.eye(n_factors) * MIN_EIGENVALUE_EPSILON).T,
                 Ft_Ftm1.T,
                 assume_a='pos'
             ).T
@@ -158,7 +167,7 @@ def estimate_transition_matrix(
     except Exception as e:
         logger.warning(f"A矩阵估计失败: {e}，使用单位矩阵")
         n_states = n_factors * max_lags
-        A = np.eye(n_states) * 0.95
+        A = np.eye(n_states) * DEFAULT_AR1_COEFFICIENT
 
     return A
 
@@ -216,8 +225,7 @@ def estimate_covariance_matrices(
             # 特征值分解
             eigenvalues, eigenvectors = np.linalg.eigh(Sigma)
             # 将负特征值替换为小正数
-            min_eig_val = 1e-7
-            eigenvalues_corrected = np.maximum(eigenvalues, min_eig_val)
+            eigenvalues_corrected = np.maximum(eigenvalues, MIN_EIGENVALUE_EPSILON)
 
             # 使用修正后的特征值重构Sigma
             Sigma_corrected = eigenvectors @ np.diag(eigenvalues_corrected) @ eigenvectors.T
@@ -235,14 +243,14 @@ def estimate_covariance_matrices(
 
         except np.linalg.LinAlgError as e:
             logger.warning(f"Sigma特征值分解失败: {e}. 使用fallback值")
-            Q = np.eye(n_factors) * 1e-6
+            Q = np.eye(n_factors) * R_MATRIX_MIN_VARIANCE
             B = np.zeros((n_factors, n_shocks))
             min_dim_fallback = min(n_factors, n_shocks)
-            B[:min_dim_fallback, :min_dim_fallback] = np.eye(min_dim_fallback) * np.sqrt(1e-6)
+            B[:min_dim_fallback, :min_dim_fallback] = np.eye(min_dim_fallback) * np.sqrt(SVD_FALLBACK_MIN_VALUE)
     else:
         # 如果没有n_shocks，只计算Q矩阵
-        Q = _ensure_positive_definite(Sigma, epsilon=1e-7)
-        B = np.eye(n_factors) * 0.1  # 默认B矩阵
+        Q = _ensure_positive_definite(Sigma, epsilon=MIN_EIGENVALUE_EPSILON)
+        B = np.eye(n_factors) * DEFAULT_B_SCALE  # 默认B矩阵
 
     # 计算残差和R矩阵（匹配老代码EMstep的实现）
     # 中心化数据：y_np
@@ -255,20 +263,20 @@ def estimate_covariance_matrices(
     R_diag = np.nanvar(residuals, axis=0, ddof=0)  # (n_obs,), ddof=0避免自由度问题
 
     # 处理NaN和Inf：替换为默认值
-    R_diag = np.where(np.isfinite(R_diag), R_diag, 1.0)  # NaN/Inf用1.0替换
-    R_diag = np.maximum(R_diag, 1e-7)  # 确保正定性
+    R_diag = np.where(np.isfinite(R_diag), R_diag, ZERO_STD_REPLACEMENT)  # NaN/Inf用默认值替换
+    R_diag = np.maximum(R_diag, MIN_EIGENVALUE_EPSILON)  # 确保正定性
 
     R = np.diag(R_diag)
 
     return B, Q, R
 
 
-def _ensure_positive_definite(matrix: np.ndarray, epsilon: float = 1e-6) -> np.ndarray:
+def _ensure_positive_definite(matrix: np.ndarray, epsilon: float = R_MATRIX_MIN_VARIANCE) -> np.ndarray:
     """确保矩阵正定（完全匹配老代码_calculate_shock_matrix的实现）
 
     Args:
         matrix: 输入矩阵
-        epsilon: 最小特征值
+        epsilon: 最小特征值（默认为R_MATRIX_MIN_VARIANCE）
 
     Returns:
         np.ndarray: 正定矩阵

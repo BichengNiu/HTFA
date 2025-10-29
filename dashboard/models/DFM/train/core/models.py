@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
+from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT
 
 
 # ==================== 评估指标相关 ====================
@@ -136,7 +137,7 @@ class TrainingResult:
 
     # 数据统计
     target_mean_original: float = 0.0
-    target_std_original: float = 1.0
+    target_std_original: float = ZERO_STD_REPLACEMENT
 
     # 输出路径
     output_dir: Optional[str] = None
