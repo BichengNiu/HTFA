@@ -412,6 +412,87 @@ class TrainingResultExporter:
             logger.error(f"转换PCA结果为DataFrame失败: {e}")
             return pd.DataFrame()
 
+    def _collect_nowcast_data(self, result, config) -> Optional[pd.Series]:
+        """
+        收集并合并训练期和验证期的Nowcast数据
+
+        Args:
+            result: 训练结果
+            config: 训练配置
+
+        Returns:
+            合并后的Nowcast序列，如果失败则返回None
+        """
+        forecast_is = None
+        forecast_oos = None
+
+        if result.model_result:
+            if hasattr(result.model_result, 'forecast_is'):
+                forecast_is = result.model_result.forecast_is
+                logger.info(f"forecast_is类型: {type(forecast_is)}, 长度: {len(forecast_is) if forecast_is is not None else None}")
+
+            if hasattr(result.model_result, 'forecast_oos'):
+                forecast_oos = result.model_result.forecast_oos
+                logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
+
+        is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
+        oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
+
+        nowcast_series_list = []
+
+        if forecast_is is not None and is_index is not None and len(is_index) == len(forecast_is):
+            is_series = pd.Series(forecast_is, index=is_index, name='Nowcast')
+            nowcast_series_list.append(is_series)
+            logger.info(f"训练期数据: {len(is_series)} 个点，时间范围 {is_index.min()} 到 {is_index.max()}")
+        else:
+            logger.warning("无法生成训练期Nowcast序列")
+
+        if forecast_oos is not None and oos_index is not None and len(oos_index) == len(forecast_oos):
+            oos_series = pd.Series(forecast_oos, index=oos_index, name='Nowcast')
+            nowcast_series_list.append(oos_series)
+            logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
+        else:
+            logger.warning("无法生成验证期Nowcast序列")
+
+        if len(nowcast_series_list) == 0:
+            logger.warning("无法获取Nowcast数据")
+            return None
+
+        nowcast_data = pd.concat(nowcast_series_list).sort_index()
+        logger.info(f"完整Nowcast数据: {len(nowcast_data)} 个点，时间范围 {nowcast_data.index.min()} 到 {nowcast_data.index.max()}")
+        logger.info(f"nowcast_data索引类型: {type(nowcast_data.index)}, 前5个: {list(nowcast_data.index[:5])}")
+
+        return nowcast_data
+
+    def _load_target_data(self, config) -> Optional[pd.Series]:
+        """
+        从数据文件加载目标变量数据
+
+        Args:
+            config: 训练配置
+
+        Returns:
+            目标变量序列，如果失败则返回None
+        """
+        if not hasattr(config, 'data_path') or not config.data_path:
+            return None
+
+        try:
+            logger.info(f"尝试从数据文件读取目标变量: {config.data_path}")
+            data = self._read_data_file(config.data_path)
+            logger.info(f"数据文件读取成功，形状: {data.shape}, 列数: {len(data.columns)}")
+
+            if config.target_variable in data.columns:
+                target_data = data[config.target_variable].dropna()
+                logger.info(f"目标变量'{config.target_variable}'读取成功，长度: {len(target_data)}")
+                return target_data
+            else:
+                logger.warning(f"数据文件中未找到目标变量'{config.target_variable}'")
+                return None
+        except Exception as e:
+            logger.warning(f"从数据文件读取目标变量失败: {e}", exc_info=True)
+            return None
+
     def _generate_aligned_table(self, result, config, metadata: Dict) -> Optional[pd.DataFrame]:
         """
         生成complete_aligned_table
@@ -433,78 +514,19 @@ class TrainingResultExporter:
             logger.info("开始生成complete_aligned_table，合并训练期和验证期数据...")
             logger.info("=" * 60)
 
-            # 1. 获取训练期和验证期的Nowcast数据（原始尺度）
-            forecast_is = None
-            forecast_oos = None
-
-            if result.model_result:
-                # 获取训练期预测
-                if hasattr(result.model_result, 'forecast_is'):
-                    forecast_is = result.model_result.forecast_is
-                    logger.info(f"forecast_is类型: {type(forecast_is)}, 长度: {len(forecast_is) if forecast_is is not None else None}")
-
-                # 获取验证期预测
-                if hasattr(result.model_result, 'forecast_oos'):
-                    forecast_oos = result.model_result.forecast_oos
-                    logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
-
-            # 2. 获取完整的日期索引（训练期+验证期）
-            is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
-            oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
-
-            # 3. 构建完整的Nowcast时间序列
-            nowcast_series_list = []
-
-            if forecast_is is not None and is_index is not None and len(is_index) == len(forecast_is):
-                is_series = pd.Series(forecast_is, index=is_index, name='Nowcast')
-                nowcast_series_list.append(is_series)
-                logger.info(f"训练期数据: {len(is_series)} 个点，时间范围 {is_index.min()} 到 {is_index.max()}")
-            else:
-                logger.warning("无法生成训练期Nowcast序列")
-
-            if forecast_oos is not None and oos_index is not None and len(oos_index) == len(forecast_oos):
-                oos_series = pd.Series(forecast_oos, index=oos_index, name='Nowcast')
-                nowcast_series_list.append(oos_series)
-                logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
-            else:
-                logger.warning("无法生成验证期Nowcast序列")
-
-            # 合并训练期和验证期
-            if len(nowcast_series_list) == 0:
+            nowcast_data = self._collect_nowcast_data(result, config)
+            if nowcast_data is None:
                 logger.warning("无法获取Nowcast数据，complete_aligned_table将为空")
                 return pd.DataFrame(columns=['Nowcast (Original Scale)', config.target_variable])
 
-            nowcast_data = pd.concat(nowcast_series_list).sort_index()
-            logger.info(f"完整Nowcast数据: {len(nowcast_data)} 个点，时间范围 {nowcast_data.index.min()} 到 {nowcast_data.index.max()}")
-
-            logger.info(f"nowcast_data已准备: 长度={len(nowcast_data)}, 有索引={hasattr(nowcast_data, 'index')}")
-            if hasattr(nowcast_data, 'index'):
-                logger.info(f"nowcast_data索引类型: {type(nowcast_data.index)}, 前5个: {list(nowcast_data.index[:5])}")
-
-            # 2. 获取目标变量实际值
-            target_data = None
-            if hasattr(config, 'data_path') and config.data_path:
-                try:
-                    logger.info(f"尝试从数据文件读取目标变量: {config.data_path}")
-                    data = self._read_data_file(config.data_path)
-                    logger.info(f"数据文件读取成功，形状: {data.shape}, 列数: {len(data.columns)}")
-                    if config.target_variable in data.columns:
-                        target_data = data[config.target_variable].dropna()
-                        logger.info(f"目标变量'{config.target_variable}'读取成功，长度: {len(target_data)}")
-                    else:
-                        logger.warning(f"数据文件中未找到目标变量'{config.target_variable}'")
-                except Exception as e:
-                    logger.warning(f"从数据文件读取目标变量失败: {e}", exc_info=True)
-
+            target_data = self._load_target_data(config)
             if target_data is None or len(target_data) == 0:
                 logger.warning("无法获取目标变量实际值")
-                # 创建基本对齐表格（仅包含Nowcast）
                 return pd.DataFrame({
                     'Nowcast (Original Scale)': nowcast_data,
                     config.target_variable: np.nan
                 })
 
-            # 3. 执行对齐逻辑（参考老代码）
             aligned_table = self._align_nowcast_target(
                 nowcast_data,
                 target_data,
@@ -646,6 +668,190 @@ class TrainingResultExporter:
             logger.error(f"获取{period_name}日期索引失败: {e}")
             return None
 
+    def _prepare_r2_calculation_data(
+        self,
+        result,
+        config
+    ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        准备R²计算所需的因子和变量数据
+
+        Args:
+            result: 训练结果
+            config: 训练配置
+
+        Returns:
+            tuple: (factors_train, train_data) 或 None（如果失败）
+        """
+        if not result.model_result or not hasattr(result.model_result, 'factors'):
+            logger.warning("缺少模型结果或因子数据，无法计算R²")
+            return None
+
+        factors_data = result.model_result.factors
+        if isinstance(factors_data, np.ndarray):
+            if factors_data.ndim == 2:
+                factors_df = pd.DataFrame(
+                    factors_data.T,
+                    columns=[f'Factor_{i+1}' for i in range(factors_data.shape[0])]
+                )
+            else:
+                logger.warning(f"因子数据维度不正确: {factors_data.ndim}")
+                return None
+        elif isinstance(factors_data, pd.DataFrame):
+            factors_df = factors_data
+        else:
+            logger.warning(f"因子数据类型不支持: {type(factors_data)}")
+            return None
+
+        data = self._read_data_file(config.data_path)
+
+        if not isinstance(data.index, pd.DatetimeIndex):
+            try:
+                data.index = pd.to_datetime(data.index)
+            except Exception:
+                logger.warning("无法将数据索引转换为DatetimeIndex")
+                return None
+
+        if len(factors_df) != len(data):
+            logger.warning(f"因子数据长度({len(factors_df)})与完整数据长度({len(data)})不匹配")
+            min_len = min(len(factors_df), len(data))
+            factors_df = factors_df.iloc[:min_len].copy()
+            data = data.iloc[:min_len].copy()
+
+        factors_df.index = data.index
+
+        train_end = pd.to_datetime(config.train_end) if hasattr(config, 'train_end') else data.index.max()
+        train_data = data[data.index <= train_end]
+        factors_train = factors_df[factors_df.index <= train_end]
+
+        return factors_train, train_data
+
+    def _group_variables_by_industry(
+        self,
+        result,
+        var_industry_map: Dict[str, str]
+    ) -> Optional[Dict[str, list]]:
+        """
+        按行业分组变量
+
+        Args:
+            result: 训练结果
+            var_industry_map: 变量到行业的映射字典
+
+        Returns:
+            dict: {industry_name: [variable_names]} 或 None（如果失败）
+        """
+        if not result.selected_variables:
+            logger.warning("缺少选定变量，无法计算R²")
+            return None
+
+        industry_groups = {}
+        for var in result.selected_variables:
+            if var not in var_industry_map:
+                continue
+            industry = var_industry_map[var]
+            if industry not in industry_groups:
+                industry_groups[industry] = []
+            industry_groups[industry].append(var)
+
+        if not industry_groups:
+            logger.warning("没有有效的行业分组")
+            return None
+
+        logger.info(f"识别到 {len(industry_groups)} 个行业: {list(industry_groups.keys())}")
+        return industry_groups
+
+    def _compute_industry_r2_scores(
+        self,
+        industry_groups: Dict[str, list],
+        factors_train: pd.DataFrame,
+        train_data: pd.DataFrame
+    ) -> Tuple[Optional[pd.Series], Optional[Dict]]:
+        """
+        计算每个行业的R²得分
+
+        Args:
+            industry_groups: 行业分组
+            factors_train: 训练期因子数据
+            train_data: 训练期变量数据
+
+        Returns:
+            tuple: (industry_r2_series, factor_industry_r2_dict)
+        """
+        industry_r2_results = {}
+        factor_industry_r2_results = {f'Factor_{i+1}': {} for i in range(len(factors_train.columns))}
+
+        for industry, variables in industry_groups.items():
+            industry_vars = [v for v in variables if v in train_data.columns]
+            if not industry_vars:
+                logger.warning(f"行业 '{industry}' 没有有效变量")
+                continue
+
+            industry_data = train_data[industry_vars].dropna(how='all')
+
+            common_index = factors_train.index.intersection(industry_data.index)
+            if len(common_index) == 0:
+                logger.warning(f"行业 '{industry}' 的数据无法与因子对齐")
+                continue
+
+            X = factors_train.loc[common_index].values
+            Y = industry_data.loc[common_index].values
+
+            valid_mask = ~np.isnan(Y).any(axis=1) & ~np.isnan(X).any(axis=1)
+            X_clean = X[valid_mask]
+            Y_clean = Y[valid_mask]
+
+            if len(X_clean) < 10:
+                logger.warning(f"行业 '{industry}' 有效样本太少: {len(X_clean)}")
+                continue
+
+            try:
+                model = LinearRegression()
+                model.fit(X_clean, Y_clean)
+                Y_pred = model.predict(X_clean)
+
+                rss = np.sum((Y_clean - Y_pred) ** 2)
+                tss = np.sum((Y_clean - np.mean(Y_clean, axis=0)) ** 2)
+
+                if tss > 0:
+                    r2_overall = 1 - rss / tss
+                    industry_r2_results[industry] = float(r2_overall)
+                    logger.debug(f"行业 '{industry}' 整体R²: {r2_overall:.4f}")
+                else:
+                    industry_r2_results[industry] = 0.0
+            except Exception as e:
+                logger.warning(f"计算行业 '{industry}' 整体R²失败: {e}")
+                continue
+
+            for i, factor_name in enumerate(factors_train.columns):
+                try:
+                    X_single = X_clean[:, i:i+1]
+                    model_single = LinearRegression()
+                    model_single.fit(X_single, Y_clean)
+                    Y_pred_single = model_single.predict(X_single)
+
+                    rss_single = np.sum((Y_clean - Y_pred_single) ** 2)
+
+                    if tss > 0:
+                        r2_single = 1 - rss_single / tss
+                        factor_industry_r2_results[factor_name][industry] = float(r2_single)
+                        logger.debug(f"行业 '{industry}' {factor_name} R²: {r2_single:.4f}")
+                    else:
+                        factor_industry_r2_results[factor_name][industry] = 0.0
+                except Exception as e:
+                    logger.warning(f"计算行业 '{industry}' {factor_name} R²失败: {e}")
+                    continue
+
+        if not industry_r2_results:
+            logger.warning("没有成功计算任何行业的R²")
+            return None, None
+
+        industry_r2_series = pd.Series(industry_r2_results)
+        industry_r2_series.name = "Industry R2 (All Factors)"
+
+        logger.info(f"成功计算 {len(industry_r2_results)} 个行业的R²分析")
+        return industry_r2_series, factor_industry_r2_results
+
     def _calculate_industry_r2(
         self,
         result,
@@ -666,158 +872,17 @@ class TrainingResultExporter:
                 - factor_industry_r2_dict: dict，可转换为DataFrame，行业×因子的R²矩阵
         """
         try:
-            # 1. 检查必要数据
-            if not result.model_result or not hasattr(result.model_result, 'factors'):
-                logger.warning("缺少模型结果或因子数据，无法计算R²")
+            data_result = self._prepare_r2_calculation_data(result, config)
+            if data_result is None:
                 return None, None
 
-            if not result.selected_variables:
-                logger.warning("缺少选定变量，无法计算R²")
+            factors_train, train_data = data_result
+
+            industry_groups = self._group_variables_by_industry(result, var_industry_map)
+            if industry_groups is None:
                 return None, None
 
-            # 2. 提取因子时间序列 (n_timesteps, n_factors)
-            factors_data = result.model_result.factors
-            if isinstance(factors_data, np.ndarray):
-                if factors_data.ndim == 2:
-                    # factors_data shape: (n_factors, n_timesteps) -> 转置
-                    factors_df = pd.DataFrame(
-                        factors_data.T,
-                        columns=[f'Factor_{i+1}' for i in range(factors_data.shape[0])]
-                    )
-                else:
-                    logger.warning(f"因子数据维度不正确: {factors_data.ndim}")
-                    return None, None
-            elif isinstance(factors_data, pd.DataFrame):
-                factors_df = factors_data
-            else:
-                logger.warning(f"因子数据类型不支持: {type(factors_data)}")
-                return None, None
-
-            # 3. 读取变量数据
-            data = self._read_data_file(config.data_path)
-
-            # 确保索引是DatetimeIndex
-            if not isinstance(data.index, pd.DatetimeIndex):
-                try:
-                    data.index = pd.to_datetime(data.index)
-                except Exception:
-                    logger.warning("无法将数据索引转换为DatetimeIndex")
-                    return None, None
-
-            # 4. 对齐因子和变量数据
-            # 因子应该与完整数据的索引对齐（因子是从完整数据中提取的）
-            if len(factors_df) != len(data):
-                logger.warning(f"因子数据长度({len(factors_df)})与完整数据长度({len(data)})不匹配")
-                # 尝试对齐
-                min_len = min(len(factors_df), len(data))
-                factors_df = factors_df.iloc[:min_len].copy()
-                data = data.iloc[:min_len].copy()
-
-            # 赋予因子DataFrame正确的日期索引
-            factors_df.index = data.index
-
-            # 5. 截取训练集期间的数据
-            train_end = pd.to_datetime(config.train_end) if hasattr(config, 'train_end') else data.index.max()
-            train_data = data[data.index <= train_end]
-            factors_train = factors_df[factors_df.index <= train_end]
-
-            # 5. 按行业分组变量
-            industry_groups = {}
-            for var in result.selected_variables:
-                if var not in var_industry_map:
-                    continue
-                industry = var_industry_map[var]
-                if industry not in industry_groups:
-                    industry_groups[industry] = []
-                industry_groups[industry].append(var)
-
-            if not industry_groups:
-                logger.warning("没有有效的行业分组")
-                return None, None
-
-            logger.info(f"识别到 {len(industry_groups)} 个行业: {list(industry_groups.keys())}")
-
-            # 6. 计算每个行业的R²
-            industry_r2_results = {}
-            factor_industry_r2_results = {f'Factor_{i+1}': {} for i in range(len(factors_train.columns))}
-
-            for industry, variables in industry_groups.items():
-                # 提取该行业的所有变量数据
-                industry_vars = [v for v in variables if v in train_data.columns]
-                if not industry_vars:
-                    logger.warning(f"行业 '{industry}' 没有有效变量")
-                    continue
-
-                industry_data = train_data[industry_vars].dropna(how='all')
-
-                # 对齐因子和行业数据
-                common_index = factors_train.index.intersection(industry_data.index)
-                if len(common_index) == 0:
-                    logger.warning(f"行业 '{industry}' 的数据无法与因子对齐")
-                    continue
-
-                X = factors_train.loc[common_index].values  # (n_samples, n_factors)
-                Y = industry_data.loc[common_index].values  # (n_samples, n_vars)
-
-                # 移除含有NaN的样本
-                valid_mask = ~np.isnan(Y).any(axis=1) & ~np.isnan(X).any(axis=1)
-                X_clean = X[valid_mask]
-                Y_clean = Y[valid_mask]
-
-                if len(X_clean) < 10:
-                    logger.warning(f"行业 '{industry}' 有效样本太少: {len(X_clean)}")
-                    continue
-
-                # 6.1 计算整体R² (所有因子)
-                try:
-                    model = LinearRegression()
-                    model.fit(X_clean, Y_clean)
-                    Y_pred = model.predict(X_clean)
-
-                    # Pooled R²: 1 - sum(RSS) / sum(TSS)
-                    rss = np.sum((Y_clean - Y_pred) ** 2)
-                    tss = np.sum((Y_clean - np.mean(Y_clean, axis=0)) ** 2)
-
-                    if tss > 0:
-                        r2_overall = 1 - rss / tss
-                        industry_r2_results[industry] = float(r2_overall)
-                        logger.debug(f"行业 '{industry}' 整体R²: {r2_overall:.4f}")
-                    else:
-                        industry_r2_results[industry] = 0.0
-                except Exception as e:
-                    logger.warning(f"计算行业 '{industry}' 整体R²失败: {e}")
-                    continue
-
-                # 6.2 计算每个因子的R²
-                for i, factor_name in enumerate(factors_train.columns):
-                    try:
-                        X_single = X_clean[:, i:i+1]  # (n_samples, 1)
-                        model_single = LinearRegression()
-                        model_single.fit(X_single, Y_clean)
-                        Y_pred_single = model_single.predict(X_single)
-
-                        rss_single = np.sum((Y_clean - Y_pred_single) ** 2)
-
-                        if tss > 0:
-                            r2_single = 1 - rss_single / tss
-                            factor_industry_r2_results[factor_name][industry] = float(r2_single)
-                            logger.debug(f"行业 '{industry}' {factor_name} R²: {r2_single:.4f}")
-                        else:
-                            factor_industry_r2_results[factor_name][industry] = 0.0
-                    except Exception as e:
-                        logger.warning(f"计算行业 '{industry}' {factor_name} R²失败: {e}")
-                        continue
-
-            # 7. 转换为所需格式
-            if not industry_r2_results:
-                logger.warning("没有成功计算任何行业的R²")
-                return None, None
-
-            industry_r2_series = pd.Series(industry_r2_results)
-            industry_r2_series.name = "Industry R2 (All Factors)"
-
-            logger.info(f"成功计算 {len(industry_r2_results)} 个行业的R²分析")
-            return industry_r2_series, factor_industry_r2_results
+            return self._compute_industry_r2_scores(industry_groups, factors_train, train_data)
 
         except Exception as e:
             logger.error(f"计算行业R²失败: {e}", exc_info=True)
