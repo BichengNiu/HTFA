@@ -366,7 +366,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                 st_obj.markdown("---")
 
                 # 添加第2个图的标题
-                st_obj.markdown("#### 出口依赖分组")
+                st_obj.markdown("#### 分出口依赖行业拉动率")
 
                 # Second chart - Export dependency groups (contribution mode only)
                 export_vars = [col for col in weighted_df.columns if col.startswith('出口依赖_')]
@@ -376,7 +376,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                     if contribution_export is not None:
                         chart2_data = contribution_export
                         chart2_vars = [col for col in contribution_export.columns if col.startswith('出口依赖_')]
-                        y_axis_title_2 = "对总体工业增加值的拉动率 (百分点)"
+                        y_axis_title_2 = "%"
                     else:
                         st_obj.warning("拉动率数据未计算，无法显示图表")
                         chart2_data = None
@@ -427,7 +427,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                 st_obj.markdown("---")
 
                 # 添加第3个图的标题
-                st_obj.markdown("#### 上中下游分组")
+                st_obj.markdown("#### 分上中下游行业拉动率")
 
                 # Third chart - Upstream/downstream groups (contribution mode only)
                 stream_vars = [col for col in weighted_df.columns if col.startswith('上中下游_')]
@@ -455,7 +455,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                         chart3_data = contribution_stream
                         chart3_vars = [col for col in contribution_stream.columns if col.startswith('上中下游_')]
                         chart3_vars = sorted(chart3_vars, key=get_sort_key)
-                        y_axis_title_3 = "对总体工业增加值的拉动率 (百分点)"
+                        y_axis_title_3 = "%"
                     else:
                         st_obj.warning("拉动率数据未计算，无法显示图表")
                         chart3_data = None
