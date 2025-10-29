@@ -1,21 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(find:*)",
-      "Bash(mkdir:*)",
-      "Bash(node:*)",
-      "Bash(npm --version)",
-      "Bash(git ls-tree:*)",
-      "Bash(awk:*)",
-      "Bash(dir:*)",
-      "Read(//c/Users/Administrator/Desktop/**)",
-      "Bash(python:*)",
-      "Bash(cat:*)",
-      "Bash(python3:*)",
-      "Bash(for file in E:同步文件夹HTFAdashboardmodelsDFMtraincore*.py E:同步文件夹HTFAdashboardmodelsDFMtraintraining*.py E:同步文件夹HTFAdashboardmodelsDFMtrainevaluation*.py E:同步文件夹HTFAdashboardmodelsDFMtrainselection*.py E:同步文件夹HTFAdashboardmodelsDFMtrainexport*.py)",
-      "Bash(do:*)",
-      "Bash(wc:*)",
-      "Bash(done)"
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []

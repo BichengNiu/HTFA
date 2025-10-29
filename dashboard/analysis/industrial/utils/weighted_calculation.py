@@ -48,7 +48,13 @@ def calculate_weighted_sum_for_group(
     weights_mapping: Dict[str, pd.Series]
 ) -> pd.Series:
     """
-    计算一个分组的加权和（向量化优化）
+    计算一个分组的加权求和（拉动率）（向量化优化）
+
+    加权求和 = Σ(增速_i × 权重_i)
+    这表示分组对总体工业增加值的拉动率
+
+    注意：这里计算的是拉动率，不是加权平均增速
+    拉动率可以跨分组相加，拉动率总和 ≈ 总体工业增加值增速
 
     Args:
         df_macro: 宏观数据DataFrame
@@ -56,7 +62,7 @@ def calculate_weighted_sum_for_group(
         weights_mapping: 指标到权重Series的映射 {指标名: 权重Series}
 
     Returns:
-        加权和Series
+        拉动率Series
     """
     if not indicators:
         return pd.Series(dtype=float)

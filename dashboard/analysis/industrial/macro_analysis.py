@@ -40,6 +40,10 @@ from dashboard.analysis.industrial.utils import (
     create_time_series_chart
 )
 
+# 导入拉动率计算模块
+from dashboard.analysis.industrial.utils.contribution_calculator import calculate_all_contributions
+from dashboard.ui.utils.debug_helpers import debug_log
+
 def get_monitoring_state(key: str, default: Any = None):
     """获取监测分析状态"""
     unified_manager = get_unified_manager()
@@ -289,8 +293,9 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
             cached_data_hash = get_monitoring_state('cached_data_hash')
 
             # Create a simple hash of the input data to detect changes
+            # 注意：2025-10-30修改为拉动率显示，增加版本号以清理旧缓存
             import hashlib
-            current_data_str = f"{df.shape}_{df_weights.shape}_{len(target_columns)}"
+            current_data_str = f"v4_contrib_fixed_{df.shape}_{df_weights.shape}_{len(target_columns)}"
             current_data_hash = hashlib.md5(current_data_str.encode()).hexdigest()
 
             # Only recalculate if data has changed or cache is empty
@@ -302,6 +307,56 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                 # Cache the results
                 set_monitoring_state('cached_weighted_df', weighted_df)
                 set_monitoring_state('cached_data_hash', current_data_hash)
+
+                # 计算拉动率
+                debug_log("开始计算拉动率", "INFO")
+                try:
+                    # 获取总体增速数据并合并
+                    from dashboard.analysis.industrial.industrial_analysis import get_industrial_state
+                    uploaded_file = get_industrial_state('macro.uploaded_file')
+
+                    if uploaded_file is not None:
+                        df_overall = load_overall_industrial_data(uploaded_file)
+                        if df_overall is not None and '规模以上工业增加值:当月同比' in df_overall.columns:
+                            # 合并总体增速到分行业数据
+                            total_growth_series = df_overall['规模以上工业增加值:当月同比']
+                            df_with_total = pd.concat([total_growth_series, df], axis=1)
+                            df_with_total = df_with_total.dropna(how='all')
+
+                            # 过滤2012年及以后
+                            df_macro_filtered = filter_data_from_2012(df_with_total)
+
+                            # 计算拉动率
+                            contribution_results = calculate_all_contributions(
+                                df_macro_filtered, df_weights
+                            )
+
+                            # 缓存拉动率结果
+                            set_monitoring_state('cached_contribution_export', contribution_results['export_groups'])
+                            set_monitoring_state('cached_contribution_stream', contribution_results['stream_groups'])
+                            set_monitoring_state('cached_contribution_individual', contribution_results['individual'])
+                            set_monitoring_state('cached_total_growth', contribution_results['total_growth'])
+
+                            debug_log(
+                                f"拉动率计算完成，验证结果: {contribution_results['validation']['passed']}",
+                                "INFO"
+                            )
+                        else:
+                            debug_log("总体增速数据加载失败", "WARNING")
+                            set_monitoring_state('cached_contribution_export', None)
+                            set_monitoring_state('cached_contribution_stream', None)
+                    else:
+                        debug_log("未找到上传文件，无法加载总体增速", "WARNING")
+                        set_monitoring_state('cached_contribution_export', None)
+                        set_monitoring_state('cached_contribution_stream', None)
+
+                except Exception as e:
+                    debug_log(f"拉动率计算失败: {e}", "ERROR")
+                    import traceback
+                    debug_log(f"错误详情: {traceback.format_exc()}", "ERROR")
+                    # 即使拉动率计算失败，也不影响其他功能
+                    set_monitoring_state('cached_contribution_export', None)
+                    set_monitoring_state('cached_contribution_stream', None)
             else:
                 # Use cached results
                 weighted_df = cached_weighted_df
@@ -313,50 +368,60 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                 # 添加第2个图的标题
                 st_obj.markdown("#### 出口依赖分组")
 
-                # Second chart - Export dependency groups with independent time selector
+                # Second chart - Export dependency groups (contribution mode only)
                 export_vars = [col for col in weighted_df.columns if col.startswith('出口依赖_')]
                 if export_vars:
+                    # 直接使用拉动率数据
+                    contribution_export = get_monitoring_state('cached_contribution_export')
+                    if contribution_export is not None:
+                        chart2_data = contribution_export
+                        chart2_vars = [col for col in contribution_export.columns if col.startswith('出口依赖_')]
+                        y_axis_title_2 = "对总体工业增加值的拉动率 (百分点)"
+                    else:
+                        st_obj.warning("拉动率数据未计算，无法显示图表")
+                        chart2_data = None
+                        chart2_vars = []
 
+                    if chart2_data is not None and chart2_vars:
+                        # 定义图表创建函数 - 使用统一的图表创建器
+                        def create_chart2(df, variables, time_range, custom_start_date, custom_end_date):
+                            return create_time_series_chart(
+                                df=df,
+                                variables=variables,
+                                title="",
+                                time_range=time_range,
+                                custom_start_date=custom_start_date,
+                                custom_end_date=custom_end_date,
+                                y_axis_title=y_axis_title_2,
+                                height=350,
+                                bottom_margin=150
+                            )
 
-                    # 定义图表创建函数 - 使用统一的图表创建器
-                    def create_chart2(df, variables, time_range, custom_start_date, custom_end_date):
-                        return create_time_series_chart(
-                            df=df,
-                            variables=variables,
-                            title="",
-                            time_range=time_range,
-                            custom_start_date=custom_start_date,
-                            custom_end_date=custom_end_date,
-                            y_axis_title="加权工业增加值同比增速 (%)",
-                            height=350,
-                            bottom_margin=150
-                        )
-
-                    # 使用统一Fragment组件
-                    current_time_range_2, custom_start_2, custom_end_2 = create_chart_with_time_selector_fragment(
-                        st_obj=st_obj,
-                        chart_id="macro_chart2",
-                        state_namespace="monitoring.industrial.macro",
-                        chart_title=None,
-                        chart_creator_func=create_chart2,
-                        chart_data=weighted_df,
-                        chart_variables=export_vars,
-                        get_state_func=get_monitoring_state,
-                        set_state_func=set_monitoring_state
-                    )
-
-                    # 数据下载功能 - 使用统一下载工具
-                    filtered_df2 = filter_data_by_time_range(weighted_df[export_vars], current_time_range_2, custom_start_2, custom_end_2)
-                    if not filtered_df2.empty:
-                        export_groups, _ = create_grouping_mappings(df_weights)
-                        annotation_df = prepare_grouping_annotation_data(df_weights, export_groups, '出口依赖')
-                        create_download_with_annotation(
+                        # 使用统一Fragment组件
+                        current_time_range_2, custom_start_2, custom_end_2 = create_chart_with_time_selector_fragment(
                             st_obj=st_obj,
-                            data=filtered_df2,
-                            file_name=f"出口依赖分组_{current_time_range_2}",
-                            annotation_data=annotation_df,
-                            button_key="download_chart2"
+                            chart_id="macro_chart2",
+                            state_namespace="monitoring.industrial.macro",
+                            chart_title=None,
+                            chart_creator_func=create_chart2,
+                            chart_data=chart2_data,
+                            chart_variables=chart2_vars,
+                            get_state_func=get_monitoring_state,
+                            set_state_func=set_monitoring_state
                         )
+
+                        # 数据下载功能 - 使用统一下载工具
+                        filtered_df2 = filter_data_by_time_range(chart2_data[chart2_vars], current_time_range_2, custom_start_2, custom_end_2)
+                        if not filtered_df2.empty:
+                            export_groups, _ = create_grouping_mappings(df_weights)
+                            annotation_df = prepare_grouping_annotation_data(df_weights, export_groups, '出口依赖')
+                            create_download_with_annotation(
+                                st_obj=st_obj,
+                                data=filtered_df2,
+                                file_name=f"出口依赖分组_拉动率_{current_time_range_2}",
+                                annotation_data=annotation_df,
+                                button_key="download_chart2"
+                            )
 
                 # 添加横线分隔符
                 st_obj.markdown("---")
@@ -364,7 +429,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                 # 添加第3个图的标题
                 st_obj.markdown("#### 上中下游分组")
 
-                # Third chart - Upstream/downstream groups with independent time selector
+                # Third chart - Upstream/downstream groups (contribution mode only)
                 stream_vars = [col for col in weighted_df.columns if col.startswith('上中下游_')]
 
                 # 按照指定顺序排序图例：上游XX、中游XX、下游XX
@@ -384,45 +449,58 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
 
                 stream_vars = sorted(stream_vars, key=get_sort_key)
                 if stream_vars:
-                    # 定义图表创建函数 - 使用统一的图表创建器
-                    def create_chart3(df, variables, time_range, custom_start_date, custom_end_date):
-                        return create_time_series_chart(
-                            df=df,
-                            variables=variables,
-                            title="",
-                            time_range=time_range,
-                            custom_start_date=custom_start_date,
-                            custom_end_date=custom_end_date,
-                            y_axis_title="加权工业增加值同比增速 (%)",
-                            height=350,
-                            bottom_margin=150
-                        )
+                    # 直接使用拉动率数据
+                    contribution_stream = get_monitoring_state('cached_contribution_stream')
+                    if contribution_stream is not None:
+                        chart3_data = contribution_stream
+                        chart3_vars = [col for col in contribution_stream.columns if col.startswith('上中下游_')]
+                        chart3_vars = sorted(chart3_vars, key=get_sort_key)
+                        y_axis_title_3 = "对总体工业增加值的拉动率 (百分点)"
+                    else:
+                        st_obj.warning("拉动率数据未计算，无法显示图表")
+                        chart3_data = None
+                        chart3_vars = []
 
-                    # 使用统一Fragment组件
-                    current_time_range_3, custom_start_3, custom_end_3 = create_chart_with_time_selector_fragment(
-                        st_obj=st_obj,
-                        chart_id="macro_chart3",
-                        state_namespace="monitoring.industrial.macro",
-                        chart_title=None,
-                        chart_creator_func=create_chart3,
-                        chart_data=weighted_df,
-                        chart_variables=stream_vars,
-                        get_state_func=get_monitoring_state,
-                        set_state_func=set_monitoring_state
-                    )
+                    if chart3_data is not None and chart3_vars:
+                        # 定义图表创建函数 - 使用统一的图表创建器
+                        def create_chart3(df, variables, time_range, custom_start_date, custom_end_date):
+                            return create_time_series_chart(
+                                df=df,
+                                variables=variables,
+                                title="",
+                                time_range=time_range,
+                                custom_start_date=custom_start_date,
+                                custom_end_date=custom_end_date,
+                                y_axis_title=y_axis_title_3,
+                                height=350,
+                                bottom_margin=150
+                            )
 
-                    # 数据下载功能 - 使用统一下载工具
-                    filtered_df3 = filter_data_by_time_range(weighted_df[stream_vars], current_time_range_3, custom_start_3, custom_end_3)
-                    if not filtered_df3.empty:
-                        _, stream_groups = create_grouping_mappings(df_weights)
-                        annotation_df = prepare_grouping_annotation_data(df_weights, stream_groups, '上中下游')
-                        create_download_with_annotation(
+                        # 使用统一Fragment组件
+                        current_time_range_3, custom_start_3, custom_end_3 = create_chart_with_time_selector_fragment(
                             st_obj=st_obj,
-                            data=filtered_df3,
-                            file_name=f"上中下游分组_{current_time_range_3}",
-                            annotation_data=annotation_df,
-                            button_key="download_chart3"
+                            chart_id="macro_chart3",
+                            state_namespace="monitoring.industrial.macro",
+                            chart_title=None,
+                            chart_creator_func=create_chart3,
+                            chart_data=chart3_data,
+                            chart_variables=chart3_vars,
+                            get_state_func=get_monitoring_state,
+                            set_state_func=set_monitoring_state
                         )
+
+                        # 数据下载功能 - 使用统一下载工具
+                        filtered_df3 = filter_data_by_time_range(chart3_data[chart3_vars], current_time_range_3, custom_start_3, custom_end_3)
+                        if not filtered_df3.empty:
+                            _, stream_groups = create_grouping_mappings(df_weights)
+                            annotation_df = prepare_grouping_annotation_data(df_weights, stream_groups, '上中下游')
+                            create_download_with_annotation(
+                                st_obj=st_obj,
+                                data=filtered_df3,
+                                file_name=f"上中下游分组_拉动率_{current_time_range_3}",
+                                annotation_data=annotation_df,
+                                button_key="download_chart3"
+                            )
             else:
                 # 使用简化的验证逻辑，提供简洁的错误信息
                 is_valid, error_message, debug_info = validate_data_format(df, df_weights, target_columns)
