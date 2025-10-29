@@ -394,7 +394,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                                 custom_end_date=custom_end_date,
                                 y_axis_title=y_axis_title_2,
                                 height=350,
-                                bottom_margin=150
+                                bottom_margin=80
                             )
 
                         # 使用统一Fragment组件
@@ -473,7 +473,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
                                 custom_end_date=custom_end_date,
                                 y_axis_title=y_axis_title_3,
                                 height=350,
-                                bottom_margin=150
+                                bottom_margin=80
                             )
 
                         # 使用统一Fragment组件
