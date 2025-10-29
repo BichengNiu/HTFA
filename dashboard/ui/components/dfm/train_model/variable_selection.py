@@ -14,6 +14,7 @@ from collections import defaultdict
 
 from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
 from dashboard.core import get_global_dfm_manager
+from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 
 
 logger = logging.getLogger(__name__)
@@ -129,18 +130,31 @@ class VariableSelectionComponent(DFMComponent):
             industry_to_vars = self._get_industry_mapping_from_state()
             all_industries = list(industry_to_vars.keys()) if industry_to_vars else []
 
+            # 2.5. 获取DFM变量选择配置（从Excel的"DFM变量"列读取）
+            dfm_default_map = self._get_state('dfm_default_variables_map', {})
+            print(f"[DEBUG] 从DFM变量列读取配置: {len(dfm_default_map)}个标记为'是'的变量")
+            if not dfm_default_map:
+                print(f"[DEBUG] DFM变量列为空或全部为非'是'值，将不选择任何变量")
+
             # 3. 预测指标选择 - 直接显示所有行业的指标供用户选择
             selected_indicators = self._render_indicator_selection_legacy(
-                st_obj, all_industries, industry_to_vars
+                st_obj, all_industries, industry_to_vars, dfm_default_map
             )
 
-            # 4. 从选择的指标自动推断实际使用的行业
-            actual_industries = []
-            for industry, indicators in industry_to_vars.items():
-                if any(ind in selected_indicators for ind in indicators):
-                    actual_industries.append(industry)
+            # 4. 从选择的指标直接统计涉及的唯一行业数
+            # 获取变量到行业的映射
+            var_industry_map = self._get_state('dfm_industry_map_obj', {})
 
-            selected_industries = actual_industries
+            # 统计选中指标对应的唯一行业
+            actual_industries_set = set()
+            from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+            for indicator in selected_indicators:
+                indicator_norm = normalize_text(indicator)
+                if indicator_norm in var_industry_map:
+                    industry = var_industry_map[indicator_norm]
+                    actual_industries_set.add(industry)
+
+            selected_industries = sorted(list(actual_industries_set))
 
             # 5. 显示汇总信息 - 与老代码第1108行完全一致
             self._render_selection_summary_legacy(st_obj, selected_target_var,
@@ -752,8 +766,11 @@ class VariableSelectionComponent(DFMComponent):
         return selected_industries
 
     def _render_indicator_selection_legacy(self, st_obj, selected_industries: List[str],
-                                         industry_to_vars: Dict[str, List[str]]) -> List[str]:
+                                         industry_to_vars: Dict[str, List[str]],
+                                         dfm_default_map: Dict[str, str] = None) -> List[str]:
         """渲染预测指标选择 - 与老代码第1032-1104行完全一致"""
+        if dfm_default_map is None:
+            dfm_default_map = {}
         st_obj.markdown("**选择预测指标**")
 
         # 初始化指标选择状态
@@ -794,16 +811,27 @@ class VariableSelectionComponent(DFMComponent):
                 if excluded_count > 0:
                     st_obj.text(f"  已自动排除目标变量 '{current_target_var}' (共排除 {excluded_count} 个)")
 
-                # 默认选中该行业下的所有指标
+                # 从状态管理器读取已选指标，或使用DFM默认选择
                 current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
-                default_selection_for_industry = current_selection.get(
-                    industry_name,
-                    indicators_for_this_industry # 默认全选
-                )
+                default_selection_for_industry = current_selection.get(industry_name, None)
+
+                # 如果状态管理器中没有选择，使用DFM变量列配置
+                if default_selection_for_industry is None:
+                    if dfm_default_map:
+                        # dfm_default_map中已经只包含标记为"是"的变量，直接筛选该行业的指标
+                        dfm_selected_indicators = [
+                            indicator for indicator in indicators_for_this_industry
+                            if normalize_text(indicator) in dfm_default_map
+                        ]
+                        default_selection_for_industry = dfm_selected_indicators
+                        print(f"[DEBUG] {industry_name}: 根据DFM变量列配置选择了{len(dfm_selected_indicators)}个指标")
+                    else:
+                        # DFM变量列全为空，全不选
+                        default_selection_for_industry = []
+                        print(f"[DEBUG] {industry_name}: DFM变量列为空，全不选")
+
                 # 确保默认值是实际可选列表的子集
                 valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
-                if not valid_default and indicators_for_this_industry: # 如果之前存的默认值无效了，且当前有可选指标，则全选
-                    valid_default = indicators_for_this_industry
 
                 # 取消全选复选框，使用key确保状态追踪
                 deselect_all_checked = st_obj.checkbox(

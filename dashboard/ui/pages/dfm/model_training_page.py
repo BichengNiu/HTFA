@@ -796,54 +796,86 @@ def render_dfm_train_model_tab(st_instance):
     data_file = get_dfm_state('train_uploaded_data_file', None)
     industry_map_file = get_dfm_state('train_uploaded_industry_map_file', None)
 
+    # 生成文件标识（用于检测文件变更）
+    def get_file_id(file_obj):
+        if file_obj is None:
+            return None
+        file_obj.seek(0, 2)  # 移动到文件末尾
+        size = file_obj.tell()
+        file_obj.seek(0)  # 重置到开头
+        name = getattr(file_obj, 'name', 'unknown')
+        return f"{name}_{size}"
+
+    # 加载预处理数据（带缓存）
     input_df = None
     if data_file is not None:
-        try:
-            data_file.seek(0)
-            input_df = pd.read_csv(data_file, index_col=0, parse_dates=True)
-            # 保存到当前命名空间（仅用于本tab）
-            set_dfm_state('dfm_prepared_data_df', input_df)
-            print(f"[模型训练] 成功加载预处理数据: {input_df.shape}")
-        except Exception as e:
-            st_instance.error(f"加载预处理数据失败: {e}")
-            input_df = None
+        current_data_file_id = get_file_id(data_file)
+        cached_data_file_id = get_dfm_state('cached_data_file_id', None)
+        cached_df = get_dfm_state('dfm_prepared_data_df', None)
 
-    # 加载行业映射
+        # 检查缓存是否有效
+        if cached_df is not None and current_data_file_id == cached_data_file_id:
+            input_df = cached_df
+            print(f"[模型训练] 使用缓存的预处理数据: {input_df.shape}")
+        else:
+            # 缓存无效，重新加载
+            try:
+                data_file.seek(0)
+                input_df = pd.read_csv(data_file, index_col=0, parse_dates=True)
+                set_dfm_state('dfm_prepared_data_df', input_df)
+                set_dfm_state('cached_data_file_id', current_data_file_id)
+                print(f"[模型训练] 重新加载预处理数据: {input_df.shape}")
+            except Exception as e:
+                st_instance.error(f"加载预处理数据失败: {e}")
+                input_df = None
+
+    # 加载行业映射（带缓存）
     var_industry_map = {}
     if industry_map_file is not None:
-        try:
-            import unicodedata as udata  # 确保在当前作用域可用
-            industry_map_file.seek(0)
-            industry_map_df = pd.read_csv(industry_map_file)
-            if 'Indicator' in industry_map_df.columns and 'Industry' in industry_map_df.columns:
-                # 转换为标准化键名（小写）
-                var_industry_map = {
-                    udata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['Industry'])
-                    if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip()
-                }
-                # 保存到当前命名空间（仅用于本tab）
-                set_dfm_state('dfm_industry_map_obj', var_industry_map)
-                print(f"[模型训练] 成功加载行业映射: {len(var_industry_map)} 个变量")
+        current_map_file_id = get_file_id(industry_map_file)
+        cached_map_file_id = get_dfm_state('cached_map_file_id', None)
+        cached_industry_map = get_dfm_state('dfm_industry_map_obj', None)
+        cached_dfm_default_map = get_dfm_state('dfm_default_variables_map', None)
 
-                # 读取DFM默认选择列（如果存在）
-                if 'DFM_Default' in industry_map_df.columns:
-                    var_dfm_default_map = {
+        # 检查缓存是否有效
+        if cached_industry_map is not None and current_map_file_id == cached_map_file_id:
+            var_industry_map = cached_industry_map
+            print(f"[模型训练] 使用缓存的行业映射: {len(var_industry_map)} 个变量")
+            if cached_dfm_default_map is not None:
+                print(f"[模型训练] 使用缓存的DFM变量配置: {len(cached_dfm_default_map)} 个标记为'是'的变量")
+        else:
+            # 缓存无效，重新加载
+            try:
+                import unicodedata as udata
+                industry_map_file.seek(0)
+                industry_map_df = pd.read_csv(industry_map_file)
+                if 'Indicator' in industry_map_df.columns and 'Industry' in industry_map_df.columns:
+                    var_industry_map = {
                         udata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                        for k, v in zip(industry_map_df['Indicator'], industry_map_df['DFM_Default'])
+                        for k, v in zip(industry_map_df['Indicator'], industry_map_df['Industry'])
                         if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip()
                     }
-                    set_dfm_state('dfm_default_variables_map', var_dfm_default_map)
-                    dfm_yes_count = sum(1 for v in var_dfm_default_map.values() if v == '是')
-                    print(f"[模型训练] 成功加载DFM默认选择: {len(var_dfm_default_map)} 个变量，其中{dfm_yes_count}个标记为'是'")
+                    set_dfm_state('dfm_industry_map_obj', var_industry_map)
+                    set_dfm_state('cached_map_file_id', current_map_file_id)
+                    print(f"[模型训练] 重新加载行业映射: {len(var_industry_map)} 个变量")
+
+                    # 读取DFM变量列（如果存在），只保留标记为"是"的条目
+                    if 'DFM_Default' in industry_map_df.columns:
+                        var_dfm_default_map = {
+                            udata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                            for k, v in zip(industry_map_df['Indicator'], industry_map_df['DFM_Default'])
+                            if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                        }
+                        set_dfm_state('dfm_default_variables_map', var_dfm_default_map)
+                        print(f"[模型训练] 从CSV文件加载了 {len(var_dfm_default_map)} 个标记为'是'的变量")
+                    else:
+                        print(f"[模型训练] 映射文件未包含DFM_Default列（旧格式），跳过DFM变量配置加载")
                 else:
-                    print(f"[模型训练] 映射文件未包含DFM_Default列（旧格式），跳过DFM默认选择加载")
-            else:
-                st_instance.error("映射文件格式错误：必须包含 'Indicator' 和 'Industry' 列")
-        except Exception as e:
-            st_instance.error(f"加载映射文件失败: {e}")
-            import traceback
-            st_instance.code(traceback.format_exc(), language="python")
+                    st_instance.error("映射文件格式错误：必须包含 'Indicator' 和 'Industry' 列")
+            except Exception as e:
+                st_instance.error(f"加载映射文件失败: {e}")
+                import traceback
+                st_instance.code(traceback.format_exc(), language="python")
 
     # 检查文件是否都已上传
     if input_df is None or not var_industry_map:
@@ -1016,12 +1048,12 @@ def render_dfm_train_model_tab(st_instance):
             # 从状态管理器读取已选指标，或使用DFM默认选择
             default_selection_for_industry = current_selection.get(industry_name, None)
 
-            # 如果状态管理器中没有选择，使用DFM默认选择映射
+            # 如果状态管理器中没有选择，使用DFM变量列配置
             if default_selection_for_industry is None:
-                # 从dfm_default_map中筛选该行业中标记为"是"的指标
+                # dfm_default_map中已经只包含标记为"是"的变量，直接筛选该行业的指标
                 dfm_default_indicators = [
                     indicator for indicator in indicators_for_this_industry
-                    if dfm_default_map.get(normalize_text(indicator), '').strip() == '是'
+                    if normalize_text(indicator) in dfm_default_map
                 ]
                 default_selection_for_industry = dfm_default_indicators
 
@@ -1098,6 +1130,14 @@ def render_dfm_train_model_tab(st_instance):
 
         set_dfm_state('dfm_selected_indicators_per_industry', current_selection)
 
+    # 修复：如果循环没有执行（filtered_industries为空），但dfm_selected_indicators_per_industry中有数据
+    # 说明这是旧数据，应该从dfm_selected_indicators_per_industry重建指标列表
+    if len(final_selected_indicators_flat) == 0 and len(current_selected_industries) == 0:
+        saved_selection = get_dfm_state('dfm_selected_indicators_per_industry', {})
+        if saved_selection:
+            for industry, indicators in saved_selection.items():
+                final_selected_indicators_flat.extend(indicators)
+
     # 更新最终的扁平化预测指标列表 (去重)
     final_indicators = sorted(list(set(final_selected_indicators_flat)))
     set_dfm_state('dfm_selected_indicators', final_indicators)
@@ -1124,8 +1164,10 @@ def render_dfm_train_model_tab(st_instance):
     st_instance.markdown("--- ")
     current_target_var = get_dfm_state('dfm_target_variable', None)
     current_selected_indicators = get_dfm_state('dfm_selected_indicators', [])
+    current_selected_industries_for_display = get_dfm_state('dfm_selected_industries', [])
+
     st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
-    st_instance.text(f" - 选定行业数: {len(current_selected_industries)}")
+    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
     st_instance.text(f" - 选定预测指标总数: {len(current_selected_indicators)}")
 
     st_instance.markdown("--- ") # 分隔线，将变量选择与参数配置分开

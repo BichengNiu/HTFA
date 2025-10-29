@@ -387,7 +387,7 @@ class ModelLoader:
             convergence_info['log_likelihood'] = float(self._model.log_likelihood)
 
         # 从元数据中获取性能指标
-        performance_keys = ['revised_is_rmse', 'revised_oos_rmse', 'revised_is_hr', 'revised_oos_hr']
+        performance_keys = ['is_rmse', 'oos_rmse', 'is_hit_rate', 'oos_hit_rate']
         for key in performance_keys:
             if key in self._metadata:
                 convergence_info[key] = float(self._metadata[key])

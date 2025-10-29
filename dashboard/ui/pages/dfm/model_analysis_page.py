@@ -560,12 +560,12 @@ def render_dfm_tab(st):
             n_vars = 'N/A'
             logger.warning("无法获取变量数量，将显示N/A")
 
-    revised_is_hr = metadata.get('revised_is_hr')
-    revised_oos_hr = metadata.get('revised_oos_hr')
-    revised_is_rmse = metadata.get('revised_is_rmse')
-    revised_oos_rmse = metadata.get('revised_oos_rmse')
-    revised_is_mae = metadata.get('revised_is_mae')
-    revised_oos_mae = metadata.get('revised_oos_mae')
+    is_hr = metadata.get('is_hit_rate')
+    oos_hr = metadata.get('oos_hit_rate')
+    is_rmse = metadata.get('is_rmse')
+    oos_rmse = metadata.get('oos_rmse')
+    is_mae = metadata.get('is_mae')
+    oos_mae = metadata.get('oos_mae')
 
     def format_value(val, is_percent=False, precision=2):
         if isinstance(val, (int, float)) and pd.notna(val):
@@ -576,7 +576,8 @@ def render_dfm_tab(st):
             return f"{val:.{precision}f}"
         return 'N/A' if val == 'N/A' or pd.isna(val) else str(val)
 
-    row1_col1, row1_col2 = st.columns(2)
+    # 第一排：4个指标
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
     with row1_col1:
         # 兼容numpy整数类型和Python整数类型
         display_k = int(k_factors) if isinstance(k_factors, (int, np.integer)) else 'N/A'
@@ -585,22 +586,21 @@ def render_dfm_tab(st):
         # 兼容numpy整数类型和Python整数类型
         display_n = int(n_vars) if isinstance(n_vars, (int, np.integer)) else 'N/A'
         st.metric("最终变量数 (N)", display_n)
+    with row1_col3:
+        st.metric("训练期胜率", format_value(is_hr, is_percent=True))
+    with row1_col4:
+        st.metric("验证期胜率", format_value(oos_hr, is_percent=True))
 
-    row2_col1, row2_col2 = st.columns(2)
+    # 第二排：4个指标
+    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
     with row2_col1:
-        st.metric("训练期胜率", format_value(revised_is_hr, is_percent=True))
+        st.metric("样本内 RMSE", format_value(is_rmse))
     with row2_col2:
-        st.metric("验证期胜率", format_value(revised_oos_hr, is_percent=True))
-
-    row3_col1, row3_col2, row3_col3, row3_col4 = st.columns(4)
-    with row3_col1:
-        st.metric("样本内 RMSE", format_value(revised_is_rmse))
-    with row3_col2:
-        st.metric("样本外 RMSE", format_value(revised_oos_rmse))
-    with row3_col3:
-        st.metric("样本内 MAE", format_value(revised_is_mae))
-    with row3_col4:
-        st.metric("样本外 MAE", format_value(revised_oos_mae))
+        st.metric("样本外 RMSE", format_value(oos_rmse))
+    with row2_col3:
+        st.metric("样本内 MAE", format_value(is_mae))
+    with row2_col4:
+        st.metric("样本外 MAE", format_value(oos_mae))
 
     # 修复：直接使用pickle文件中的complete_aligned_table数据
     complete_aligned_table = metadata.get('complete_aligned_table')

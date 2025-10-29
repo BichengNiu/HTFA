@@ -13,7 +13,6 @@ from dashboard.models.DFM.train.core.models import DFMModelResult, EvaluationMet
 from dashboard.models.DFM.train.core.factor_model import DFMModel
 from dashboard.models.DFM.train.core.prediction import generate_target_forecast
 from dashboard.models.DFM.train.evaluation.metrics import (
-    calculate_rmse,
     calculate_next_month_mae,
     calculate_next_month_hit_rate
 )
@@ -202,6 +201,11 @@ def _evaluate_performance(
     """
     计算评估指标（统一的样本内/样本外评估逻辑）
 
+    使用统一的"下月配对"评估方式：
+    - RMSE: m月所有周的nowcast与m+1月target配对
+    - MAE: m月最后周五nowcast与m+1月target配对
+    - Hit Rate: m月最后周五nowcast与m+1月target配对
+
     Args:
         metrics: 要更新的EvaluationMetrics对象
         forecast: 预测值数组
@@ -210,15 +214,21 @@ def _evaluate_performance(
     """
     min_len = min(len(forecast), len(actual))
     forecast_aligned = forecast[:min_len]
-    actual_aligned = actual.values[:min_len]
-
-    rmse = calculate_rmse(actual_aligned, forecast_aligned)
 
     actual_index = pd.to_datetime(actual.index[:min_len])
     pred_series = pd.Series(forecast_aligned, index=actual_index)
-    actual_series = pd.Series(actual_aligned, index=actual_index)
+    actual_series = actual
 
     log_prefix = "IS" if period_type == "is" else "OOS"
+
+    # 使用下月配对RMSE（与变量选择阶段保持一致）
+    from dashboard.models.DFM.train.evaluation.metrics import calculate_next_month_rmse
+    try:
+        rmse = calculate_next_month_rmse(pred_series, actual_series)
+        logger.debug(f"[{log_prefix}] RMSE计算成功: {rmse:.4f}")
+    except Exception as e:
+        logger.error(f"[{log_prefix}] RMSE计算失败: {e}")
+        rmse = np.inf
 
     try:
         mae = calculate_next_month_mae(pred_series, actual_series)

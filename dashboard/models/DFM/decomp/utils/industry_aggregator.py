@@ -99,7 +99,8 @@ class IndustryAggregator:
             'contribution_pct': 0.0
         })
 
-        total_impact = sum(c.impact_value for c in contributions)
+        # 修正：使用绝对值之和作为分母，避免正负抵消导致百分比爆炸
+        total_abs_impact = sum(abs(c.impact_value) for c in contributions)
 
         # 按行业累加统计
         for contrib in contributions:
@@ -113,11 +114,11 @@ class IndustryAggregator:
             elif contrib.impact_value < 0:
                 industry_stats[industry]['negative_impact'] += contrib.impact_value
 
-        # 计算贡献百分比
+        # 计算贡献百分比（使用绝对值进行归一化）
         for industry in industry_stats:
             impact = industry_stats[industry]['impact']
             industry_stats[industry]['contribution_pct'] = (
-                (impact / total_impact * 100) if total_impact != 0 else 0
+                (abs(impact) / total_abs_impact * 100) if total_abs_impact > 0 else 0
             )
 
         return dict(industry_stats)

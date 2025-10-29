@@ -118,14 +118,14 @@ def load_mappings(
                 index=indicator_sheet[indicator_col].astype(str).str.strip()
             ).to_dict()
 
-            # 标准化键并过滤NaN/空字符串
+            # 标准化键并只保留标记为"是"的条目
             var_dfm_default_map = {
                 normalize_text(k): str(v).strip()
                 for k, v in dfm_default_map_temp.items()
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
-                and pd.notna(v) and str(v).strip().lower() not in ['', 'nan']
+                and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] Successfully created DFM default map with {len(var_dfm_default_map)} entries.")
+            print(f"  [Mappings] 从DFM变量列加载了 {len(var_dfm_default_map)} 个标记为'是'的变量")
         elif dfm_default_col:
              print(f"  [Mappings] Warning: DFM default column '{dfm_default_col}' not found in sheet '{sheet_name}'. DFM default map will be empty.")
         else:

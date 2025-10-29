@@ -190,16 +190,25 @@ def render_dfm_data_prep_tab(st):
     # 处理新上传的文件
     uploaded_file = None
     if uploaded_file_new is not None:
-        # 保存新文件到状态
+        # 检查文件是否真的变更
         file_bytes = uploaded_file_new.getvalue()
-        set_dfm_state("dfm_training_data_file", uploaded_file_new)
-        set_dfm_state("dfm_training_data_bytes", file_bytes)
-        set_dfm_state("dfm_uploaded_excel_file_path", uploaded_file_new.name)
-        set_dfm_state("dfm_use_full_data_preparation", True)
-        set_dfm_state("dfm_file_processed", False)
-        set_dfm_state("dfm_date_detection_needed", True)
+        existing_file_path = get_dfm_state("dfm_uploaded_excel_file_path", None)
+        existing_file_bytes = get_dfm_state("dfm_training_data_bytes", None)
 
-        print(f"[UI] 新文件上传: {uploaded_file_new.name}，字节大小: {len(file_bytes)}")
+        # 生成文件标识
+        new_file_id = f"{uploaded_file_new.name}_{len(file_bytes)}"
+        existing_file_id = f"{existing_file_path}_{len(existing_file_bytes) if existing_file_bytes else 0}"
+
+        # 只有文件真正变更时才更新状态
+        if new_file_id != existing_file_id:
+            set_dfm_state("dfm_training_data_file", uploaded_file_new)
+            set_dfm_state("dfm_training_data_bytes", file_bytes)
+            set_dfm_state("dfm_uploaded_excel_file_path", uploaded_file_new.name)
+            set_dfm_state("dfm_use_full_data_preparation", True)
+            set_dfm_state("dfm_file_processed", False)
+            set_dfm_state("dfm_date_detection_needed", True)
+            print(f"[UI] 新文件上传: {uploaded_file_new.name}，字节大小: {len(file_bytes)}")
+
         uploaded_file = uploaded_file_new
     elif existing_file:
         # 使用已存在的文件
@@ -324,10 +333,11 @@ def render_dfm_data_prep_tab(st):
     current_file = get_dfm_state('dfm_training_data_file')
     if current_file and hasattr(current_file, 'getvalue'):
         try:
-            file_hash = hash(current_file.getvalue())
-            cache_key = f"date_range_{current_file.name}_{file_hash}"
+            # 使用文件名和大小作为缓存键，比哈希更稳定
+            file_bytes = current_file.getvalue()
+            cache_key = f"date_range_{current_file.name}_{len(file_bytes)}"
         except Exception as e:
-            st.warning(f"文件哈希计算失败: {e}")
+            st.warning(f"文件标识生成失败: {e}")
             cache_key = f"date_range_{current_file.name}_fallback"
     else:
         cache_key = "date_range_none"
@@ -371,10 +381,10 @@ def render_dfm_data_prep_tab(st):
         # 使用缓存的结果
         detected_start, detected_end = cached_result if cached_result else (None, None)
         if detected_start and detected_end:
-            # 静默处理缓存的日期范围，避免重复日志
-            # 同时保存到专门的状态键，供按钮处理时使用
+            # 使用缓存的日期范围
             set_dfm_state("dfm_detected_start_date", detected_start)
             set_dfm_state("dfm_detected_end_date", detected_end)
+            print(f"[UI] 使用缓存的日期范围: {detected_start} 到 {detected_end}")
 
     # 设置默认值：开始日期固定为2020-01-01（系统边界），结束日期使用检测到的日期
     default_start_date = datetime(2020, 1, 1).date()  # 固定为2020-01-01，不管检测到什么

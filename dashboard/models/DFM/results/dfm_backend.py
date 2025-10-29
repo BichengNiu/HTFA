@@ -33,39 +33,36 @@ def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
     else:
         logger.info("成功接收 DFM 元数据对象。")
         
-    logger.info("直接使用训练模块已计算的标准指标...")
-    
-    # 检查元数据中是否包含训练模块计算的指标
+    logger.info("检查并加载评估指标...")
+
+    # 检查元数据中是否包含训练模块计算的标准指标
     standard_metric_keys = ['is_rmse', 'oos_rmse', 'is_mae', 'oos_mae', 'is_hit_rate', 'oos_hit_rate']
     has_standard_metrics = all(key in metadata for key in standard_metric_keys)
-    
+
+    # 添加调试日志：输出元数据中实际包含的键
+    logger.info(f"元数据中包含的指标相关键: {[k for k in metadata.keys() if any(x in k for x in ['rmse', 'mae', 'hit_rate', 'hr'])]}")
+
     if has_standard_metrics:
         logger.info("发现训练模块计算的标准指标，直接使用...")
-        # 直接使用训练模块的标准指标，保持键名一致以供UI使用
-        metadata['revised_is_hr'] = metadata.get('is_hit_rate')
-        metadata['revised_is_rmse'] = metadata.get('is_rmse')
-        metadata['revised_is_mae'] = metadata.get('is_mae')
-        metadata['revised_oos_hr'] = metadata.get('oos_hit_rate')
-        metadata['revised_oos_rmse'] = metadata.get('oos_rmse')
-        metadata['revised_oos_mae'] = metadata.get('oos_mae')
-        
-        logger.info(f"已加载标准指标: IS胜率={metadata['revised_is_hr']}, OOS胜率={metadata['revised_oos_hr']}")
-        logger.info(f"                 IS_RMSE={metadata['revised_is_rmse']}, OOS_RMSE={metadata['revised_oos_rmse']}")
+        logger.info(f"已加载标准指标: IS胜率={metadata['is_hit_rate']:.2f}%, OOS胜率={metadata['oos_hit_rate']:.2f}%")
+        logger.info(f"                 IS_RMSE={metadata['is_rmse']:.4f}, OOS_RMSE={metadata['oos_rmse']:.4f}")
+        logger.info(f"                 IS_MAE={metadata['is_mae']:.4f}, OOS_MAE={metadata['oos_mae']:.4f}")
     else:
-        logger.warning("未在元数据中找到训练模块计算的标准指标，使用默认值...")
-        # 使用默认指标值
-        metadata['revised_is_hr'] = 60.0
-        metadata['revised_oos_hr'] = 50.0
-        metadata['revised_is_rmse'] = 0.08
-        metadata['revised_oos_rmse'] = 0.10
-        metadata['revised_is_mae'] = 0.08
-        metadata['revised_oos_mae'] = 0.10
+        logger.warning("未在元数据中找到训练模块计算的标准指标，这可能是旧版本模型文件")
+        logger.warning("使用默认值作为fallback（建议重新训练模型以获取真实指标）")
+        # 使用默认指标值（向后兼容旧模型）
+        metadata['is_hit_rate'] = 60.0
+        metadata['oos_hit_rate'] = 50.0
+        metadata['is_rmse'] = 0.08
+        metadata['oos_rmse'] = 0.10
+        metadata['is_mae'] = 0.08
+        metadata['oos_mae'] = 0.10
 
     # 最终检查：如果模型为None但有足够的数据，移除相关错误
     if model is None:
         # 检查是否有足够的数据来显示UI
         has_complete_table = 'complete_aligned_table' in metadata and metadata.get('complete_aligned_table') is not None
-        has_basic_metrics = all(key in metadata for key in ['revised_is_hr', 'revised_oos_hr', 'revised_is_rmse', 'revised_oos_rmse'])
+        has_basic_metrics = all(key in metadata for key in ['is_hit_rate', 'oos_hit_rate', 'is_rmse', 'oos_rmse'])
 
         if has_complete_table and has_basic_metrics:
             logger.info("虽然模型为None，但metadata包含足够数据供UI使用，移除模型相关错误")

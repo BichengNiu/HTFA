@@ -159,12 +159,12 @@ class TrainingResultExporter:
             raise ValueError("训练结果缺少评估指标(metrics)，无法导出元数据")
 
         metadata.update({
-            'revised_is_hr': float(result.metrics.is_hit_rate),
-            'revised_oos_hr': float(result.metrics.oos_hit_rate),
-            'revised_is_rmse': float(result.metrics.is_rmse),
-            'revised_oos_rmse': float(result.metrics.oos_rmse),
-            'revised_is_mae': float(result.metrics.is_mae),
-            'revised_oos_mae': float(result.metrics.oos_mae),
+            'is_hit_rate': float(result.metrics.is_hit_rate),
+            'oos_hit_rate': float(result.metrics.oos_hit_rate),
+            'is_rmse': float(result.metrics.is_rmse),
+            'oos_rmse': float(result.metrics.oos_rmse),
+            'is_mae': float(result.metrics.is_mae),
+            'oos_mae': float(result.metrics.oos_mae),
         })
 
         # 因子载荷DataFrame（预测变量）
