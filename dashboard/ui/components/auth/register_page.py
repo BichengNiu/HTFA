@@ -168,7 +168,7 @@ class RegisterPage:
             
             # 返回登录按钮
             st.markdown("---")
-            if st.button("返回登录页面", use_container_width=True):
+            if st.button("返回登录页面", use_container_width=True, type="primary"):
                 # 清除注册页面标识
                 if 'show_register_page' in st.session_state:
                     del st.session_state['show_register_page']

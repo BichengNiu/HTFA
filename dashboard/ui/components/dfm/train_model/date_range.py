@@ -123,16 +123,16 @@ class DateRangeComponent(DFMComponent):
             # === 与老代码第1126-1292行完全一致的日期设置逻辑 ===
 
             # 计算基于数据的智能默认值 - 与老代码第1131-1214行一致
-            date_defaults = self._get_data_based_date_defaults_legacy(training_data, data_prep_dates)
+            date_defaults = self._get_data_based_date_defaults(training_data, data_prep_dates)
 
             # 使用统一状态管理器检查是否有数据并获取数据 - 与老代码第1219-1257行一致
-            self._update_date_states_from_data_legacy(training_data, date_defaults)
+            self._update_date_states_from_data(training_data, date_defaults)
 
             # 执行日期参数一致性验证 - 与老代码第1262-1265行一致
-            self._validate_date_consistency_legacy()
+            self._validate_date_consistency()
 
             # 渲染日期输入控件 - 与老代码第1267-1292行完全一致
-            date_result = self._render_date_inputs_legacy(st_obj, date_defaults)
+            date_result = self._render_date_inputs(st_obj, date_defaults)
 
             return date_result
 
@@ -142,7 +142,7 @@ class DateRangeComponent(DFMComponent):
 
     # === 与老代码完全一致的辅助方法 ===
 
-    def _get_data_based_date_defaults_legacy(self, training_data: pd.DataFrame,
+    def _get_data_based_date_defaults(self, training_data: pd.DataFrame,
                                            data_prep_dates: Dict[str, Any]) -> Dict[str, Any]:
         """计算基于数据的智能默认值 - 与老代码第1131-1214行一致"""
         try:
@@ -208,7 +208,7 @@ class DateRangeComponent(DFMComponent):
                 'data_end_date': None
             }
 
-    def _update_date_states_from_data_legacy(self, training_data: pd.DataFrame,
+    def _update_date_states_from_data(self, training_data: pd.DataFrame,
                                            date_defaults: Dict[str, Any]):
         """使用统一状态管理器检查是否有数据并获取数据 - 与老代码第1219-1257行一致"""
         try:
@@ -227,7 +227,7 @@ class DateRangeComponent(DFMComponent):
         except Exception as e:
             logger.error(f"更新日期状态失败: {e}")
 
-    def _validate_date_consistency_legacy(self):
+    def _validate_date_consistency(self):
         """执行日期参数一致性验证 - 与老代码第1262-1265行一致"""
         try:
             training_start = self._get_state('dfm_training_start_date')
@@ -244,7 +244,7 @@ class DateRangeComponent(DFMComponent):
         except Exception as e:
             logger.error(f"日期一致性验证失败: {e}")
 
-    def _render_date_inputs_legacy(self, st_obj, date_defaults: Dict[str, Any]) -> Dict[str, Any]:
+    def _render_date_inputs(self, st_obj, date_defaults: Dict[str, Any]) -> Dict[str, Any]:
         """渲染日期输入控件 - 与老代码第1267-1292行完全一致"""
         try:
             # 获取当前状态
@@ -361,223 +361,6 @@ class DateRangeComponent(DFMComponent):
                 'validation_end': datetime(2024, 12, 31).date()
             }
     
-    def _validate_and_correct_dates(self, date_defaults: Dict[str, date], 
-                                  data_prep_dates: Dict[str, date]) -> None:
-        """
-        验证并修正现有的日期设置
-        
-        Args:
-            date_defaults: 默认日期
-            data_prep_dates: 数据准备页面的日期设置
-        """
-        try:
-            # 检查并更新训练开始日期
-            current_training_start = self._get_state('dfm_training_start_date')
-            if (current_training_start is None or 
-                current_training_start == datetime(2010, 1, 1).date()):
-                self._set_state('dfm_training_start_date', date_defaults['training_start'])
-            
-            # 检查并更新验证开始日期
-            current_validation_start = self._get_state('dfm_validation_start_date')
-            if (current_validation_start is None or 
-                current_validation_start == datetime(2020, 12, 31).date()):
-                self._set_state('dfm_validation_start_date', date_defaults['validation_start'])
-            
-            # 检查并更新验证结束日期
-            current_validation_end = self._get_state('dfm_validation_end_date')
-            if (current_validation_end is None or 
-                current_validation_end == datetime(2022, 12, 31).date()):
-                self._set_state('dfm_validation_end_date', date_defaults['validation_end'])
-                
-        except Exception as e:
-            logger.error(f"验证和修正日期失败: {e}")
-    
-    def _render_data_range_info(self, st_obj, training_data: pd.DataFrame) -> None:
-        """
-        渲染数据范围信息
-        
-        Args:
-            st_obj: Streamlit对象
-            training_data: 训练数据
-        """
-        try:
-            data_start = training_data.index.min().strftime('%Y-%m-%d')
-            data_end = training_data.index.max().strftime('%Y-%m-%d')
-            data_count = len(training_data.index)
-            
-            st_obj.info(f"[DATA] 可用数据范围: {data_start} 至 {data_end} ({data_count} 个时间点)")
-            
-        except Exception as e:
-            logger.error(f"渲染数据范围信息失败: {e}")
-    
-    def _render_training_start_date(self, st_obj, default_date: date) -> date:
-        """
-        渲染训练开始日期选择
-        
-        Args:
-            st_obj: Streamlit对象
-            default_date: 默认日期
-            
-        Returns:
-            选择的训练开始日期
-        """
-        current_value = self._get_state('dfm_training_start_date', default_date)
-        
-        training_start = st_obj.date_input(
-            "训练期开始日期 (Training Start Date)",
-            value=current_value,
-            key=f"{self.get_state_key_prefix()}_training_start_input",
-            help="选择模型训练数据的起始日期。默认为数据的第一期。"
-        )
-        
-        # 更新状态
-        self._set_state('dfm_training_start_date', training_start)
-        
-        return training_start
-    
-    def _render_validation_dates(self, st_obj, date_defaults: Dict[str, date]) -> Tuple[date, date]:
-        """
-        渲染验证期日期选择
-        
-        Args:
-            st_obj: Streamlit对象
-            date_defaults: 默认日期字典
-            
-        Returns:
-            (验证开始日期, 验证结束日期)
-        """
-        # 验证开始日期
-        validation_start_value = self._get_state(
-            'dfm_validation_start_date', 
-            date_defaults['validation_start']
-        )
-        
-        validation_start = st_obj.date_input(
-            "验证期开始日期 (Validation Start Date)",
-            value=validation_start_value,
-            key=f"{self.get_state_key_prefix()}_validation_start_input",
-            help="选择验证期开始日期。默认为训练期结束后。"
-        )
-        
-        # 验证结束日期
-        validation_end_value = self._get_state(
-            'dfm_validation_end_date', 
-            date_defaults['validation_end']
-        )
-        
-        validation_end = st_obj.date_input(
-            "验证期结束日期 (Validation End Date)",
-            value=validation_end_value,
-            key=f"{self.get_state_key_prefix()}_validation_end_input",
-            help="选择验证期结束日期。默认为数据的最后一期。"
-        )
-        
-        # 更新状态
-        self._set_state('dfm_validation_start_date', validation_start)
-        self._set_state('dfm_validation_end_date', validation_end)
-        
-        return validation_start, validation_end
-
-    def _validate_date_consistency(self, dates: Dict[str, date],
-                                 data_prep_dates: Dict[str, date]) -> Tuple[bool, List[str]]:
-        """
-        验证日期一致性
-
-        Args:
-            dates: 当前日期设置
-            data_prep_dates: 数据准备页面的日期设置
-
-        Returns:
-            (是否有效, 错误列表)
-        """
-        errors = []
-
-        try:
-            training_start = dates['training_start']
-            validation_start = dates['validation_start']
-            validation_end = dates['validation_end']
-
-            # 1. 基本逻辑验证
-            if training_start >= validation_start:
-                errors.append(f"训练开始日期 ({training_start}) 必须早于验证开始日期 ({validation_start})")
-
-            if validation_start >= validation_end:
-                errors.append(f"验证开始日期 ({validation_start}) 必须早于验证结束日期 ({validation_end})")
-
-            # 2. 验证日期边界
-            boundary_valid, boundary_errors = self._validate_date_boundaries(dates, data_prep_dates)
-            errors.extend(boundary_errors)
-
-            # 3. 验证期长度检查
-            if validation_start < validation_end:
-                validation_days = (validation_end - validation_start).days
-                if validation_days < 30:
-                    errors.append(f"验证期过短 ({validation_days} 天)，建议至少30天")
-                elif validation_days > 730:  # 2年
-                    errors.append(f"验证期过长 ({validation_days} 天)，建议不超过2年")
-
-            # 4. 训练期长度检查
-            if training_start < validation_start:
-                training_days = (validation_start - training_start).days
-                if training_days < 365:  # 1年
-                    errors.append(f"训练期过短 ({training_days} 天)，建议至少1年")
-
-            return len(errors) == 0, errors
-
-        except Exception as e:
-            logger.error(f"日期一致性验证失败: {e}")
-            return False, [f"日期验证过程中发生错误: {e}"]
-
-    def _validate_date_boundaries(self, dates: Dict[str, date],
-                                data_prep_dates: Dict[str, date]) -> Tuple[bool, List[str]]:
-        """
-        验证日期边界
-
-        Args:
-            dates: 当前日期设置
-            data_prep_dates: 数据准备页面的日期设置
-
-        Returns:
-            (是否有效, 错误列表)
-        """
-        errors = []
-
-        try:
-            prep_start = data_prep_dates.get('data_start_date')
-            prep_end = data_prep_dates.get('data_end_date')
-
-            if prep_start:
-                if dates['training_start'] < prep_start:
-                    errors.append(
-                        f"训练开始日期 ({dates['training_start']}) "
-                        f"不能早于数据准备页面设置的开始边界 ({prep_start})"
-                    )
-
-                if dates['validation_start'] < prep_start:
-                    errors.append(
-                        f"验证开始日期 ({dates['validation_start']}) "
-                        f"不能早于数据准备页面设置的开始边界 ({prep_start})"
-                    )
-
-            if prep_end:
-                if dates['validation_end'] > prep_end:
-                    errors.append(
-                        f"验证结束日期 ({dates['validation_end']}) "
-                        f"不能晚于数据准备页面设置的结束边界 ({prep_end})"
-                    )
-
-                if dates['training_start'] > prep_end:
-                    errors.append(
-                        f"训练开始日期 ({dates['training_start']}) "
-                        f"不能晚于数据准备页面设置的结束边界 ({prep_end})"
-                    )
-
-            return len(errors) == 0, errors
-
-        except Exception as e:
-            logger.error(f"日期边界验证失败: {e}")
-            return False, [f"边界验证过程中发生错误: {e}"]
-
     def _auto_correct_dates(self, dates: Dict[str, date]) -> Dict[str, date]:
         """
         自动修正日期设置
@@ -612,40 +395,6 @@ class DateRangeComponent(DFMComponent):
             logger.error(f"自动修正日期失败: {e}")
             return dates
 
-    def _render_date_summary(self, st_obj, dates: Dict[str, date]) -> None:
-        """
-        渲染日期摘要
-
-        Args:
-            st_obj: Streamlit对象
-            dates: 日期设置
-        """
-        try:
-            st_obj.markdown("---")
-            st_obj.markdown("**[INFO] 日期设置摘要**")
-
-            # 基本信息
-            st_obj.text(f"训练期开始: {dates['training_start']}")
-            st_obj.text(f"验证期开始: {dates['validation_start']}")
-            st_obj.text(f"验证期结束: {dates['validation_end']}")
-
-            # 计算期间长度
-            training_days = self._calculate_training_period_length(dates)
-            validation_days = self._calculate_validation_period_length(dates)
-
-            st_obj.text(f"训练期长度: {training_days} 天 ({training_days // 365} 年 {(training_days % 365) // 30} 个月)")
-            st_obj.text(f"验证期长度: {validation_days} 天 ({validation_days // 30} 个月)")
-
-            # 显示训练/验证比例
-            total_days = training_days + validation_days
-            if total_days > 0:
-                training_ratio = training_days / total_days * 100
-                validation_ratio = validation_days / total_days * 100
-                st_obj.text(f"训练/验证比例: {training_ratio:.1f}% / {validation_ratio:.1f}%")
-
-        except Exception as e:
-            logger.error(f"渲染日期摘要失败: {e}")
-
     def _calculate_training_period_length(self, dates: Dict[str, date]) -> int:
         """
         计算训练期长度（天数）
@@ -677,23 +426,6 @@ class DateRangeComponent(DFMComponent):
         except Exception as e:
             logger.error(f"计算验证期长度失败: {e}")
             return 0
-
-    def _get_state(self, key: str, default: Any = None) -> Any:
-        """获取状态值"""
-        try:
-            dfm_manager = get_global_dfm_manager()
-            if dfm_manager:
-                value = dfm_manager.get_dfm_state('train_model', key, None)
-                if value is not None:
-                    return value
-
-            # 如果DFM管理器不可用，返回默认值
-            logger.warning(f"DFM状态管理器不可用，返回默认值: {key}")
-            return default
-
-        except Exception as e:
-            logger.warning(f"获取状态失败: {e}")
-            return default
 
     def _set_state(self, key: str, value: Any) -> None:
         """设置状态值"""

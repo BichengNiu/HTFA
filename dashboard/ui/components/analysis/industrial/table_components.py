@@ -298,8 +298,8 @@ class SummaryTableComponent(TableComponent):
             
             # 选择显示列
             display_columns = [
-                '日度指标名称', '最新日期', '最新值', '环比昨日', 
-                '上周均值', '上月均值', '近1年平均值', '近1年最大值', '近1年最小值'
+                '日度指标名称', '最新日期', '最新值', '昨日值', '环比昨日',
+                '上周均值', '上月均值'
             ]
             available_columns = [col for col in display_columns if col in data.columns]
             data_display = data[available_columns].copy()
@@ -317,7 +317,7 @@ class SummaryTableComponent(TableComponent):
             format_dict = {}
             
             # 数值列格式化
-            numeric_cols = ['最新值', '上周均值', '上月均值', '近1年平均值', '近1年最大值', '近1年最小值']
+            numeric_cols = ['最新值', '昨日值', '上周均值', '上月均值']
             for col in numeric_cols:
                 if col in data_formatted.columns:
                     format_dict[col] = '{:.2f}'
@@ -360,9 +360,7 @@ class SummaryTableComponent(TableComponent):
                 f"{stats['increase_count']}个上涨（占比{stats['increase_pct']:.1f}%），"
                 f"{stats['decrease_count']}个下跌（占比{stats['decrease_pct']:.1f}%）；"
                 f"{stats['above_week_mean_count']}个高于上周均值（占比{stats['above_week_mean_pct']:.1f}%），"
-                f"{stats['above_month_mean_count']}个高于上月均值（占比{stats['above_month_mean_pct']:.1f}%）；"
-                f"{stats['above_max_count']}个高于最大值（占比{stats['above_max_pct']:.1f}%），"
-                f"{stats['below_min_count']}个低于最小值（占比{stats['below_min_pct']:.1f}%）。"
+                f"{stats['above_month_mean_count']}个高于上月均值（占比{stats['above_month_mean_pct']:.1f}%）。"
             )
             
             return summary_sentence
@@ -393,39 +391,29 @@ class SummaryTableComponent(TableComponent):
             latest_val = pd.to_numeric(data['最新值'], errors='coerce') if '最新值' in data.columns else pd.Series(dtype=float)
             week_mean = pd.to_numeric(data.get('上周均值', pd.Series(dtype=float)), errors='coerce')
             month_mean = pd.to_numeric(data.get('上月均值', pd.Series(dtype=float)), errors='coerce')
-            max_1y = pd.to_numeric(data.get('近1年最大值', pd.Series(dtype=float)), errors='coerce')
-            min_1y = pd.to_numeric(data.get('近1年最小值', pd.Series(dtype=float)), errors='coerce')
-            
+
             # 计算统计
             increase_count = (dod_numeric > 0).sum()
             decrease_count = (dod_numeric < 0).sum()
             above_week_mean_count = (latest_val > week_mean).sum()
             above_month_mean_count = (latest_val > month_mean).sum()
-            above_max_count = (latest_val > max_1y).sum()
-            below_min_count = (latest_val < min_1y).sum()
-            
+
             # 计算百分比
             increase_pct = (increase_count / total_indicators * 100) if total_indicators > 0 else 0
             decrease_pct = (decrease_count / total_indicators * 100) if total_indicators > 0 else 0
             above_week_mean_pct = (above_week_mean_count / total_indicators * 100) if total_indicators > 0 else 0
             above_month_mean_pct = (above_month_mean_count / total_indicators * 100) if total_indicators > 0 else 0
-            above_max_pct = (above_max_count / total_indicators * 100) if total_indicators > 0 else 0
-            below_min_pct = (below_min_count / total_indicators * 100) if total_indicators > 0 else 0
-            
+
             return {
                 'total_indicators': total_indicators,
                 'increase_count': increase_count,
                 'decrease_count': decrease_count,
                 'above_week_mean_count': above_week_mean_count,
                 'above_month_mean_count': above_month_mean_count,
-                'above_max_count': above_max_count,
-                'below_min_count': below_min_count,
                 'increase_pct': increase_pct,
                 'decrease_pct': decrease_pct,
                 'above_week_mean_pct': above_week_mean_pct,
-                'above_month_mean_pct': above_month_mean_pct,
-                'above_max_pct': above_max_pct,
-                'below_min_pct': below_min_pct
+                'above_month_mean_pct': above_month_mean_pct
             }
             
         except Exception as e:
@@ -436,14 +424,10 @@ class SummaryTableComponent(TableComponent):
                 'decrease_count': 0,
                 'above_week_mean_count': 0,
                 'above_month_mean_count': 0,
-                'above_max_count': 0,
-                'below_min_count': 0,
                 'increase_pct': 0,
                 'decrease_pct': 0,
                 'above_week_mean_pct': 0,
-                'above_month_mean_pct': 0,
-                'above_max_pct': 0,
-                'below_min_pct': 0
+                'above_month_mean_pct': 0
             }
     
     def render(self):
@@ -640,7 +624,8 @@ class DataTableComponent(TableComponent):
                         data=csv_data,
                         file_name=f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                         mime="text/csv",
-                        key=f"csv_{title}"
+                        key=f"csv_{title}",
+                        type="primary"
                     )
 
             with col2:
@@ -652,7 +637,8 @@ class DataTableComponent(TableComponent):
                         data=excel_data,
                         file_name=f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=f"excel_{title}"
+                        key=f"excel_{title}",
+                        type="primary"
                     )
 
         except Exception as e:

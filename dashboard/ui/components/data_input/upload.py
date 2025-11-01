@@ -13,8 +13,6 @@ import logging
 
 from dashboard.ui.components.data_input.base import DataInputComponent
 from dashboard.ui.components.sidebar import SidebarComponent
-from dashboard.ui.utils.state_helpers import get_tools_manager_instance
-from dashboard.core import get_global_tools_manager
 
 logger = logging.getLogger(__name__)
 
@@ -247,13 +245,9 @@ class UnifiedDataUploadComponent(DataInputComponent):
 
     def render_staging_data_selection(self, st_obj, **kwargs) -> Optional[pd.DataFrame]:
         """渲染暂存数据选择 - 使用统一命名约定"""
-        tools_manager = get_global_tools_manager()
-        if not tools_manager:
-            st_obj.error("无法访问暂存数据")
-            return None
-
-        # 获取暂存数据 - 使用统一命名约定
-        staged_data_dict = tools_manager.get_tools_state('data_input', 'staging.staged_data_dict', {})
+        import streamlit as st
+                # 获取暂存数据 - 使用统一命名约定
+        staged_data_dict = st.session_state.get('tools.data_input.staging.staged_data_dict', {})
 
         if not staged_data_dict:
             st_obj.info("暂存区中没有可用数据")
@@ -327,12 +321,12 @@ class DataUploadSidebar(SidebarComponent):
             return None
 
         # 获取暂存数据 - 使用统一命名约定
-        tools_manager = get_global_tools_manager()
+        import streamlit as st
         if not tools_manager:
             return None
 
         # 获取所有暂存数据 - 使用统一命名约定
-        staged_data_dict = tools_manager.get_tools_state('data_input', 'staging.staged_data_dict', {})
+        staged_data_dict = st.session_state.get('tools.data_input.staging.staged_data_dict', {})
 
         if not staged_data_dict:
             st_obj.info("暂存区暂无数据")

@@ -651,13 +651,9 @@ class FactorAnalysisComponent(DFMComponent):
                 if value is not None:
                     return value
 
-            # 备用方案：使用统一状态管理器
-            from dashboard.core import get_unified_manager
-            state_manager = get_unified_manager()
-            if state_manager:
-                backup_key = f'dfm_model_analysis_{key}'
-                return state_manager.get_state(backup_key, default)
-            return default
+            # 备用方案：使用st.session_state
+            backup_key = f'dfm_model_analysis_{key}'
+            return st.session_state.get(backup_key, default)
 
         except Exception as e:
             logger.warning(f"获取状态失败: {e}")

@@ -9,12 +9,13 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+import io
 
 from dashboard.preview.config import UNIFIED_FREQUENCY_CONFIGS, UI_TEXT
 from dashboard.preview.calculators import calculate_summary
 from dashboard.preview.plotting import plot_indicator
 from dashboard.preview.components import create_filter_ui, display_summary_table
-from dashboard.preview.state_integration import get_all_preview_data, set_preview_state
+from dashboard.ui.utils.state_helpers import get_all_preview_data, set_preview_state, get_preview_state
 from dashboard.preview.frequency_utils import get_indicator_frequencies, filter_indicators_by_frequency
 from dashboard.preview.config import FREQUENCY_ORDER
 
@@ -179,7 +180,7 @@ def render_statistics_summary(stats, st_module):
             stats['industry_stats'],
             ['行业名称', '指标数量']
         )
-        st_module.dataframe(industry_df, use_container_width=True)
+        st_module.dataframe(industry_df, use_container_width=True, hide_index=True)
 
     # 渲染类型统计
     with col2:
@@ -188,7 +189,7 @@ def render_statistics_summary(stats, st_module):
             stats['type_stats'],
             ['指标类型', '指标数量']
         )
-        st_module.dataframe(type_df, use_container_width=True)
+        st_module.dataframe(type_df, use_container_width=True, hide_index=True)
 
     # 渲染频率统计
     with col3:
@@ -198,32 +199,13 @@ def render_statistics_summary(stats, st_module):
                 stats['frequency_stats'],
                 ['数据频率', '指标数量']
             )
-            st_module.dataframe(frequency_df, use_container_width=True)
+            st_module.dataframe(frequency_df, use_container_width=True, hide_index=True)
         else:
             st_module.warning("无频率数据")
 
 
-def _apply_detail_filters(df, industries, types, frequencies):
-    """应用筛选条件（私有辅助函数）
-
-    优化：使用布尔索引替代copy，减少内存占用50%
-    """
-    # 构建组合的布尔掩码（无需copy）
-    mask = pd.Series(True, index=df.index)
-
-    if industries:
-        mask &= df['行业'].isin(industries)
-    if types:
-        mask &= df['类型'].isin(types)
-    if frequencies:
-        mask &= df['频率'].isin(frequencies)
-
-    # 直接返回视图（Streamlit只读取不修改）
-    return df[mask]
-
-
 def render_indicator_details(indicator_details, st_module):
-    """渲染指标详情表格及筛选UI
+    """渲染指标详情表格及下载功能
 
     Args:
         indicator_details: 指标详情列表
@@ -236,56 +218,94 @@ def render_indicator_details(indicator_details, st_module):
     # 转换为DataFrame
     detailed_df = pd.DataFrame(indicator_details)
 
-    # 创建筛选UI
-    col1, col2, col3 = st_module.columns(3)
+    # 添加缺失率数值列用于排序（将"5.2%"转换为5.2）
+    detailed_df['缺失率_数值'] = detailed_df['缺失率'].str.replace('%', '').astype(float)
 
-    with col1:
-        selected_industries = st_module.multiselect(
-            "筛选行业",
-            options=sorted(detailed_df['行业'].unique()),
-            default=[]
-        )
-
-    # 根据行业筛选可用类型
-    if selected_industries:
-        available_types = detailed_df[
-            detailed_df['行业'].isin(selected_industries)
-        ]['类型'].unique()
-    else:
-        available_types = detailed_df['类型'].unique()
-
-    with col2:
-        selected_types = st_module.multiselect(
-            "筛选类型",
-            options=sorted(available_types),
-            default=[]
-        )
-
-    # 根据行业和类型筛选可用频率
-    temp_df = detailed_df.copy()
-    if selected_industries:
-        temp_df = temp_df[temp_df['行业'].isin(selected_industries)]
-    if selected_types:
-        temp_df = temp_df[temp_df['类型'].isin(selected_types)]
-    available_frequencies = temp_df['频率'].unique()
-
-    with col3:
-        selected_frequencies = st_module.multiselect(
-            "筛选频率",
-            options=sorted(available_frequencies),
-            default=[]
-        )
-
-    # 应用筛选
-    filtered_df = _apply_detail_filters(
-        detailed_df,
-        selected_industries,
-        selected_types,
-        selected_frequencies
+    # 排序：按缺失率（由低到高）、行业、类型、频率
+    detailed_df = detailed_df.sort_values(
+        by=['缺失率_数值', '行业', '类型', '频率'],
+        ascending=[True, True, True, True]
     )
 
-    # 显示表格
-    st_module.dataframe(filtered_df, use_container_width=True)
+    # 删除临时排序列
+    detailed_df = detailed_df.drop(columns=['缺失率_数值'])
+
+    # 重置索引并添加序号列（从1开始）
+    detailed_df = detailed_df.reset_index(drop=True)
+    detailed_df.insert(0, '序号', range(1, len(detailed_df) + 1))
+
+    # 显示表格（隐藏默认index）
+    st_module.dataframe(detailed_df, use_container_width=True, hide_index=True)
+
+    # 添加间距
+    st_module.markdown("")
+
+    # 创建下载按钮区域
+    col1, col2 = st_module.columns(2)
+
+    with col1:
+        # 下载指标详情统计表
+        buffer1 = io.BytesIO()
+        with pd.ExcelWriter(buffer1, engine='openpyxl') as writer:
+            detailed_df.to_excel(writer, sheet_name='指标详情', index=False)
+
+            # 设置列宽自适应
+            worksheet = writer.sheets['指标详情']
+            for column in worksheet.columns:
+                max_length = max(len(str(cell.value)) for cell in column if cell.value)
+                worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
+
+        st_module.download_button(
+            label="下载指标详情统计表",
+            data=buffer1.getvalue(),
+            file_name=f"指标详情统计_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+
+    with col2:
+        # 下载全部原始数据
+        # 收集所有频率的DataFrame（按顺序：日度、周度、旬度、月度、年度）
+        frequency_data = {
+            '日度': get_preview_state('daily_df'),
+            '周度': get_preview_state('weekly_df'),
+            '旬度': get_preview_state('ten_day_df'),
+            '月度': get_preview_state('monthly_df'),
+            '年度': get_preview_state('yearly_df')
+        }
+
+        buffer2 = io.BytesIO()
+        with pd.ExcelWriter(buffer2, engine='openpyxl') as writer:
+            for freq_name, df in frequency_data.items():
+                if df is not None and not df.empty:
+                    # 创建副本以避免修改原始数据
+                    df_export = df.copy()
+
+                    # 重置索引并重命名为"时间"
+                    df_export = df_export.reset_index()
+                    if len(df_export.columns) > 0 and df_export.columns[0] != '时间':
+                        df_export.rename(columns={df_export.columns[0]: '时间'}, inplace=True)
+
+                    # 格式化时间列为年-月-日格式
+                    if '时间' in df_export.columns:
+                        df_export['时间'] = pd.to_datetime(df_export['时间']).dt.strftime('%Y-%m-%d')
+
+                    # 写入Excel（不包含index，因为已经转为时间列）
+                    df_export.to_excel(writer, sheet_name=freq_name, index=False)
+
+                    # 设置列宽自适应
+                    worksheet = writer.sheets[freq_name]
+                    for column in worksheet.columns:
+                        max_length = max(len(str(cell.value)) for cell in column if cell.value)
+                        worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
+
+        st_module.download_button(
+            label="下载全部原始数据",
+            data=buffer2.getvalue(),
+            file_name=f"全部原始数据_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
 
 
 def _get_available_types_for_industries(selected_industries, all_indicators, indicator_maps):
@@ -297,173 +317,6 @@ def _get_available_types_for_industries(selected_industries, all_indicators, ind
             ind_type = indicator_maps['type'].get(indicator, "未分类")
             available_types.add(ind_type)
     return sorted(list(available_types))
-
-
-def _create_download_filters(stats, indicator_maps, st_module):
-    """创建下载筛选UI（私有辅助函数）
-
-    Returns:
-        dict: {'industries': [...], 'types': [...], 'frequencies': [...]}
-    """
-    col1, col2, col3 = st_module.columns(3)
-
-    with col1:
-        selected_industries = st_module.multiselect(
-            "选择下载行业",
-            options=sorted(stats['industry_stats'].keys()),
-            default=[],
-            key="download_industries"
-        )
-
-    # 根据行业筛选可用类型
-    if selected_industries:
-        available_types = _get_available_types_for_industries(
-            selected_industries, stats['all_indicators'], indicator_maps
-        )
-    else:
-        available_types = sorted(stats['type_stats'].keys())
-
-    with col2:
-        selected_types = st_module.multiselect(
-            "选择下载类型",
-            options=available_types,
-            default=[],
-            key="download_types"
-        )
-
-    # 频率选项（使用配置的顺序）
-    available_frequencies = [freq for freq in FREQUENCY_ORDER if freq in stats['frequency_stats']]
-
-    with col3:
-        selected_frequencies = st_module.multiselect(
-            "选择下载频率",
-            options=available_frequencies,
-            default=[],
-            key="download_frequencies"
-        )
-
-    return {
-        'industries': selected_industries,
-        'types': selected_types,
-        'frequencies': selected_frequencies
-    }
-
-
-def _filter_indicators_for_download(all_indicators, indicator_maps, filters):
-    """根据筛选条件过滤指标（私有辅助函数）"""
-    filtered = []
-
-    for indicator in all_indicators:
-        # 检查行业
-        if filters['industries']:
-            industry = indicator_maps['industry'].get(indicator, "未分类")
-            if industry not in filters['industries']:
-                continue
-
-        # 检查类型
-        if filters['types']:
-            ind_type = indicator_maps['type'].get(indicator, "未分类")
-            if ind_type not in filters['types']:
-                continue
-
-        filtered.append(indicator)
-
-    return filtered
-
-
-def _prepare_download_files(all_data_dict, all_indicators, indicator_maps, filters):
-    """准备下载文件（私有辅助函数）
-
-    Returns:
-        dict: {频率名: DataFrame}
-    """
-    # 筛选指标
-    filtered_indicators = _filter_indicators_for_download(
-        all_indicators, indicator_maps, filters
-    )
-
-    # 按频率组织（使用频率工具函数，自动处理频率筛选）
-    indicator_by_freq = filter_indicators_by_frequency(
-        set(filtered_indicators),
-        all_data_dict,
-        target_frequencies=filters['frequencies'] if filters['frequencies'] else None
-    )
-
-    # 生成下载文件
-    download_files = {}
-    for freq_name, indicators in indicator_by_freq.items():
-        download_files[freq_name] = all_data_dict[freq_name][indicators].copy()
-
-    return download_files
-
-
-def _render_download_buttons(download_files, st_module):
-    """渲染下载按钮（私有辅助函数）"""
-    # 按照固定顺序排列
-    available_freqs = [freq for freq in FREQUENCY_ORDER if freq in download_files]
-
-    # 创建5列布局
-    cols = st_module.columns(5)
-
-    for freq in available_freqs:
-        df = download_files[freq]
-
-        # 准备CSV数据
-        df_copy = df.copy()
-        df_copy.columns = [str(col) for col in df_copy.columns]
-        csv_data = df_copy.to_csv(index=True, sep=',').encode('utf-8-sig')
-
-        # 生成文件名
-        filename = f"{freq}数据_筛选结果_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-
-        # 确定列索引
-        col_idx = FREQUENCY_ORDER.index(freq)
-
-        with cols[col_idx]:
-            st_module.download_button(
-                label=f"下载{freq}数据",
-                data=csv_data,
-                file_name=filename,
-                mime="text/csv",
-                key=f"download_{freq}"
-            )
-
-
-def render_data_download_section(all_data_dict, stats, indicator_maps, st_module):
-    """渲染数据下载UI
-
-    Args:
-        all_data_dict: {频率名: DataFrame}字典
-        stats: 统计信息字典
-        indicator_maps: 映射关系字典
-        st_module: streamlit模块
-    """
-    if not stats['all_indicators']:
-        st_module.warning("没有可下载的数据")
-        return
-
-    # 创建筛选UI
-    selected_filters = _create_download_filters(stats, indicator_maps, st_module)
-
-    # 准备下载文件
-    download_files = _prepare_download_files(
-        all_data_dict,
-        stats['all_indicators'],
-        indicator_maps,
-        selected_filters
-    )
-
-    # 显示筛选结果
-    if download_files:
-        total_indicators = sum(len(df.columns) for df in download_files.values())
-        st_module.info(
-            f"筛选出 {total_indicators} 个指标(跨{len(download_files)}个频率)可供下载"
-        )
-
-        # 渲染下载按钮
-        _render_download_buttons(download_files, st_module)
-    else:
-        st_module.warning("没有找到符合条件的数据")
 
 
 def display_time_series_tab(st_module, frequency):
@@ -479,7 +332,6 @@ def display_time_series_tab(st_module, frequency):
     config = UNIFIED_FREQUENCY_CONFIGS[frequency]
 
     # 2. 获取数据（使用缓存）
-    from dashboard.preview.state_integration import get_preview_state
     loaded_file = get_preview_state('data_loaded_files')
     preview_data = get_all_preview_data(cache_key=loaded_file)
     df = preview_data.get(config['df_key'], pd.DataFrame())
@@ -638,7 +490,6 @@ def display_overview_tab(st_module):
         st_module: Streamlit模块
     """
     # 1. 获取数据并创建统一结构（使用工具函数，避免硬编码）
-    from dashboard.preview.state_integration import get_preview_state
     loaded_file = get_preview_state('data_loaded_files')
     preview_data = get_all_preview_data(cache_key=loaded_file)
 
@@ -665,8 +516,3 @@ def display_overview_tab(st_module):
     # 4. 第二部分：指标详情
     st_module.markdown("#### 指标详情")
     render_indicator_details(stats['indicator_details'], st_module)
-    st_module.markdown("---")
-
-    # 5. 第三部分：数据下载
-    st_module.markdown("#### 数据下载")
-    render_data_download_section(all_data_dict, stats, indicator_maps, st_module)

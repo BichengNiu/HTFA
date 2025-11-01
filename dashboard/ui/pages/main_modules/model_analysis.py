@@ -3,6 +3,7 @@
 模型分析欢迎页面组件
 """
 
+import streamlit as st
 from typing import List
 from dashboard.ui.components.base import UIComponent
 from dashboard.ui.constants import UIConstants
@@ -53,13 +54,7 @@ class ModelAnalysisWelcomePage(UIComponent):
                 use_container_width=True,
                 help="使用动态因子模型进行经济预测和分析"
             ):
-                # 使用统一状态管理器
-                from dashboard.core import get_unified_manager
-                state_manager = get_unified_manager()
-                if state_manager:
-                    state_manager.set_state('navigation.navigate_to_sub_module', 'DFM 模型')
-                else:
-                    print("[WARNING] 统一状态管理器不可用，无法设置导航状态")
+                st.session_state["navigation.navigate_to_sub_module"] = 'DFM 模型'
                 st_obj.rerun()
 
         # 添加一些说明文字
@@ -79,16 +74,11 @@ class ModelAnalysisWelcomePage(UIComponent):
     def _navigate_to_sub_module(self, st_obj, sub_module: str):
         """导航到子模块"""
         try:
-            # 使用导航管理器设置导航状态
+            import streamlit as st
             from core.navigation_manager import get_navigation_manager
-            from dashboard.core import get_unified_manager
 
-            unified_manager = get_unified_manager()
-            if not unified_manager:
-                st_obj.error("统一状态管理器不可用")
-                return
-
-            nav_manager = get_navigation_manager(unified_manager)
+            # 使用st.session_state获取导航管理器
+            nav_manager = get_navigation_manager(st.session_state)
 
             # 设置子模块
             nav_manager.set_current_sub_module(sub_module)
@@ -101,20 +91,11 @@ class ModelAnalysisWelcomePage(UIComponent):
 
     def _handle_navigation(self, st_obj):
         """处理导航事件"""
-        from dashboard.core import get_unified_manager
-        state_manager = get_unified_manager()
-
-        if state_manager:
-            # 使用统一状态管理器检查导航请求
-            sub_module = state_manager.get_state('navigation.navigate_to_sub_module')
-            if sub_module:
-                state_manager.clear_state('navigation.navigate_to_sub_module')
-                self._navigate_to_sub_module(st_obj, sub_module)
-        else:
-            # 降级到session_state
-            if 'navigate_to_sub_module' in st_obj.session_state:
-                sub_module = st_obj.session_state.pop('navigate_to_sub_module')
-                self._navigate_to_sub_module(st_obj, sub_module)
+        sub_module = st.session_state.get("navigation.navigate_to_sub_module")
+        if sub_module:
+            if "navigation.navigate_to_sub_module" in st.session_state:
+                del st.session_state["navigation.navigate_to_sub_module"]
+            self._navigate_to_sub_module(st_obj, sub_module)
     
     def get_state_keys(self) -> List[str]:
         """获取组件相关的状态键"""

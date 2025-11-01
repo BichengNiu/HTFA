@@ -106,10 +106,11 @@ def standardize_timestamps(df_input: pd.DataFrame, data_type: str) -> pd.DataFra
         weekdays = dates.weekday  # 0=Monday, ..., 6=Sunday
 
         # 计算到周五的天数（向量化）
+        # 修正逻辑：周六、周日应该回到上周五，而不是下周五
         days_to_friday = np.where(
-            weekdays < 5,  # Monday to Friday
-            4 - weekdays,  # 到当周周五的天数
-            4 + (7 - weekdays)  # 到下周周五的天数
+            weekdays <= 4,  # Monday to Friday
+            4 - weekdays,   # 到当周周五的天数
+            -(weekdays - 4)  # 周六、周日向前偏移到上周五
         )
 
         # 使用向量化操作计算新索引
@@ -554,6 +555,11 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
             indicator_type_map,
             read_mapping_sheet=read_mapping
         )
+
+        # 使用返回的映射字典更新
+        indicator_industry_map = ind_map
+        indicator_unit_map = unit_map
+        indicator_type_map = type_map
 
         # 合并各频率数据
         for freq, dfs in file_dfs.items():

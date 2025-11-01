@@ -13,8 +13,8 @@ import glob
 import time
 from pathlib import Path
 from typing import Dict, Any
+import streamlit as st
 from dashboard.core.config import get_core_config
-from dashboard.core import get_unified_manager
 from dashboard.ui.utils.style_initializer import get_ui_initializer
 from dashboard.core.resource_loader import get_resource_loader
 
@@ -72,11 +72,10 @@ class StreamlitInitializer:
         """配置Streamlit"""
         start_time = time.time()
 
-        state_manager = get_unified_manager()
-        already_configured = state_manager.get_state('core.streamlit_configured', False)
+        already_configured = st.session_state.get('core.streamlit_configured', False)
 
         if not already_configured:
-            state_manager.set_state('core.streamlit_configured', True)
+            st.session_state['core.streamlit_configured'] = True
             logger.info("Streamlit页面配置状态记录完成")
 
         setup_time = time.time() - start_time
@@ -248,22 +247,6 @@ class AppInitializer:
         logger.debug(f"{component_name} setup completed in {setup_time:.3f}s")
         self.initialized_components.add(component_name)
 
-    def initialize_state_manager(self):
-        """初始化状态管理器"""
-        def init_func():
-            state_manager = get_unified_manager()
-            logger.info("使用统一状态管理器实例")
-            return state_manager
-
-        def post_init_func(state_manager):
-            already_initialized = state_manager.get_state('core.unified_state_manager_initialized', False)
-            if not already_initialized:
-                state_manager.set_state('core.unified_state_manager_initialized', True)
-                logger.info("统一状态管理器标记完成")
-            else:
-                logger.debug("统一状态管理器已经初始化过")
-
-        self._initialize_component('state_manager', init_func, post_init_func)
 
     def initialize_resource_loader(self):
         """初始化资源加载器"""
@@ -289,7 +272,6 @@ class AppInitializer:
             ('paths', EnvironmentInitializer.setup_paths),
             ('streamlit', StreamlitInitializer.configure_streamlit),
             ('styles', StreamlitInitializer.load_styles),
-            ('state_manager', self.initialize_state_manager),
             ('resource_loader', self.initialize_resource_loader)
         ]
 

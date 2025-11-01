@@ -57,7 +57,7 @@ REM 设置 HTFA_DEBUG_MODE=false -> 正常模式
 REM ========================================
 
 REM 设置调试模式（开发时使用true，生产时使用false）
-set HTFA_DEBUG_MODE=false
+set HTFA_DEBUG_MODE=true
 
 echo [信息] 调试模式: %HTFA_DEBUG_MODE%
 echo.

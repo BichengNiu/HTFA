@@ -8,7 +8,6 @@ import streamlit as st
 import time
 from typing import List, Dict, Any, Optional, Tuple
 from dashboard.ui.utils.debug_helpers import debug_button_click, debug_navigation
-from dashboard.core import get_unified_manager
 
 # 全局按钮key跟踪器，防止同一渲染周期内的重复key
 _current_render_button_keys = set()
@@ -54,7 +53,7 @@ def render_main_module_selector(
     selected_module = current_module
     has_change = False
 
-    # 渲染第一列模块 - 使用默认按钮样式
+    # 渲染第一列模块 - 使用secondary按钮样式
     with col1:
         for module in col1_modules:
             button_key = f"{key_prefix}_col1_{module}"
@@ -64,7 +63,7 @@ def render_main_module_selector(
                 selected_module = module
                 has_change = True
 
-    # 渲染第二列模块 - 使用默认按钮样式
+    # 渲染第二列模块 - 使用secondary按钮样式
     with col2:
         for module in col2_modules:
             button_key = f"{key_prefix}_col2_{module}"
@@ -121,7 +120,7 @@ def render_sub_module_selector(
     selected_sub_module = current_sub_module
     has_change = False
 
-    # 渲染第一列子模块 - 使用默认按钮样式
+    # 渲染第一列子模块 - 使用secondary按钮样式
     with col1:
         for sub_module in col1_modules:
             button_key = f"{key_prefix}_col1_{sub_module}"
@@ -131,7 +130,7 @@ def render_sub_module_selector(
                 selected_sub_module = sub_module
                 has_change = True
 
-    # 渲染第二列子模块 - 使用默认按钮样式
+    # 渲染第二列子模块 - 使用secondary按钮样式
     with col2:
         for sub_module in col2_modules:
             button_key = f"{key_prefix}_col2_{sub_module}"
@@ -204,7 +203,7 @@ def get_module_distribution(modules: List[str]) -> Tuple[List[str], List[str]]:
 
 def create_module_button(
     module_name: str,
-    button_type: str = 'secondary',
+    button_type: str = 'primary',
     key: str = None
 ) -> bool:
     """
@@ -308,12 +307,10 @@ def handle_module_selection(
             if hasattr(nav_manager, 'set_transitioning'):
                 nav_manager.set_transitioning(True)
 
-            # 记录导航时间戳到统一状态管理器，用于循环渲染检测
-            state_manager = get_unified_manager()
-            if state_manager:
-                current_time = time.time()
-                state_manager.set_state('dashboard.last_navigation_time', current_time)
-                debug_navigation("导航时间戳", f"设置导航时间戳: {current_time}")
+            # 记录导航时间戳，用于循环渲染检测
+            current_time = time.time()
+            st.session_state["dashboard.last_navigation_time"] = current_time
+            debug_navigation("导航时间戳", f"设置导航时间戳: {current_time}")
 
             if module_type == 'main':
                 debug_log(f"调用 nav_manager.set_current_main_module({selected_module})", "DEBUG")

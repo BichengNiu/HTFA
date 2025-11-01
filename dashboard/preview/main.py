@@ -6,12 +6,7 @@ import logging
 
 from dashboard.preview.data_loader import load_and_process_data
 from dashboard.preview.tabs import display_time_series_tab, display_overview_tab
-from dashboard.preview.state_integration import (
-    get_all_preview_data,
-    get_preview_state,
-    set_preview_state,
-    clear_preview_data
-)
+from dashboard.ui.utils.state_helpers import get_all_preview_data, get_preview_state, set_preview_state, clear_preview_data
 
 logger = logging.getLogger(__name__)
 
@@ -132,21 +127,10 @@ def render_file_upload_sidebar(st_module):
             show_preview=False
         )
 
-        # 显示已上传文件
-        if uploaded_industrial_file:
-            st_module.markdown("**已上传文件：**")
-            st_module.markdown(f"{uploaded_industrial_file.name}")
-
         # 数据状态面板（使用批量数据获取优化性能）
-        if get_preview_state('data_loaded_files'):
-            _render_data_status_panel(st_module)
-        else:
-            st_module.markdown("---")
-            st_module.markdown("**使用说明：**")
-            st_module.markdown("• 支持 Excel (.xlsx) 格式文件")
-            st_module.markdown("• 上传单个数据文件")
-            st_module.markdown("• 文件应包含时间序列数据")
-            st_module.markdown("• 支持周度、月度、日度数据")
+        # 已禁用：不在sidebar显示数据状态统计信息
+        # if get_preview_state('data_loaded_files'):
+        #     _render_data_status_panel(st_module)
 
     return uploaded_industrial_file
 
@@ -316,10 +300,6 @@ def process_uploaded_data(uploaded_file, extract_industry_name_func, st_module, 
             processing_time_str = f"{processing_time:.2f}秒"
             set_preview_state('data_processing_time', processing_time_str)
 
-            # 清除缓存，确保下次获取时能得到最新数据
-            get_all_preview_data.clear()
-            logger.info(f"[RENDER] 清除get_all_preview_data缓存")
-
             # 显示处理完成信息
             logger.info(f"[RENDER] 数据处理完成 - 文件: {uploaded_file_name}, 耗时: {processing_time_str}")
             with st_module.sidebar:
@@ -416,34 +396,31 @@ def display_industrial_tabs(extract_industry_name_func):
     if not uploaded_industrial_file and loaded_files:
         # 检查是否是真正的文件删除（而不是首次加载）
         # 通过检查会话中是否记录了文件上传状态来判断
-        from dashboard.core import get_unified_manager
-        manager = get_unified_manager()
-        file_was_uploaded = manager.get_namespaced('preview', '_file_upload_session_active', False)
+        file_was_uploaded = st.session_state.get('preview._file_upload_session_active', False)
 
         if file_was_uploaded:
             # 确实是用户删除了文件
             logger.info("[RENDER] 检测到文件被删除，清空数据")
-            clear_preview_data()
-            # 清除缓存，确保下次获取时不会得到旧数据
-            get_all_preview_data.clear()
-            logger.info("[RENDER] 清除get_all_preview_data缓存")
+            # 清空preview命名空间的所有状态
+            keys_to_delete = [k for k in st.session_state.keys() if k.startswith('preview.')]
+            for key in keys_to_delete:
+                del st.session_state[key]
             # 清除会话标志
-            manager.set_namespaced('preview', '_file_upload_session_active', False)
+            st.session_state['preview._file_upload_session_active'] = False
             st.success("数据已清空！")
             st.rerun()
         else:
             # 首次加载，只清空数据但不rerun
             logger.info("[RENDER] 首次加载检测到残留数据，静默清空")
-            clear_preview_data()
-            get_all_preview_data.clear()
+            keys_to_delete = [k for k in st.session_state.keys() if k.startswith('preview.')]
+            for key in keys_to_delete:
+                del st.session_state[key]
 
     if uploaded_industrial_file:
         uploaded_file_name = uploaded_industrial_file.name
 
         # 设置会话标志，表示文件已上传
-        from dashboard.core import get_unified_manager
-        manager = get_unified_manager()
-        manager.set_namespaced('preview', '_file_upload_session_active', True)
+        st.session_state['preview._file_upload_session_active'] = True
 
         # 智能缓存机制：检查文件和数据是否需要重新处理
         need_reprocess = should_reprocess_file(uploaded_industrial_file)
@@ -462,7 +439,7 @@ def display_industrial_tabs(extract_industry_name_func):
 
             # 确保必要的状态键已设置
             if not loaded_files:
-                set_preview_state('data_loaded_files', uploaded_file_name)
+                st.session_state['preview.data_loaded_files'] = uploaded_file_name
 
     # 渲染数据Tab页
     render_data_tabs(st, logger)

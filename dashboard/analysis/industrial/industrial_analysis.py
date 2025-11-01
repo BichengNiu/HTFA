@@ -26,18 +26,13 @@ from dashboard.ui.components.analysis import (
     IndustrialWelcomeComponent
 )
 
-# 导入统一状态管理器
-from dashboard.core import get_unified_manager
-
 
 def get_industrial_state(key: str, default=None):
     """获取工业分析模块状态"""
     try:
-        unified_manager = get_unified_manager()
-        if unified_manager:
-            return unified_manager.get_state(f'industrial.analysis.{key}', default)
-        else:
-            raise RuntimeError("统一状态管理器不可用")
+        import streamlit as st
+        full_key = f'industrial.analysis.{key}'
+        return st.session_state.get(full_key, default)
     except Exception as e:
         logger.error(f"获取工业分析状态失败: {e}")
         return default
@@ -45,28 +40,31 @@ def get_industrial_state(key: str, default=None):
 
 def set_industrial_state(key: str, value, is_initialization: bool = False):
     """设置工业分析模块状态"""
-    unified_manager = get_unified_manager()
-    if unified_manager is None:
-        raise RuntimeError("统一状态管理器不可用，无法设置工业分析状态")
-    return unified_manager.set_state(f'industrial.analysis.{key}', value, is_initialization=is_initialization)
+    try:
+        import streamlit as st
+        full_key = f'industrial.analysis.{key}'
+        st.session_state[full_key] = value
+        return True
+    except Exception as e:
+        logger.error(f"设置工业分析状态失败: {e}")
+        return False
 
 def initialize_industrial_states():
     """预初始化工业分析状态，避免第一次点击时刷新"""
     try:
-        unified_manager = get_unified_manager()
-        if unified_manager:
-            # 静默初始化企业经营时间筛选状态
-            enterprise_keys = [
-                'enterprise_time_range_chart1'
-            ]
+        import streamlit as st
+        # 静默初始化企业经营时间筛选状态
+        enterprise_keys = [
+            'enterprise_time_range_chart1'
+        ]
 
-            for key in enterprise_keys:
-                full_key = f'industrial.analysis.{key}'
-                # 只有在状态不存在时才初始化
-                if unified_manager.get_state(full_key) is None:
-                    unified_manager.set_state(full_key, "3年", is_initialization=True)
+        for key in enterprise_keys:
+            full_key = f'industrial.analysis.{key}'
+            # 只有在状态不存在时才初始化
+            if full_key not in st.session_state:
+                st.session_state[full_key] = "3年"
 
-            return True
+        return True
     except Exception:
         return False
 

@@ -20,21 +20,17 @@ from dashboard.ui.pages.main_modules.user_management import UserManagementWelcom
 logger = logging.getLogger(__name__)
 
 
-def force_navigation_state_sync(state_manager, main_module: str, sub_module: str = None):
+def force_navigation_state_sync(main_module: str, sub_module: str = None):
     """
     强制同步导航状态并刷新相关缓存。
 
     Args:
-        state_manager: 统一状态管理器
         main_module: 主模块名称
         sub_module: 子模块名称
     """
-    if state_manager is None:
-        raise RuntimeError("统一状态管理器不可用，无法同步导航状态")
-
-    state_manager.set_state('navigation.main_module', main_module)
+    st.session_state['navigation.main_module'] = main_module
     if sub_module:
-        state_manager.set_state('navigation.sub_module', sub_module)
+        st.session_state['navigation.sub_module'] = sub_module
 
     cache_keys_to_clear = [
         'ui.button_state_cache',
@@ -43,10 +39,10 @@ def force_navigation_state_sync(state_manager, main_module: str, sub_module: str
         'ui.module_selector_cache'
     ]
 
-    existing_keys = set(state_manager.get_all_keys())
+    existing_keys = set(st.session_state.keys())
     for key in cache_keys_to_clear:
         if key in existing_keys:
-            state_manager.clear_state(key)
+            del st.session_state[key]
 
     from dashboard.ui.utils.button_state_manager import clear_button_state_cache, update_button_state_cache
     clear_button_state_cache()
@@ -68,11 +64,8 @@ def check_user_permission(module_name: str) -> tuple[bool, Optional[str]]:
         tuple[bool, Optional[str]]: (是否有权限, 错误信息)
     """
     try:
-        from dashboard.core import get_unified_manager
-        state_manager = get_unified_manager()
-
         # 读取调试模式状态
-        debug_mode = state_manager.get_state('auth.debug_mode', True)
+        debug_mode = st.session_state.get('auth.debug_mode', True)
 
         # 调试模式：直接放行
         if debug_mode:
@@ -80,8 +73,8 @@ def check_user_permission(module_name: str) -> tuple[bool, Optional[str]]:
             return True, None
 
         # 正常模式：检查用户权限
-        user_accessible_modules = state_manager.get_state('auth.user_accessible_modules', set())
-        current_user = state_manager.get_state('auth.current_user', None)
+        user_accessible_modules = st.session_state.get('auth.user_accessible_modules', set())
+        current_user = st.session_state.get('auth.current_user', None)
 
         if not current_user:
             error_msg = f"请先登录后访问「{module_name}」模块"
@@ -388,20 +381,20 @@ def render_model_analysis_content(sub_module: Optional[str], nav_manager: Any) -
             tab1, tab2, tab3, tab4 = st.tabs(["数据准备", "模型训练", "模型分析", "新闻分析"])
 
             with tab1:
-                from dashboard.ui.pages.dfm import render_dfm_data_prep_tab
-                render_dfm_data_prep_tab(st)
+                from dashboard.ui.pages.dfm import render_dfm_data_prep_page
+                render_dfm_data_prep_page(st)
 
             with tab2:
-                from dashboard.ui.pages.dfm import render_dfm_train_model_tab
-                render_dfm_train_model_tab(st)
+                from dashboard.ui.pages.dfm import render_dfm_model_training_page
+                render_dfm_model_training_page(st)
 
             with tab3:
-                from dashboard.ui.pages.dfm import render_dfm_analysis_tab
-                render_dfm_analysis_tab(st)
+                from dashboard.ui.pages.dfm import render_dfm_model_analysis_page
+                render_dfm_model_analysis_page(st)
 
             with tab4:
-                from dashboard.ui.pages.dfm import render_dfm_news_analysis_tab
-                render_dfm_news_analysis_tab(st)
+                from dashboard.ui.pages.dfm import render_dfm_news_analysis_page
+                render_dfm_news_analysis_page(st)
         else:
             st.info("请选择一个模型分析子模块以开始分析")
 
@@ -552,57 +545,52 @@ def _clear_previous_module_state(current_main_module: str) -> None:
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(current_dir)))
         if project_root not in sys.path:
             sys.path.insert(0, project_root)
-            
-        from dashboard.core import get_unified_manager
 
-        state_manager = get_unified_manager()
-        if state_manager:
-            # 定义需要清理的状态键模式
-            state_patterns_to_clear = [
-                'temp_selected_',
-                'navigate_to_',
-                '_preview_data',
-                '_processed_data',
-                '_analysis_result'
-            ]
+        # 定义需要清理的状态键模式
+        state_patterns_to_clear = [
+            'temp_selected_',
+            'navigate_to_',
+            '_preview_data',
+            '_processed_data',
+            '_analysis_result'
+        ]
 
-            # 模块特定的状态清理
-            module_specific_states = {
-                '数据预览': ['monitoring_', 'model_', 'tools_'],
-                '监测分析': ['preview_', 'model_', 'tools_'],
-                '模型分析': ['preview_', 'monitoring_', 'tools_'],
-                '数据探索': ['preview_', 'monitoring_', 'model_']
-            }
+        # 模块特定的状态清理
+        module_specific_states = {
+            '数据预览': ['monitoring_', 'model_', 'tools_'],
+            '监测分析': ['preview_', 'model_', 'tools_'],
+            '模型分析': ['preview_', 'monitoring_', 'tools_'],
+            '数据探索': ['preview_', 'monitoring_', 'model_']
+        }
 
-            # 获取需要清理的模块前缀
-            prefixes_to_clear = module_specific_states.get(current_main_module, [])
+        # 获取需要清理的模块前缀
+        prefixes_to_clear = module_specific_states.get(current_main_module, [])
 
-            # 获取所有状态键
-            all_keys = state_manager.get_all_keys()
+        # 获取所有状态键
+        all_keys = list(st.session_state.keys())
 
-            # 清理状态
-            keys_to_remove = []
-            for key in all_keys:
-                key_str = str(key)
+        # 清理状态
+        keys_to_remove = []
+        for key in all_keys:
+            key_str = str(key)
 
-                # 清理通用状态模式
-                for pattern in state_patterns_to_clear:
-                    if pattern in key_str:
-                        keys_to_remove.append(key)
-                        break
+            # 清理通用状态模式
+            for pattern in state_patterns_to_clear:
+                if pattern in key_str:
+                    keys_to_remove.append(key)
+                    break
 
-                # 清理模块特定状态
-                for prefix in prefixes_to_clear:
-                    if key_str.startswith(prefix):
-                        keys_to_remove.append(key)
-                        break
+            # 清理模块特定状态
+            for prefix in prefixes_to_clear:
+                if key_str.startswith(prefix):
+                    keys_to_remove.append(key)
+                    break
 
-            for key in keys_to_remove:
-                state_manager.clear_state(key)
+        for key in keys_to_remove:
+            if key in st.session_state:
+                del st.session_state[key]
 
-            logger.debug(f"清理了 {len(keys_to_remove)} 个状态键")
-        else:
-            logger.warning("统一状态管理器不可用，跳过状态清理")
+        logger.debug(f"清理了 {len(keys_to_remove)} 个状态键")
 
     except Exception as e:
         logger.error(f"状态清理失败: {e}")

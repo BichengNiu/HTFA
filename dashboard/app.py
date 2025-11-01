@@ -20,7 +20,7 @@ if multiprocessing.current_process().name != 'MainProcess':
     # 如果这是子进程，立即退出，不执行任何UI相关代码
     sys.exit(0)
 
-# Dashboard状态管理已集成到统一状态管理器
+# Dashboard状态管理使用st.session_state
 
 # 在任何其他导入之前立即抑制 Streamlit 警告
 def _suppress_streamlit_warnings():
@@ -118,7 +118,7 @@ def inject_styles_always():
     inject_cached_styles()
 
 def inject_styles_once():
-    """只执行一次CSS注入 - 使用统一状态管理"""
+    """只执行一次CSS注入"""
     process_id = os.getpid()
     css_cache_key = f"css_injected_{process_id}"
 
@@ -126,11 +126,9 @@ def inject_styles_once():
     if _css_injection_cache.get(css_cache_key, False):
         return
 
-    unified_manager = get_unified_manager()
-
-    if not unified_manager.get_namespaced('dashboard', f'css.{css_cache_key}', False):
+    if not st.session_state.get(f'dashboard.css.{css_cache_key}', False):
         inject_cached_styles()
-        unified_manager.set_namespaced('dashboard', f'css.{css_cache_key}', True)
+        st.session_state[f'dashboard.css.{css_cache_key}'] = True
         _css_injection_cache[css_cache_key] = True
     else:
         _css_injection_cache[css_cache_key] = True
@@ -152,7 +150,6 @@ from dashboard.ui.utils.debug_helpers import (
 )
 
 # === 导入核心模块 ===
-from dashboard.core import get_unified_manager
 from dashboard.core.resource_loader import get_resource_loader
 from dashboard.core.config_cache import get_config_cache
 from dashboard.core.navigation_manager import get_navigation_manager
@@ -160,7 +157,6 @@ from dashboard.ui.utils.style_loader import inject_cached_styles
 
 # 简化初始化，避免循环导入
 lazy_loader = None
-state_manager = None
 nav_manager = None
 
 # 第二阶段优化：导入资源加载器
@@ -182,101 +178,49 @@ def get_managers():
     """延迟获取管理器实例 - 优化版本，使用session_state缓存"""
     # streamlit, time, os模块已在顶部导入
 
-    global lazy_loader, state_manager, nav_manager
+    global lazy_loader, nav_manager
 
     # 获取当前进程ID用于缓存键
     process_id = os.getpid()
-    managers_cache_key = f"cached_managers_{process_id}"
-    managers_cache_time_key = f"managers_cache_time_{process_id}"
-    managers_health_key = f"managers_health_{process_id}"
-
-    # 添加初始化锁，防止重复初始化
     init_lock_key = f"managers_init_lock_{process_id}"
 
-    # 尝试使用统一状态管理器检查初始化锁
-    def _check_init_lock_with_state_manager():
-        unified_manager = get_unified_manager()
-        if unified_manager:
-            # 检查初始化锁
-            if unified_manager.get_namespaced('dashboard', f'init_lock.{init_lock_key}', False):
-                # 正在初始化，返回缓存的实例（如果有）
-                cached_managers = unified_manager.get_state('dashboard.managers_cache', None)
-                if cached_managers:
-                    return cached_managers
-                return None, None, None
-            return False  # 没有锁
-        return None  # 状态管理器不可用
-
     # 检查初始化锁
-    lock_check = _check_init_lock_with_state_manager()
-    if lock_check is not None and lock_check is not False:
-        return lock_check
-    elif lock_check is None:
-        # 如果状态管理器不可用，继续初始化流程
-        # print(f"[DEBUG Init] 统一状态管理器不可用，使用简化初始化流程")  # 移除调试输出
-        pass
+    if st.session_state.get(f'dashboard.init_lock.{init_lock_key}', False):
+        # 正在初始化，返回缓存的实例（如果有）
+        cached_managers = st.session_state.get('dashboard.managers_cache', None)
+        if cached_managers:
+            return cached_managers
+        return None, None
 
-    # 检查真正的单例缓存 - 优先使用统一状态管理器
+    # 检查缓存
     current_time = time.time()
+    cached_managers = st.session_state.get('dashboard.managers_cache', None)
+    cached_time = st.session_state.get('dashboard.managers_cache_time', 0)
+    cached_health = st.session_state.get('dashboard.managers_health', False)
 
-    def _check_cache_with_state_manager():
-        unified_manager = get_unified_manager()
-        if unified_manager:
-            if unified_manager is not None:
-                cached_managers = unified_manager.get_state('dashboard.managers_cache', None)
-                cached_time = unified_manager.get_state('dashboard.managers_cache_time', 0)
-                cached_health = unified_manager.get_state('dashboard.managers_health', False)
-
-                # 如果缓存在30分钟内且健康检查通过，使用缓存
-                if (cached_managers and cached_time and
-                    current_time - cached_time < 1800 and cached_health):
-                    # 注意：不再需要手动同步导航状态，NavigationManager 自动管理
-                    return cached_managers
-        return None
-
-    # 尝试使用统一状态管理器缓存
-    cached_result = _check_cache_with_state_manager()
-    if cached_result:
-        lazy_loader, state_manager, nav_manager = cached_result
-        # 注意：不再需要手动同步导航状态，NavigationManager 自动管理
-        return lazy_loader, state_manager, nav_manager
-
-    # 如果统一状态管理器缓存不可用，进行首次初始化
-    # print(f"[DEBUG Init] 首次初始化管理器 (PID: {process_id})")  # 移除调试输出
-
-    # 继续执行初始化流程
+    # 如果缓存在30分钟内且健康检查通过，使用缓存
+    if (cached_managers and cached_time and
+        current_time - cached_time < 1800 and cached_health):
+        lazy_loader, nav_manager = cached_managers
+        return lazy_loader, nav_manager
 
     # 记录初始化开始时间
     start_time = time.time()
 
+    # 设置初始化锁
+    st.session_state[f'dashboard.init_lock.{init_lock_key}'] = True
+    debug_log(f"初始化锁设置成功: {init_lock_key}", "DEBUG")
+
     # 重新初始化管理器
-    if state_manager is None:
-        debug_log("正在尝试获取统一状态管理器...", "DEBUG")
-        state_manager = get_unified_manager()
-        if state_manager is None:
-            debug_log("统一状态管理器初始化返回None", "ERROR")
-            raise RuntimeError("统一状态管理器初始化失败")
-        else:
-            debug_log(f"统一状态管理器初始化成功: {type(state_manager)}", "INFO")
-
-    # 设置初始化锁（在state_manager初始化之后）
-    if state_manager:
-        state_manager.set_state(f'dashboard.init_lock.{init_lock_key}', True)
-        debug_log(f"初始化锁设置成功: {init_lock_key}", "DEBUG")
-    else:
-        debug_log(f"统一状态管理器不可用，无法设置初始化锁: {init_lock_key}", "WARNING")
-
     if lazy_loader is None:
         lazy_loader = get_resource_loader()
 
-    if nav_manager is None and state_manager is not None:
-        nav_manager = get_navigation_manager(state_manager)
+    if nav_manager is None:
+        nav_manager = get_navigation_manager()
         debug_log("导航管理器初始化成功", "INFO")
 
     # 执行健康检查
-    health_check = _perform_managers_health_check(state_manager, nav_manager)
-
-    # 注意：不再需要手动同步导航状态，NavigationManager 自动管理
+    health_check = _perform_managers_health_check(nav_manager)
 
     # 第二阶段优化：初始化资源加载系统
     resource_loader, config_cache = initialize_resource_loading()
@@ -285,42 +229,26 @@ def get_managers():
     end_time = time.time()
     init_time = (end_time - start_time) * 1000  # 转换为毫秒
 
-    # 缓存到统一状态管理器 (优先) 和 session_state (备用)
-    managers_tuple = (lazy_loader, state_manager, nav_manager)
+    # 缓存到session_state
+    managers_tuple = (lazy_loader, nav_manager)
+    st.session_state['dashboard.managers_cache'] = managers_tuple
+    st.session_state['dashboard.managers_cache_time'] = current_time
+    st.session_state['dashboard.managers_health'] = health_check
 
-    # 使用统一状态管理器缓存（移除session_state备用）
-    if state_manager:
-        state_manager.set_state('dashboard.managers_cache', managers_tuple)
-        state_manager.set_state('dashboard.managers_cache_time', current_time)
-        state_manager.set_state('dashboard.managers_health', health_check)
-
-        # 缓存资源加载器
-        if resource_loader:
-            state_manager.set_state(f'dashboard.resource_loader_{process_id}', resource_loader)
-        if config_cache:
-            state_manager.set_state(f'dashboard.config_cache_{process_id}', config_cache)
-    else:
-        # 统一状态管理器不可用时，记录错误但不抛出异常
-        print("[ERROR] 统一状态管理器不可用，无法缓存管理器")
-
+    # 缓存资源加载器
+    if resource_loader:
+        st.session_state[f'dashboard.resource_loader_{process_id}'] = resource_loader
+    if config_cache:
+        st.session_state[f'dashboard.config_cache_{process_id}'] = config_cache
 
     # 释放初始化锁
-    if state_manager:
-        state_manager.set_state(f'dashboard.init_lock.{init_lock_key}', False)
-    else:
-        print(f"[WARNING] 统一状态管理器不可用，无法释放初始化锁: {init_lock_key}")
+    st.session_state[f'dashboard.init_lock.{init_lock_key}'] = False
 
-    return lazy_loader, state_manager, nav_manager
+    return lazy_loader, nav_manager
 
-def _perform_managers_health_check(state_manager, nav_manager):
+def _perform_managers_health_check(nav_manager):
     """执行管理器健康检查"""
     try:
-        # 检查状态管理器
-        if state_manager is not None:
-            # 尝试调用一个简单的方法来验证状态管理器是否正常工作
-            if hasattr(state_manager, 'get_state'):
-                state_manager.get_state('health_check_test', 'default')
-
         # 检查导航管理器
         if nav_manager is not None:
             # 尝试调用一个简单的方法来验证导航管理器是否正常工作
@@ -336,8 +264,6 @@ def _perform_managers_health_check(state_manager, nav_manager):
 
 # 使用UI模块的按钮状态管理
 from dashboard.ui.utils.button_state_manager import optimize_button_state_management
-# 为了向后兼容，保持原有的函数名
-_optimize_button_state_management = optimize_button_state_management
 
 
 # 配置Altair数据转换器
@@ -356,15 +282,7 @@ from dashboard.ui.utils.state_helpers import (
 
 def clear_analysis_states(analysis_type: str, selected_name: str = None):
     """清理分析相关状态 - 使用UI模块的状态管理器"""
-    # 尝试使用UI模块的清理函数
-    if 'ui_clear_analysis_states' in globals():
-        return ui_clear_analysis_states(analysis_type)
-
-    # 如果UI模块的清理函数不可用，抛出错误
-    raise RuntimeError(f"分析状态清理失败：UI模块清理函数不可用 (analysis_type: {analysis_type})")
-
-# set_analysis_data和clear_analysis_data函数已通过UI模块导入
-# 如果导入失败，会使用上面定义的fallback版本
+    return ui_clear_analysis_states(analysis_type)
 
 
 # extract_industry_name函数已移至dashboard.utils.industry_utils模块，避免重复定义
@@ -386,27 +304,24 @@ MODULE_CONFIG = {
 def _perform_intelligent_state_cleanup():
     """执行智能状态清理，避免循环渲染"""
     try:
-        # 使用统一状态管理器清理临时状态
-        if state_manager:
-            # 获取所有状态键
-            all_keys = state_manager.get_all_keys()
+        # 获取所有状态键
+        all_keys = list(st.session_state.keys())
 
-            # 清理导航相关的临时状态
-            navigation_patterns = ['navigate_to', 'temp_selected', 'rerun', '_transition', '_loading']
-            navigation_keys = [k for k in all_keys if any(pattern in str(k) for pattern in navigation_patterns)]
+        # 清理导航相关的临时状态
+        navigation_patterns = ['navigate_to', 'temp_selected', 'rerun', '_transition', '_loading']
+        navigation_keys = [k for k in all_keys if any(pattern in str(k) for pattern in navigation_patterns)]
 
-            for key in navigation_keys:
-                state_manager.clear_state(key)
+        for key in navigation_keys:
+            if key in st.session_state:
+                del st.session_state[key]
 
-            # 清理可能导致循环的组件状态
-            component_patterns = ['_preview_data', '_processed_data', '_analysis_result', '_cached_']
-            component_keys = [k for k in all_keys if any(pattern in str(k) for pattern in component_patterns)]
+        # 清理可能导致循环的组件状态
+        component_patterns = ['_preview_data', '_processed_data', '_analysis_result', '_cached_']
+        component_keys = [k for k in all_keys if any(pattern in str(k) for pattern in component_patterns)]
 
-            for key in component_keys:
-                state_manager.clear_state(key)
-        else:
-            # 统一状态管理器不可用时，记录错误
-            print("[ERROR] 统一状态管理器不可用，无法进行状态清理")
+        for key in component_keys:
+            if key in st.session_state:
+                del st.session_state[key]
 
         print(f"[DEBUG Recovery] 清理了 {len(navigation_keys + component_keys)} 个状态键")
 
@@ -418,7 +333,7 @@ def _perform_intelligent_state_cleanup():
 inject_styles_always()
 
 # 获取管理器实例
-lazy_loader, state_manager, nav_manager = get_managers()
+lazy_loader, nav_manager = get_managers()
 
 # 集成认证中间件
 from dashboard.ui.components.auth.auth_middleware import get_auth_middleware
@@ -443,107 +358,79 @@ if current_user:
 current_time = time.time()
 
 # 检查是否有模块正在加载
-if state_manager is not None:
-    all_keys = state_manager.get_all_keys()
-    loading_modules = [key for key in all_keys if key.startswith('_loading_')]
-    if loading_modules:
-        st.stop()
+all_keys = list(st.session_state.keys())
+loading_modules = [key for key in all_keys if key.startswith('_loading_')]
+if loading_modules:
+    st.stop()
 
-    # 检测快速连续重新渲染（回弹检测）- 改进版本
-    last_render_time = state_manager.get_state('dashboard.last_render_time', 0)
-    render_interval = current_time - last_render_time
+# 检测快速连续重新渲染（回弹检测）- 改进版本
+last_render_time = st.session_state.get('dashboard.last_render_time', 0)
+render_interval = current_time - last_render_time
 
-    # 检查是否是用户主动导航操作导致的重新渲染
-    is_navigation_triggered = False
-    if nav_manager:
-        # 检查导航状态是否在变化中
-        is_navigation_triggered = nav_manager.is_transitioning()
+# 检查是否是用户主动导航操作导致的重新渲染
+is_navigation_triggered = False
+if nav_manager:
+    # 检查导航状态是否在变化中
+    is_navigation_triggered = nav_manager.is_transitioning()
 
-        # 检查是否在导航操作的时间窗口内（2秒内的导航操作都认为是用户主动的）
-        if not is_navigation_triggered and state_manager:
-            last_nav_time = state_manager.get_state('dashboard.last_navigation_time', 0)
-            if current_time - last_nav_time < 2.0:  # 2秒的导航操作窗口
-                is_navigation_triggered = True
+    # 检查是否在导航操作的时间窗口内（2秒内的导航操作都认为是用户主动的）
+    if not is_navigation_triggered:
+        last_nav_time = st.session_state.get('dashboard.last_navigation_time', 0)
+        if current_time - last_nav_time < 2.0:  # 2秒的导航操作窗口
+            is_navigation_triggered = True
 
-    # 只有在非导航触发且间隔很短的情况下才视为回弹
-    if render_interval < 0.05 and last_render_time > 0 and not is_navigation_triggered:  # 50ms阈值，排除导航触发
-        st.stop()
+# 只有在非导航触发且间隔很短的情况下才视为回弹
+if render_interval < 0.05 and last_render_time > 0 and not is_navigation_triggered:  # 50ms阈值，排除导航触发
+    st.stop()
 
-    state_manager.set_state('dashboard.last_render_time', current_time)
-else:
-    # 如果状态管理器不可用，跳过渲染跟踪
-    pass
+st.session_state['dashboard.last_render_time'] = current_time
 
 # 如果管理器正在初始化，跳过本次渲染
-if lazy_loader is None or state_manager is None or nav_manager is None:
+if lazy_loader is None or nav_manager is None:
     st.info("系统正在初始化，请稍候...")
     st.stop()
 
 try:
-    if state_manager is not None:
-        state_manager.set_state('dashboard.initialized', True)
-        state_manager.set_state('dashboard.start_time', datetime.now())
+    st.session_state['dashboard.initialized'] = True
+    st.session_state['dashboard.start_time'] = datetime.now()
 except Exception as e:
     st.error(f"状态初始化失败: {e}")
     st.stop()
 
 # 管理器初始化结果已在get_managers()函数中打印，避免重复
 
-# 使用统一状态管理器确保键的唯一性和防止重复渲染
-if state_manager:
-    if not state_manager.get_state('dashboard.sidebar.rendered', False):
-        state_manager.set_state('dashboard.sidebar.rendered', True)
-        state_manager.set_state('dashboard.sidebar.key_counter', 0)
-        state_manager.set_state('dashboard.main_content.rendered', False)
-else:
-    # 降级处理：记录警告
-    print("[WARNING] 统一状态管理器不可用，无法设置侧边栏渲染状态")
+# 确保键的唯一性和防止重复渲染
+if not st.session_state.get('dashboard.sidebar.rendered', False):
+    st.session_state['dashboard.sidebar.rendered'] = True
+    st.session_state['dashboard.sidebar.key_counter'] = 0
+    st.session_state['dashboard.main_content.rendered'] = False
 
-# 改进的循环渲染检测机制 - 使用统一状态管理
+# 改进的循环渲染检测机制
 current_time = time.time()
 
-def _manage_render_tracking_with_state_manager():
-    """使用统一状态管理器管理渲染跟踪"""
-    try:
-        _, state_manager, _ = get_managers()
-        if state_manager:
-            # 获取渲染跟踪数据
-            default_tracking = {'count': 0, 'last_reset': time.time(), 'last_render': 0}
-            tracking = state_manager.get_state('dashboard.render_tracking', default_tracking)
+# 获取渲染跟踪数据
+default_tracking = {'count': 0, 'last_reset': time.time(), 'last_render': 0}
+tracking = st.session_state.get('dashboard.render_tracking', default_tracking)
 
-            # 每30秒重置计数器，避免正常使用被误判
-            if current_time - tracking['last_reset'] > 30:
-                current_ts = time.time()
-                tracking = {'count': 0, 'last_reset': current_ts, 'last_render': current_ts}
-                state_manager.set_state('dashboard.render_tracking', tracking)
+# 每30秒重置计数器，避免正常使用被误判
+if current_time - tracking['last_reset'] > 30:
+    current_ts = time.time()
+    tracking = {'count': 0, 'last_reset': current_ts, 'last_render': current_ts}
+    st.session_state['dashboard.render_tracking'] = tracking
 
-            # 增加渲染计数
-            tracking['count'] += 1
-            tracking['last_render'] = time.time()
-            state_manager.set_state('dashboard.render_tracking', tracking)
-
-            # 检测短时间内的快速渲染
-            render_interval = current_time - tracking['last_render']
-            return tracking, render_interval
-        return None, None
-    except Exception as e:
-        print(f"[DEBUG Render] 统一状态管理器渲染跟踪失败: {e}")
-        return None, None
-
-# 尝试使用统一状态管理器
-tracking, render_interval = _manage_render_tracking_with_state_manager()
-
-# 如果统一状态管理器不可用，跳过渲染跟踪
-if tracking is None:
-    pass
+# 增加渲染计数
+tracking['count'] += 1
+render_interval = current_time - tracking['last_render']
+tracking['last_render'] = time.time()
+st.session_state['dashboard.render_tracking'] = tracking
 
 # 改进循环渲染检测：更严格的条件，避免误判用户正常操作
 # 只有在极短时间内（<0.05秒）连续渲染超过10次且非导航触发时才认为是循环渲染
 is_user_navigation = False
-if nav_manager and state_manager:
+if nav_manager:
     # 检查是否是用户导航操作
     is_user_navigation = (nav_manager.is_transitioning() or
-                         (current_time - state_manager.get_state('dashboard.last_navigation_time', 0) < 3.0))
+                         (current_time - st.session_state.get('dashboard.last_navigation_time', 0) < 3.0))
 
 if (render_interval and render_interval < 0.05 and tracking and tracking['count'] > 10 and
     not is_user_navigation):
@@ -553,22 +440,10 @@ if (render_interval and render_interval < 0.05 and tracking and tracking['count'
     # 智能状态清理
     _perform_intelligent_state_cleanup()
 
-    # 重置渲染计数 - 优先使用统一状态管理器
-    def _reset_render_count():
-        try:
-            _, state_manager, _ = get_managers()
-            if state_manager:
-                current_ts = time.time()
-                tracking = {'count': 0, 'last_reset': current_ts, 'last_render': current_ts}
-                state_manager.set_state('dashboard.render_tracking', tracking)
-                return True
-            return False
-        except Exception:
-            return False
-
-    if not _reset_render_count():
-        # 如果重置失败，跳过
-        pass
+    # 重置渲染计数
+    current_ts = time.time()
+    tracking = {'count': 0, 'last_reset': current_ts, 'last_render': current_ts}
+    st.session_state['dashboard.render_tracking'] = tracking
 
     # 简化恢复信息，减少对用户的干扰
     with st.expander("系统状态", expanded=False):
@@ -577,41 +452,31 @@ if (render_interval and render_interval < 0.05 and tracking and tracking['count'
         if st.button("刷新页面", key="manual_refresh_button"):
             st.rerun()
 
-# 使用统一状态管理器确保key稳定性
-if state_manager:
-    stable_key_prefix = state_manager.get_state('dashboard.sidebar.stable_key_prefix')
-    if not stable_key_prefix:
-        # 使用更长的时间戳和随机数确保唯一性
-        import time
-        import random
-        import uuid
-        timestamp = str(int(time.time() * 1000))
-        random_suffix = str(random.randint(1000, 9999))
-        session_id = str(uuid.uuid4())[:8]  # 使用UUID的前8个字符
-        stable_key_prefix = f"sidebar_{timestamp}_{random_suffix}_{session_id}"
-        state_manager.set_state('dashboard.sidebar.stable_key_prefix', stable_key_prefix)
-    key_prefix = stable_key_prefix
-else:
-    # 降级处理，也使用随机数确保唯一性
+# 确保key稳定性
+stable_key_prefix = st.session_state.get('dashboard.sidebar.stable_key_prefix')
+if not stable_key_prefix:
+    # 使用更长的时间戳和随机数确保唯一性
     import time
     import random
     import uuid
     timestamp = str(int(time.time() * 1000))
     random_suffix = str(random.randint(1000, 9999))
-    session_id = str(uuid.uuid4())[:8]
-    key_prefix = f"sidebar_{timestamp}_{random_suffix}_{session_id}"
+    session_id = str(uuid.uuid4())[:8]  # 使用UUID的前8个字符
+    stable_key_prefix = f"sidebar_{timestamp}_{random_suffix}_{session_id}"
+    st.session_state['dashboard.sidebar.stable_key_prefix'] = stable_key_prefix
+key_prefix = stable_key_prefix
 
 # 使用UI模块的完整侧边栏组件
 from dashboard.ui.components.sidebar import render_complete_sidebar
 from dashboard.ui.components.content_router import force_navigation_state_sync
 
 # 在侧边栏渲染前强制同步导航状态，确保按钮状态正确
-if state_manager and nav_manager:
+if nav_manager:
     current_main = nav_manager.get_current_main_module()
     current_sub = nav_manager.get_current_sub_module()
 
     if current_main or current_sub:
-        force_navigation_state_sync(state_manager, current_main, current_sub)
+        force_navigation_state_sync(current_main, current_sub)
 
     # 获取用户可访问的模块信息
     user_accessible_modules = set()
@@ -634,11 +499,10 @@ if state_manager and nav_manager:
             # 正常模式且未登录：无权限
             user_accessible_modules = set()
 
-    # 将权限信息和调试模式状态存储到状态管理器
-    if state_manager:
-        state_manager.set_state('auth.debug_mode', AuthConfig.is_debug_mode())
-        state_manager.set_state('auth.user_accessible_modules', user_accessible_modules)
-        state_manager.set_state('auth.current_user', current_user)
+    # 将权限信息和调试模式状态存储到session_state
+    st.session_state['auth.debug_mode'] = AuthConfig.is_debug_mode()
+    st.session_state['auth.user_accessible_modules'] = user_accessible_modules
+    st.session_state['auth.current_user'] = current_user
     
     # 渲染完整侧边栏（显示所有模块）
     sidebar_result = render_complete_sidebar(MODULE_CONFIG, nav_manager, key_prefix)
@@ -656,21 +520,19 @@ if state_manager and nav_manager:
         selected_sub_module_val = None
 
     # 处理临时状态恢复
-    if state_manager:
-        temp_main = state_manager.get_state('navigation.temp_selected_main_module')
-        if temp_main:
-            selected_main_module_val = temp_main
-            state_manager.clear_state('navigation.temp_selected_main_module')
-            debug_navigation("临时状态恢复", f"从state_manager恢复主模块选择: {selected_main_module_val}")
+    temp_main = st.session_state.get('navigation.temp_selected_main_module')
+    if temp_main:
+        selected_main_module_val = temp_main
+        if 'navigation.temp_selected_main_module' in st.session_state:
+            del st.session_state['navigation.temp_selected_main_module']
+        debug_navigation("临时状态恢复", f"恢复主模块选择: {selected_main_module_val}")
 
-        temp_sub = state_manager.get_state('navigation.temp_selected_sub_module')
-        if temp_sub:
-            selected_sub_module_val = temp_sub
-            state_manager.set_state('navigation.last_clicked_sub_module', selected_sub_module_val)
-            state_manager.clear_state('navigation.temp_selected_sub_module')
-    else:
-        # 统一状态管理器不可用时，记录错误
-        debug_navigation("状态管理器不可用", "无法处理临时状态恢复")
+    temp_sub = st.session_state.get('navigation.temp_selected_sub_module')
+    if temp_sub:
+        selected_sub_module_val = temp_sub
+        st.session_state['navigation.last_clicked_sub_module'] = selected_sub_module_val
+        if 'navigation.temp_selected_sub_module' in st.session_state:
+            del st.session_state['navigation.temp_selected_sub_module']
 
     # 获取当前状态用于后续逻辑
     current_main_module = nav_manager.get_current_main_module() if nav_manager else None
@@ -702,14 +564,10 @@ if selected_main_module_val != current_main_module:
 
     # 避免重复渲染，只在必要时重新运行
     # 检查是否真的需要重新渲染
-    if state_manager:
-        last_change = state_manager.get_state('dashboard.last_main_module_change')
-        if last_change != selected_main_module_val:
-            state_manager.set_state('dashboard.last_main_module_change', selected_main_module_val)
-            debug_navigation("重新渲染", f"主模块切换到 {selected_main_module_val}，触发重新渲染")
-    else:
-        # 统一状态管理器不可用时，记录错误
-        debug_navigation("状态管理器不可用", f"无法记录主模块变更: {selected_main_module_val}")
+    last_change = st.session_state.get('dashboard.last_main_module_change')
+    if last_change != selected_main_module_val:
+        st.session_state['dashboard.last_main_module_change'] = selected_main_module_val
+        debug_navigation("重新渲染", f"主模块切换到 {selected_main_module_val}，触发重新渲染")
 else:
     # 确保非切换时清除transitioning状态
     if nav_manager:

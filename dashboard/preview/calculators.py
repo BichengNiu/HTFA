@@ -70,12 +70,7 @@ def calculate_summary(
             current_value, reference_values, frequency, indicator_unit, indicator_type
         )
 
-        # 4. 计算历史统计
-        hist_stats = _calculate_historical_stats(
-            series, current_date, config['lookback_years']
-        )
-
-        # 5. 构建行数据
+        # 4. 构建行数据
         row_data = {
             config['indicator_name_column']: indicator,
             '单位': indicator_unit,  # 添加单位列,用于显示时格式化判断
@@ -86,8 +81,7 @@ def calculate_summary(
                 else current_date.year
             ),
             **reference_values,
-            **growth_rates,
-            **hist_stats
+            **growth_rates
         }
 
         summary_data.append(row_data)
@@ -143,23 +137,15 @@ def _calculate_reference_values(
 
     elif frequency == 'daily':
         yesterday_date = current_date - pd.Timedelta(days=1)
-        last_week_date = current_date - pd.Timedelta(days=7)
-        last_month_date = current_date - pd.Timedelta(days=30)
-        last_year_date = current_date - pd.Timedelta(days=365)
 
         # 计算时间段均值
         week_mean = _calculate_period_mean(series, current_date, days_back=7)
         month_mean = _calculate_period_mean(series, current_date, days_back=30)
-        year_mean = _calculate_period_mean(series, current_date, days_back=365)
 
         return {
             '昨日值': _get_value_at_date(df, series.name, yesterday_date),
-            '上周值': _get_value_at_date(df, series.name, last_week_date),
-            '上月值': _get_value_at_date(df, series.name, last_month_date),
-            '上年值': _get_value_at_date(df, series.name, last_year_date),
             '上周均值': week_mean,
-            '上月均值': month_mean,
-            '上年均值': year_mean
+            '上月均值': month_mean
         }
 
     elif frequency == 'ten_day':
@@ -213,18 +199,10 @@ def _calculate_growth_rates(
 
     # 环比增长率 - 根据频率类型分别处理
     if frequency == 'daily':
-        # 日度数据：计算环比昨日、环比上周、环比上月
+        # 日度数据：只计算环比昨日
         if '昨日值' in reference_values:
             growth_rates['环比昨日'] = _growth_rate(
                 current_value, reference_values['昨日值'], True, use_difference
-            )
-        if '上周值' in reference_values:
-            growth_rates['环比上周'] = _growth_rate(
-                current_value, reference_values['上周值'], True, use_difference
-            )
-        if '上月值' in reference_values:
-            growth_rates['环比上月'] = _growth_rate(
-                current_value, reference_values['上月值'], True, use_difference
             )
     elif frequency == 'weekly':
         # 周度数据：只计算环比上周
@@ -250,43 +228,12 @@ def _calculate_growth_rates(
         growth_rates['同比上年'] = _growth_rate(
             current_value, reference_values['上年同月值'], False, use_difference
         )
-    elif '上年值' in reference_values and frequency in ('daily', 'yearly'):
+    elif '上年值' in reference_values and frequency == 'yearly':
         growth_rates['同比上年'] = _growth_rate(
             current_value, reference_values['上年值'], True, use_difference
         )
 
     return growth_rates
-
-
-def _calculate_historical_stats(
-    series: pd.Series,
-    current_date: pd.Timestamp,
-    lookback_years: int
-) -> Dict[str, float]:
-    """计算历史统计(所有频率通用)"""
-    current_year = current_date.year
-    start_year = current_year - lookback_years
-    end_year = current_year - 1
-
-    start_date = pd.Timestamp(f'{start_year}-01-01')
-    end_date = pd.Timestamp(f'{end_year}-12-31')
-
-    historical_data = series.loc[
-        (series.index >= start_date) & (series.index <= end_date)
-    ]
-
-    if not historical_data.empty:
-        return {
-            f'近{lookback_years}年最大值': historical_data.max(),
-            f'近{lookback_years}年最小值': historical_data.min(),
-            f'近{lookback_years}年平均值': historical_data.mean()
-        }
-    else:
-        return {
-            f'近{lookback_years}年最大值': np.nan,
-            f'近{lookback_years}年最小值': np.nan,
-            f'近{lookback_years}年平均值': np.nan
-        }
 
 
 # 辅助函数

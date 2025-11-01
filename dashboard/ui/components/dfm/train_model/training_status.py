@@ -165,17 +165,17 @@ class TrainingStatusComponent(DFMComponent):
             # === 与老代码第1452-1650行完全一致的训练状态监控 ===
 
             # 1. 训练控制按钮 - 与老代码第1460-1500行一致
-            control_result = self._render_training_controls_legacy(st_obj, training_config or {})
+            control_result = self._render_training_controls(st_obj, training_config or {})
 
             # 2. 训练状态显示 - 与老代码第1502-1550行一致
-            current_status = self._get_current_training_status_legacy()
-            status_result = self._render_status_display_legacy(st_obj, current_status)
+            current_status = self._get_current_training_status()
+            status_result = self._render_status_display(st_obj, current_status)
 
             # 3. 训练日志显示 - 与老代码第1552-1600行一致
-            log_result = self._render_training_logs_legacy(st_obj)
+            log_result = self._render_training_logs(st_obj)
 
             # 4. 结果下载区域 - 与老代码第1602-1650行一致
-            download_result = self._render_download_section_legacy(st_obj, current_status)
+            download_result = self._render_download_section(st_obj, current_status)
 
             # 返回训练结果
             return {
@@ -192,7 +192,7 @@ class TrainingStatusComponent(DFMComponent):
 
     # === 与老代码完全一致的辅助方法 ===
 
-    def _render_training_controls_legacy(self, st_obj, training_config: Dict[str, Any]) -> Dict[str, Any]:
+    def _render_training_controls(self, st_obj, training_config: Dict[str, Any]) -> Dict[str, Any]:
         """渲染训练控制按钮 - 与老代码第1460-1500行一致"""
         st_obj.markdown("**训练控制**")
 
@@ -204,7 +204,7 @@ class TrainingStatusComponent(DFMComponent):
                            key="new_btn_dfm_start_training",
                            help="开始模型训练",
                            use_container_width=True):
-                self._start_training_legacy(training_config)
+                self._start_training(training_config)
                 return {'action': 'start_training'}
 
         with col_stop:
@@ -212,7 +212,7 @@ class TrainingStatusComponent(DFMComponent):
                            key="new_btn_dfm_stop_training",
                            help="停止当前训练",
                            use_container_width=True):
-                self._stop_training_legacy()
+                self._stop_training()
                 return {'action': 'stop_training'}
 
         with col_reset:
@@ -220,16 +220,16 @@ class TrainingStatusComponent(DFMComponent):
                            key="new_btn_dfm_reset_training",
                            help="重置训练状态",
                            use_container_width=True):
-                self._reset_training_state_legacy()
+                self._reset_training_state()
                 return {'action': 'reset_training'}
 
         return {'action': 'none'}
 
-    def _get_current_training_status_legacy(self) -> str:
+    def _get_current_training_status(self) -> str:
         """获取当前训练状态 - 与老代码第1502-1520行一致"""
         return self._get_state('dfm_training_status', '未开始')
 
-    def _render_status_display_legacy(self, st_obj, current_status: str) -> Dict[str, Any]:
+    def _render_status_display(self, st_obj, current_status: str) -> Dict[str, Any]:
         """渲染训练状态显示 - 与老代码第1522-1550行一致"""
         st_obj.markdown("**当前状态**")
 
@@ -253,7 +253,7 @@ class TrainingStatusComponent(DFMComponent):
 
         return {'status': current_status, 'progress': progress}
 
-    def _render_training_logs_legacy(self, st_obj) -> Dict[str, Any]:
+    def _render_training_logs(self, st_obj) -> Dict[str, Any]:
         """渲染训练日志显示 - 与老代码第1552-1600行一致"""
         st_obj.markdown("**训练日志**")
 
@@ -271,7 +271,7 @@ class TrainingStatusComponent(DFMComponent):
 
         return {'logs': training_logs}
 
-    def _render_download_section_legacy(self, st_obj, current_status: str) -> Dict[str, Any]:
+    def _render_download_section(self, st_obj, current_status: str) -> Dict[str, Any]:
         """渲染结果下载区域 - 与老代码第1602-1650行一致"""
         st_obj.markdown("**结果下载**")
 
@@ -302,7 +302,7 @@ class TrainingStatusComponent(DFMComponent):
 
         return {'action': 'none'}
 
-    def _start_training_legacy(self, training_config: Dict[str, Any]):
+    def _start_training(self, training_config: Dict[str, Any]):
         """开始训练 - 与老代码训练逻辑一致"""
         try:
             self._set_state('dfm_training_status', '训练中')
@@ -317,12 +317,12 @@ class TrainingStatusComponent(DFMComponent):
             self._set_state('dfm_training_status', '训练失败')
             self._add_training_log(f"训练失败: {str(e)}")
 
-    def _stop_training_legacy(self):
+    def _stop_training(self):
         """停止训练"""
         self._set_state('dfm_training_status', '已停止')
         self._add_training_log("训练已停止")
 
-    def _reset_training_state_legacy(self):
+    def _reset_training_state(self):
         """重置训练状态"""
         self._set_state('dfm_training_status', '未开始')
         self._set_state('dfm_training_progress', 0)
@@ -346,226 +346,6 @@ class TrainingStatusComponent(DFMComponent):
 
         print(f"[HOT] [训练组件] 日志已添加: {log_entry}, 总计: {len(current_logs)} 条")
     
-    def _render_training_status(self, st_obj) -> str:
-        """
-        渲染训练状态
-        
-        Args:
-            st_obj: Streamlit对象
-            
-        Returns:
-            当前训练状态
-        """
-        st_obj.markdown("**训练状态**")
-        
-        current_status = self._get_training_status()
-        
-        # 根据状态显示不同的UI
-        if current_status == '等待开始':
-            st_obj.info("[READY] 准备就绪")
-        elif current_status == '准备启动训练...':
-            st_obj.info("[PREP] 准备中...")
-        elif current_status == '正在训练...':
-            st_obj.warning("[TRAIN] 训练中...")
-            # 显示进度条
-            progress = self._get_state('dfm_training_progress', 0)
-            if progress > 0:
-                st_obj.progress(progress / 100.0)
-        elif current_status == '训练完成':
-            st_obj.success("[DONE] 训练完成")
-        elif current_status.startswith('训练失败'):
-            st_obj.error("[FAIL] 训练失败")
-            # 显示错误详情
-            error = self._get_state('dfm_training_error')
-            if error:
-                st_obj.error(f"错误详情: {error}")
-        else:
-            st_obj.info(f"[DATA] {current_status}")
-        
-        return current_status
-    
-    def _render_training_log(self, st_obj) -> None:
-        """
-        渲染训练日志
-        
-        Args:
-            st_obj: Streamlit对象
-        """
-        st_obj.markdown("**训练日志**")
-        
-        current_log = self._get_state('dfm_training_log', [])
-        
-        if current_log:
-            # 显示最新的日志条目
-            recent_logs = current_log[-10:] if len(current_log) > 10 else current_log
-            log_content = self._format_training_log(recent_logs)
-            
-            st_obj.text_area(
-                "训练日志内容",
-                value=log_content,
-                height=150,
-                disabled=True,
-                key=f"{self.get_state_key_prefix()}_log_display_{len(current_log)}",
-                label_visibility="collapsed"
-            )
-            
-            st_obj.caption(f"[LIST] {len(current_log)} 条日志")
-        else:
-            current_status = self._get_training_status()
-            if current_status in ['正在训练...', '准备启动训练...']:
-                st_obj.info("⏳ 等待日志...")
-            else:
-                st_obj.info("[NONE] 无日志")
-    
-    def _render_training_controls(self, st_obj, training_config: Optional[Dict[str, Any]]) -> None:
-        """
-        渲染训练控制按钮
-        
-        Args:
-            st_obj: Streamlit对象
-            training_config: 训练配置
-        """
-        st_obj.markdown("**训练控制**")
-        
-        col1, col2 = st_obj.columns(2)
-        
-        current_status = self._get_training_status()
-        
-        with col1:
-            # 开始训练按钮
-            if current_status in ['等待开始', '训练失败']:
-                if st_obj.button(
-                    "开始训练",
-                    key=f"{self.get_state_key_prefix()}_start_training",
-                    disabled=not training_config or not self.validate_input(training_config)
-                ):
-                    if training_config:
-                        self._set_state('dfm_should_start_training', True)
-                        st_obj.rerun()
-            else:
-                st_obj.button(
-                    "开始训练",
-                    disabled=True,
-                    key=f"{self.get_state_key_prefix()}_start_training_disabled"
-                )
-        
-        with col2:
-            # 重置状态按钮
-            if st_obj.button(
-                "重置状态",
-                key=f"{self.get_state_key_prefix()}_reset_status"
-            ):
-                self._reset_training_state()
-                st_obj.rerun()
-    
-    def _render_training_results(self, st_obj) -> Optional[Dict[str, str]]:
-        """
-        渲染训练结果
-        
-        Args:
-            st_obj: Streamlit对象
-            
-        Returns:
-            训练结果路径字典或None
-        """
-        st_obj.markdown("**训练结果**")
-        
-        current_status = self._get_training_status()
-        results = self._get_state('dfm_model_results_paths')
-        
-        if current_status == '训练完成' and results:
-            # 统计可用文件
-            available_files = self._get_available_downloads(results)
-            
-            if available_files:
-                st_obj.success("[SUCCESS] 训练完成")
-                st_obj.info(f"[DATA] {len(available_files)} 个文件")
-                
-                # 显示文件列表
-                with st_obj.expander("查看生成文件", expanded=False):
-                    for file_key, file_path in available_files:
-                        file_name = os.path.basename(file_path)
-                        file_size = self._get_file_size(file_path)
-                        st_obj.text(f"{file_name} ({file_size})")
-                
-                return results
-            else:
-                st_obj.warning("[WARNING] 未找到可用文件")
-        else:
-            if current_status == '正在训练...':
-                st_obj.info("⏳ 训练进行中...")
-            elif current_status.startswith('训练失败'):
-                st_obj.error("[ERROR] 训练失败")
-            else:
-                st_obj.info("[NONE] 无结果")
-        
-        return None
-
-    def _render_download_buttons(self, st_obj, results: Dict[str, str]) -> None:
-        """
-        渲染下载按钮
-
-        Args:
-            st_obj: Streamlit对象
-            results: 训练结果路径字典
-        """
-        st_obj.markdown("**下载文件**")
-
-        available_downloads = self._get_available_downloads(results)
-
-        if available_downloads:
-            # 核心文件类型映射
-            file_type_mapping = {
-                'final_model_joblib': ('[PACKAGE]', '模型'),
-                'model_joblib': ('[PACKAGE]', '模型'),
-                'metadata': ('[DOC]', '元数据'),
-                'simplified_metadata': ('[DOC]', '元数据'),
-                'training_data': ('[DATA]', '训练数据')
-            }
-
-            # 创建下载按钮
-            for idx, (file_key, file_path) in enumerate(available_downloads):
-                if file_key in file_type_mapping:
-                    icon, display_name = file_type_mapping[file_key]
-                    file_name = os.path.basename(file_path)
-
-                    try:
-                        # 读取文件数据
-                        with open(file_path, 'rb') as f:
-                            file_data = f.read()
-
-                        # 确定MIME类型
-                        if file_path.endswith('.csv'):
-                            mime_type = "text/csv"
-                        elif file_path.endswith('.json'):
-                            mime_type = "application/json"
-                        else:
-                            mime_type = "application/octet-stream"
-
-                        # 创建下载按钮
-                        st_obj.download_button(
-                            label=f"{icon} {display_name}",
-                            data=file_data,
-                            file_name=file_name,
-                            mime=mime_type,
-                            key=f"{self.get_state_key_prefix()}_download_{file_key}_{idx}",
-                            use_container_width=True
-                        )
-
-                    except Exception as e:
-                        st_obj.warning(f"[WARNING] {display_name} 文件读取失败: {e}")
-        else:
-            st_obj.info("[NONE] 无可下载文件")
-
-    def _get_training_status(self) -> str:
-        """
-        获取当前训练状态
-
-        Returns:
-            训练状态字符串
-        """
-        return self._get_state('dfm_training_status', '等待开始')
-
     def _update_training_status(self, status: str, log_entry: Optional[str] = None) -> None:
         """
         更新训练状态
@@ -604,50 +384,6 @@ class TrainingStatusComponent(DFMComponent):
 
         logger.info(f"Training status updated: {old_status} -> {status}")
 
-
-    def _start_training(self, training_config: Dict[str, Any]) -> bool:
-        """
-        启动训练
-
-        Args:
-            training_config: 训练配置
-
-        Returns:
-            启动是否成功
-        """
-        try:
-            # 验证配置
-            if not self.validate_input(training_config):
-                self._update_training_status("训练失败: 配置验证失败")
-                return False
-
-            # 检查前置条件
-            is_ready, errors = self._check_training_prerequisites(training_config)
-            if not is_ready:
-                error_msg = "; ".join(errors)
-                self._update_training_status(f"训练失败: {error_msg}")
-                return False
-
-            # 重置状态
-            self._reset_training_state()
-
-            # 更新状态为准备中
-            self._update_training_status("准备启动训练...", "开始准备训练环境")
-
-            # 在后台线程中执行训练
-            self._training_thread = threading.Thread(
-                target=self._execute_training_thread,
-                args=(training_config,),
-                daemon=True
-            )
-            self._training_thread.start()
-
-            return True
-
-        except Exception as e:
-            logger.error(f"启动训练失败: {e}")
-            self._update_training_status(f"训练失败: {str(e)}")
-            return False
 
     def _execute_training_thread(self, training_config: Dict[str, Any]) -> None:
         """
@@ -722,11 +458,11 @@ class TrainingStatusComponent(DFMComponent):
                     self._update_training_status("训练完成", completion_message)
 
                     try:
-                        # 使用UnifiedStateManager（线程安全）
+                        # 使用session_state设置UI刷新标志
                         self._set_state('ui_refresh_needed', True)
                         self._set_state('training_completion_timestamp', datetime.now().isoformat())
 
-                        print("[HOT] [训练组件] 已通过线程安全方式设置UI刷新标志")
+                        print("[HOT] [训练组件] 已设置UI刷新标志")
                     except Exception as e:
                         print(f"[HOT] [训练组件] 设置UI刷新标志失败: {e}")
 
@@ -951,26 +687,6 @@ class TrainingStatusComponent(DFMComponent):
 
         return progress_callback
 
-    def _reset_training_state(self) -> None:
-        """重置训练状态"""
-        try:
-            self._set_state('dfm_training_status', '等待开始')
-            self._set_state('dfm_training_log', [])
-            self._set_state('dfm_training_progress', 0)
-            self._set_state('dfm_model_results_paths', None)
-            self._set_state('dfm_model_results', None)  # [HOT] 新增：清理旧的结果状态
-            self._set_state('dfm_training_error', None)
-            self._set_state('dfm_training_start_time', None)
-            self._set_state('dfm_training_end_time', None)
-
-            self._set_state('training_completed_refreshed', None)
-            self._set_state('dfm_page_initialized', None)  # 重置页面初始化标志
-
-            logger.info("训练状态已重置，包括所有相关状态")
-
-        except Exception as e:
-            logger.error(f"重置训练状态失败: {e}")
-
     def _check_training_prerequisites(self, training_config: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """
         检查训练前置条件
@@ -1022,52 +738,6 @@ class TrainingStatusComponent(DFMComponent):
 
         return "\n".join(log_entries)
 
-    def _get_available_downloads(self, results: Dict[str, str]) -> List[Tuple[str, str]]:
-        """
-        获取可用的下载文件
-
-        Args:
-            results: 训练结果路径字典
-
-        Returns:
-            可用下载文件列表 [(file_key, file_path), ...]
-        """
-        available = []
-
-        if not results:
-            return available
-
-        for file_key, file_path in results.items():
-            if file_path and os.path.exists(file_path):
-                available.append((file_key, file_path))
-
-        return available
-
-    def _get_file_size(self, file_path: str) -> str:
-        """
-        获取文件大小的可读格式
-
-        Args:
-            file_path: 文件路径
-
-        Returns:
-            文件大小字符串
-        """
-        try:
-            if os.path.exists(file_path):
-                size_bytes = os.path.getsize(file_path)
-
-                if size_bytes < 1024:
-                    return f"{size_bytes} B"
-                elif size_bytes < 1024 * 1024:
-                    return f"{size_bytes / 1024:.1f} KB"
-                else:
-                    return f"{size_bytes / (1024 * 1024):.1f} MB"
-            else:
-                return "未知"
-        except Exception:
-            return "未知"
-
     def _estimate_training_time(self, data_size: int, num_variables: int) -> float:
         """
         估算训练时间
@@ -1088,82 +758,17 @@ class TrainingStatusComponent(DFMComponent):
 
         return max(estimated_time, 10)  # 最少10秒
 
-    def _get_state(self, key: str, default: Any = None) -> Any:
-        """获取状态值"""
-        try:
-            # 确保项目根目录在Python路径中
-            project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-            if project_root not in sys.path:
-                sys.path.insert(0, project_root)
-
-            dfm_manager = get_global_dfm_manager()
-            if dfm_manager:
-                # 验证dfm_manager使用的是正确的UnifiedStateManager（仅在调试模式下输出）
-                from dashboard.ui.utils.debug_helpers import debug_log
-                if hasattr(dfm_manager, 'unified_manager'):
-                    debug_log(f"训练组件 - 状态管理器类型: {type(dfm_manager.unified_manager)}", "DEBUG")
-
-                value = dfm_manager.get_dfm_state('train_model', key, None)
-                if value is not None:
-                    debug_log(f"训练组件 - 获取状态成功: {key} = {type(value)}", "DEBUG")
-                    return value
-                return default
-            else:
-                # 如果DFM状态管理器不可用，抛出明确错误
-                raise RuntimeError(f"DFM状态管理器不可用，无法获取状态: {key}")
-
-        except Exception as e:
-            logger.error(f"获取状态失败: {e}")
-            raise RuntimeError(f"状态获取失败: {key} - {str(e)}")
-
     def _set_state(self, key: str, value: Any, max_retries: int = 3) -> None:
         """设置状态值（带重试机制）"""
         import time
+        import streamlit as st
 
         for attempt in range(max_retries):
             try:
-                training_keys = [
-                    'dfm_training_status',
-                    'dfm_training_log',
-                    'dfm_training_progress',
-                    'dfm_model_results_paths',
-                    'dfm_training_error',
-                    'dfm_training_start_time',
-                    'dfm_training_end_time',
-                    'training_completed_refreshed'
-                ]
-
-                # 训练状态键已通过DFM状态管理器处理，无需额外操作
-                if key in training_keys:
-                    from dashboard.ui.utils.debug_helpers import debug_log
-                    debug_log(f"组件状态设置 - 训练状态键: {key}, 值类型: {type(value)}, 已通过统一状态管理器处理, 尝试: {attempt + 1}", "DEBUG")
-
-                # 确保项目根目录在Python路径中
-                project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-                if project_root not in sys.path:
-                    sys.path.insert(0, project_root)
-
-                dfm_manager = get_global_dfm_manager()
-                if dfm_manager:
-                    # 验证使用的是正确的UnifiedStateManager（仅在调试模式下输出）
-                    from dashboard.ui.utils.debug_helpers import debug_log
-                    if hasattr(dfm_manager, 'unified_manager'):
-                        debug_log(f"组件状态设置 - 使用的状态管理器类型: {type(dfm_manager.unified_manager)}", "DEBUG")
-
-                    success = dfm_manager.set_dfm_state('train_model', key, value)
-                    debug_log(f"组件状态设置 - 键: {key}, 值类型: {type(value)}, UnifiedStateManager: {success}, 尝试: {attempt + 1}", "DEBUG")
-                    if success:
-                        return  # 成功则退出
-                else:
-                    debug_log(f"组件状态设置 - DFM管理器不可用 - 键: {key}, 尝试: {attempt + 1}", "WARNING")
-
-                # 如果不是最后一次尝试，等待后重试
-                if attempt < max_retries - 1:
-                    time.sleep(0.1 * (attempt + 1))  # 递增延迟
-                    continue
-                else:
-                    logger.error(f"DFM状态管理器设置失败，已重试{max_retries}次: {key}")
-
+                # 直接使用st.session_state
+                full_key = f'train_model.{key}'
+                st.session_state[full_key] = value
+                return  # 成功则退出
             except Exception as e:
                 print(f"[HOT] [组件状态设置] 异常 - 键: {key}, 错误: {str(e)}, 尝试: {attempt + 1}")
 

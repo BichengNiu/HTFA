@@ -10,75 +10,59 @@ from abc import ABC, abstractmethod
 import logging
 import time
 
-# 导入UI状态适配器
-from dashboard.ui.utils.state_adapter import get_ui_state_adapter
 from dashboard.ui.utils.error_handler import get_ui_error_handler
 
 logger = logging.getLogger(__name__)
 
 
 class UnifiedBaseComponent:
-    """统一状态管理的UI组件基类"""
+    """使用命名空间管理状态的UI组件基类"""
 
     def __init__(self, component_name: str = None):
         self.component_name = component_name or self.__class__.__name__
         self.logger = logging.getLogger(f"UI.{self.component_name}")
-        # 延迟初始化state_manager以避免循环导入
-        self.state_manager = None
-        self._state_manager_initialized = False
-
-    def _get_state_manager(self):
-        """获取统一状态管理器（延迟初始化）"""
-        if not self._state_manager_initialized:
-            from dashboard.core import get_unified_manager
-            self.state_manager = get_unified_manager()
-            self._state_manager_initialized = True
-        return self.state_manager
 
     def get_component_state(self, key: str, default=None):
         """获取组件状态"""
-        state_manager = self._get_state_manager()
-        if state_manager:
-            full_key = f"ui.{self.component_name}.{key}"
-            return state_manager.get_state(full_key, default)
-        else:
-            self.logger.warning(f"状态管理器不可用，返回默认值: {key}")
-            return default
+        full_key = f"ui.{self.component_name}.{key}"
+        return st.session_state.get(full_key, default)
 
     def set_component_state(self, key: str, value) -> bool:
         """设置组件状态"""
-        state_manager = self._get_state_manager()
-        if state_manager:
+        try:
             full_key = f"ui.{self.component_name}.{key}"
-            success = state_manager.set_state(full_key, value)
-            if success:
-                self.logger.debug(f"状态设置成功: {key}")
-            else:
-                self.logger.error(f"状态设置失败: {key}")
-            return success
-        else:
-            self.logger.error(f"状态管理器不可用，无法设置: {key}")
+            st.session_state[full_key] = value
+            self.logger.debug(f"状态设置成功: {key}")
+            return True
+        except Exception as e:
+            self.logger.error(f"状态设置失败: {key}, 错误: {e}")
             return False
 
     def clear_component_state(self, key: str = None) -> bool:
         """清理组件状态"""
-        state_manager = self._get_state_manager()
-        if state_manager:
+        try:
             if key:
+                # 清理单个状态
                 full_key = f"ui.{self.component_name}.{key}"
-                return state_manager.clear_state(full_key)
+                if full_key in st.session_state:
+                    del st.session_state[full_key]
             else:
                 # 清理所有组件状态
                 prefix = f"ui.{self.component_name}."
-                return state_manager.clear_states_by_prefix(prefix)
-        return False
+                keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
+                for k in keys_to_delete:
+                    del st.session_state[k]
+            return True
+        except Exception as e:
+            self.logger.error(f"清理组件状态失败: {key}, 错误: {e}")
+            return False
 
     def get_component_logs(self) -> list:
-        """获取组件日志 - 使用统一状态管理"""
+        """获取组件日志"""
         return self.get_component_state('logs', [])
 
     def add_component_log(self, action: str, details: dict = None, level: str = "INFO"):
-        """添加组件日志 - 使用统一状态管理"""
+        """添加组件日志"""
         logs = self.get_component_logs()
         log_entry = {
             'timestamp': time.time(),
@@ -99,25 +83,21 @@ class UnifiedBaseComponent:
         return self.set_component_state('logs', logs)
 
     def get_current_time(self) -> float:
-        """获取当前时间 - 使用统一状态管理"""
+        """获取当前时间"""
         return self.get_component_state('current_time', time.time())
 
     def update_current_time(self) -> bool:
-        """更新当前时间 - 使用统一状态管理"""
+        """更新当前时间"""
         return self.set_component_state('current_time', time.time())
 
     def is_healthy(self) -> bool:
         """检查组件是否健康"""
-        return self._get_state_manager() is not None
+        return True  # 不再依赖state_manager，始终返回True
 
     def get_component_summary(self) -> dict:
         """获取组件状态摘要"""
-        state_manager = self._get_state_manager()
-        if not state_manager:
-            return {'error': '状态管理器不可用'}
-
         try:
-            all_keys = state_manager.get_all_keys()
+            all_keys = list(st.session_state.keys())
             component_prefix = f"ui.{self.component_name}."
             component_keys = [key for key in all_keys if str(key).startswith(component_prefix)]
 
@@ -135,9 +115,9 @@ class UnifiedBaseComponent:
 
 class UIComponent(UnifiedBaseComponent, ABC):
     """
-    UI组件基类 - 集成统一状态管理
+    UI组件基类 - 使用命名空间管理状态
 
-    所有UI组件都应该继承此基类，自动获得统一状态管理功能
+    所有UI组件都应该继承此基类，自动获得命名空间状态管理功能
     """
 
     def __init__(self, component_name: str = None):
@@ -146,7 +126,6 @@ class UIComponent(UnifiedBaseComponent, ABC):
         super().__init__(component_name)
 
         # 基本属性初始化，避免循环导入
-        self.state_adapter = None
         self.component_id = component_name or self.__class__.__name__
         self.performance_monitor = None
         self.async_helper = None
@@ -158,15 +137,6 @@ class UIComponent(UnifiedBaseComponent, ABC):
         """延迟初始化高级功能，避免循环导入"""
         if self._advanced_features_initialized:
             return
-
-        # 获取UI状态适配器
-        try:
-            self.state_adapter = get_ui_state_adapter()
-            if self.state_adapter:
-                self.state_adapter.register_component(self.component_id, self)
-        except Exception as e:
-            logger.error(f"获取状态适配器失败: {e}")
-            self.state_adapter = None
 
         from dashboard.ui.utils.performance_monitor import get_ui_performance_monitor
         from dashboard.ui.utils.async_processor import get_streamlit_async_helper
@@ -255,7 +225,8 @@ class UIComponent(UnifiedBaseComponent, ABC):
             状态值
         """
         try:
-            return self.state_adapter.get_component_state(self.component_id, key, default)
+            full_key = f"ui.{self.component_id}.{key}"
+            return st.session_state.get(full_key, default)
         except Exception as e:
             logger.error(f"获取组件状态失败: {self.component_id}.{key}, 错误: {e}")
             return default
@@ -272,7 +243,9 @@ class UIComponent(UnifiedBaseComponent, ABC):
             bool: 是否设置成功
         """
         try:
-            return self.state_adapter.set_component_state(self.component_id, key, value)
+            full_key = f"ui.{self.component_id}.{key}"
+            st.session_state[full_key] = value
+            return True
         except Exception as e:
             logger.error(f"设置组件状态失败: {self.component_id}.{key}, 错误: {e}")
             return False
@@ -285,7 +258,12 @@ class UIComponent(UnifiedBaseComponent, ABC):
             Dict[str, Any]: 组件的所有状态
         """
         try:
-            return self.state_adapter.get_all_component_states(self.component_id)
+            prefix = f"ui.{self.component_id}."
+            return {
+                key[len(prefix):]: value
+                for key, value in st.session_state.items()
+                if key.startswith(prefix)
+            }
         except Exception as e:
             logger.error(f"获取组件所有状态失败: {self.component_id}, 错误: {e}")
             return {}
@@ -298,10 +276,10 @@ class UIComponent(UnifiedBaseComponent, ABC):
         """
         try:
             # 清理组件状态
-            self.state_adapter.cleanup_component_state(self.component_id)
-
-            # 注销组件
-            self.state_adapter.unregister_component(self.component_id)
+            prefix = f"ui.{self.component_id}."
+            keys_to_delete = [k for k in st.session_state.keys() if k.startswith(prefix)]
+            for k in keys_to_delete:
+                del st.session_state[k]
 
             logger.debug(f"组件清理完成: {self.component_id}")
 
@@ -356,7 +334,7 @@ class UIComponent(UnifiedBaseComponent, ABC):
 
     def log_action(self, action: str, details: Dict[str, Any] = None) -> None:
         """
-        记录组件操作 - 使用统一状态管理
+        记录组件操作
 
         Args:
             action: 操作名称
@@ -376,7 +354,7 @@ class BaseWelcomePage(UIComponent):
     """欢迎页面基类"""
 
     def __init__(self):
-        # 调用父类初始化，集成统一状态管理
+        # 调用父类初始化
         super().__init__()
 
         self.constants = None

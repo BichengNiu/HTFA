@@ -148,6 +148,7 @@ def create_xaxis_config(
     config = XAXIS_CONFIG_BASE.copy()
     config['dtick'] = dtick
     config['tickformat'] = tickformat
+    config['hoverformat'] = "%Y-%m"  # 修复hover显示：只显示年月
 
     if tickangle != 0:
         config['tickangle'] = tickangle

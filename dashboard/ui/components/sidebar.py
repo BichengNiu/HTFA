@@ -13,9 +13,8 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 from contextlib import contextmanager
 from dashboard.ui.components.module_selector import render_main_module_selector, render_sub_module_selector, reset_button_key_tracking
-from dashboard.ui.utils.state_helpers import get_staged_data, get_tools_manager_instance
+from dashboard.ui.utils.state_helpers import get_staged_data
 from dashboard.ui.utils.button_state_manager import clear_button_state_cache
-from dashboard.core import get_unified_manager, get_global_dfm_manager
 
 logger = logging.getLogger(__name__)
 
@@ -164,27 +163,18 @@ class DataExplorationSidebar(SidebarComponent):
             return data
 
     def store_exploration_data(self, data: pd.DataFrame, file_name: str):
-        """存储数据到统一状态管理器 - 确保所有分析模块都能访问"""
-        state_manager = get_unified_manager()
-
+        """存储数据到session_state - 确保所有分析模块都能访问"""
         current_data_hash = hash(str(data.shape) + file_name)
         last_stored_hash = getattr(self, '_last_stored_data_hash', None)
 
         if current_data_hash != last_stored_hash:
-            success_count = 0
             modules = ['stationarity', 'time_lag_corr', 'lead_lag']
             for module in modules:
-                # 存储数据到各个模块
-                success = state_manager.set_state(f"exploration.{module}.data", data)
-                if success:
-                    state_manager.set_state(f"exploration.{module}.file_name", file_name)
-                    state_manager.set_state(f"exploration.{module}.data_source", 'upload')
-                    success_count += 1
+                st.session_state[f"exploration.{module}.data"] = data
+                st.session_state[f"exploration.{module}.file_name"] = file_name
+                st.session_state[f"exploration.{module}.data_source"] = 'upload'
 
-            if success_count == len(modules):
-                logger.info(f"数据已存储到所有分析模块: {data.shape}")
-            else:
-                logger.warning(f"数据存储部分成功: {success_count}/{len(modules)} 个模块")
+            logger.info(f"数据已存储到所有分析模块: {data.shape}")
 
             self._last_stored_data_hash = current_data_hash
 
@@ -221,11 +211,12 @@ class DataExplorationSidebar(SidebarComponent):
     def render_current_data_status(self, st_obj):
         """显示当前数据状态 - 增强版本"""
         try:
-            tools_manager = get_tools_manager_instance()
-            if tools_manager:
-                current_data = tools_manager.get_tools_state('data_exploration', 'current_data')
-                current_data_name = tools_manager.get_tools_state('data_exploration', 'current_data_name')
-                current_data_info = tools_manager.get_tools_state('data_exploration', 'current_data_info')
+            import streamlit as st
+            current_data = st.session_state.get('tools.data_exploration.current_data')
+            current_data_name = st.session_state.get('tools.data_exploration.current_data_name')
+            current_data_info = st.session_state.get('tools.data_exploration.current_data_info')
+
+            if True:  # 始终执行
 
                 st_obj.markdown("---")
                 st_obj.markdown("#### 当前数据状态")
@@ -486,18 +477,16 @@ def render_complete_sidebar(
         # 移除侧边栏标题，保持简洁
 
         # === 调试模式徽章 ===
-        state_manager = get_unified_manager()
-        if state_manager:
-            debug_mode = state_manager.get_state('auth.debug_mode', True)
-            if debug_mode:
-                st.warning("调试模式：认证和权限检查已禁用")
-                st.markdown("")
+        debug_mode = st.session_state.get("auth.debug_mode", True)
+        if debug_mode:
+            st.warning("调试模式：认证和权限检查已禁用")
+            st.markdown("")
 
         # === 第一层：主模块选择器 ===
         st.markdown("### 主模块")
 
         # 根据用户角色决定显示的模块
-        current_user = state_manager.get_state('auth.current_user', None) if state_manager else None
+        current_user = st.session_state.get("auth.current_user", None)
 
         if debug_mode:
             # 调试模式：显示所有模块
@@ -820,22 +809,16 @@ def filter_modules_by_permission(all_modules: List[str]) -> List[str]:
     Returns:
         List[str]: 用户有权限的模块列表
     """
-    # 从统一状态管理器获取用户权限信息
-    state_manager = get_unified_manager()
-    if not state_manager:
-        # 如果状态管理器不可用，返回除用户管理外的所有模块
-        return [module for module in all_modules if module != '用户管理']
-
     # 读取调试模式状态
-    debug_mode = state_manager.get_state('auth.debug_mode', True)
+    debug_mode = st.session_state.get("auth.debug_mode", True)
 
     # 调试模式：显示所有模块
     if debug_mode:
         return all_modules
 
     # 正常模式：按权限过滤
-    user_accessible_modules = state_manager.get_state('auth.user_accessible_modules', set())
-    current_user = state_manager.get_state('auth.current_user', None)
+    user_accessible_modules = st.session_state.get("auth.user_accessible_modules", set())
+    current_user = st.session_state.get("auth.current_user", None)
 
     if not current_user:
         # 正常模式且未登录：不应该到达这里（app.py会强制登录）

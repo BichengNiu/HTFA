@@ -17,7 +17,6 @@ from dashboard.ui.utils.state_helpers import (
     get_exploration_state,
     set_exploration_state
 )
-from dashboard.core import get_global_tools_manager, get_unified_manager
 
 logger = logging.getLogger(__name__)
 
@@ -50,38 +49,35 @@ class TimeSeriesAnalysisComponent(UIComponent):
     
     def get_state(self, key: str, default=None):
         """获取分析状态"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            return tools_manager.get_tools_state('analysis', f'{self.analysis_type}.{key}', default)
-        else:
-            return get_exploration_state(self.analysis_type, key, default)
+        import streamlit as st
+        state_key = f'tools.analysis.{self.analysis_type}.{key}'
+        return st.session_state.get(state_key, default)
 
     def set_state(self, key: str, value):
         """设置分析状态"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            return tools_manager.set_tools_state('analysis', f'{self.analysis_type}.{key}', value)
-        else:
-            return set_exploration_state(self.analysis_type, key, value)
+        import streamlit as st
+        state_key = f'tools.analysis.{self.analysis_type}.{key}'
+        try:
+            st.session_state[state_key] = value
+            return True
+        except Exception:
+            return False
     
     def set_state_value(self, key: str, value):
         """设置状态值"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            success = tools_manager.set_tools_state('ui_state', key, value)
-            if not success:
-                self.logger.debug(f"Failed to set UI state: {key}")
-        else:
-            self.logger.debug(f"ToolsModuleManager not available for state: {key}")
+        import streamlit as st
+        state_key = f'tools.ui_state.{key}'
+        try:
+            st.session_state[state_key] = value
+        except Exception:
+            self.logger.debug(f"Failed to set UI state: {key}")
 
     def get_session_state_value(self, key: str, default=None):
         """获取session state值"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            value = tools_manager.get_tools_state('ui_state', f'session.{key}', None)
-            return value if value is not None else default
-        else:
-            return default
+        import streamlit as st
+        state_key = f'tools.ui_state.session.{key}'
+        value = st.session_state.get(state_key, None)
+        return value if value is not None else default
     
     def detect_tab_activation(self, st_obj, tab_index: int) -> bool:
         """
@@ -96,27 +92,12 @@ class TimeSeriesAnalysisComponent(UIComponent):
         """
         is_really_active = False
 
-        tools_manager = get_global_tools_manager()
+        import streamlit as st
 
-        if tools_manager:
-            # 检查管理的标签页状态
-            current_active_tab = tools_manager.get_tools_state('ui_state', 'data_exploration_active_tab')
-            is_really_active = (current_active_tab == self.analysis_type)
+        # 检查管理的标签页状态
+        current_active_tab = st.session_state.get('tools.ui_state.data_exploration_active_tab')
+        is_really_active = (current_active_tab == self.analysis_type)
 
-        # 如果状态管理器未激活此标签，检查统一状态管理器
-        if not is_really_active and self.state_manager:
-            # 限制检查的键数量以提升性能
-            tab_keys = [k for k in self.state_manager.get_all_keys() if 'TabState' in str(k) or 'tab' in str(k).lower()][:10]
-            for key in tab_keys:
-                try:
-                    tab_state = self.state_manager.get_state(key)
-                    if ((hasattr(tab_state, 'active_tab') and tab_state.active_tab == tab_index) or
-                        (hasattr(tab_state, 'value') and tab_state.value == tab_index)):
-                        is_really_active = True
-                        break
-                except Exception:
-                    continue
-        
         # 只在状态真正改变时才更新
         if is_really_active:
             previous_active_tab = self.get_session_state_value('data_exploration_active_tab', None)
@@ -142,23 +123,16 @@ class TimeSeriesAnalysisComponent(UIComponent):
         """
         self.logger.debug(f"Getting module data for analysis type: {self.analysis_type}")
 
-        # 从统一状态管理器获取数据
-        state_manager = get_unified_manager()
-
-        if not state_manager:
-            self.logger.error("Unified state manager not available")
-            return None, "状态管理器不可用", ""
-
         # 尝试获取探索模块的数据
         data_key = f"exploration.{self.analysis_type}.data"
         file_name_key = f"exploration.{self.analysis_type}.file_name"
         data_source_key = f"exploration.{self.analysis_type}.data_source"
 
-        selected_data = state_manager.get_state(data_key)
+        selected_data = st.session_state.get(data_key)
 
         if selected_data is not None:
-            file_name = state_manager.get_state(file_name_key, '')
-            data_source_type = state_manager.get_state(data_source_key, 'unknown')
+            file_name = st.session_state.get(file_name_key, '')
+            data_source_type = st.session_state.get(data_source_key, 'unknown')
 
             self.logger.debug(f"Found data with shape: {selected_data.shape}, file: {file_name}")
 

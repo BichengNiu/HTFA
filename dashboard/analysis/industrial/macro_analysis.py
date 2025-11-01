@@ -3,7 +3,7 @@ Industrial Macro Operations Analysis Module
 工业宏观运行分析模块 - 主入口文件
 """
 
-# 保持向后兼容性 - 导出本模块定义的函数
+# 导出本模块定义的函数
 __all__ = ['render_macro_operations_tab', 'render_macro_operations_analysis_with_data', '_render_macro_operations_analysis']
 
 # 导入必要的模块
@@ -15,9 +15,6 @@ import logging
 
 # 设置日志
 logger = logging.getLogger(__name__)
-
-# 导入统一状态管理器
-from dashboard.core import get_unified_manager
 
 # 导入统一的工具函数
 from dashboard.analysis.industrial.utils import (
@@ -46,38 +43,44 @@ from dashboard.ui.utils.debug_helpers import debug_log
 
 def get_monitoring_state(key: str, default: Any = None):
     """获取监测分析状态"""
-    unified_manager = get_unified_manager()
-    if unified_manager is None:
-        raise RuntimeError("统一状态管理器不可用，无法获取监测分析状态")
-    return unified_manager.get_state(f'monitoring.industrial.macro.{key}', default)
+    try:
+        import streamlit as st
+        full_key = f'monitoring.industrial.macro.{key}'
+        return st.session_state.get(full_key, default)
+    except Exception as e:
+        logger.error(f"获取监测分析状态失败: {e}")
+        return default
 
 
 def set_monitoring_state(key: str, value: Any, is_initialization: bool = False):
     """设置监测分析状态"""
-    unified_manager = get_unified_manager()
-    if unified_manager is None:
-        raise RuntimeError("统一状态管理器不可用，无法设置监测分析状态")
-    return unified_manager.set_state(f'monitoring.industrial.macro.{key}', value, is_initialization=is_initialization)
+    try:
+        import streamlit as st
+        full_key = f'monitoring.industrial.macro.{key}'
+        st.session_state[full_key] = value
+        return True
+    except Exception as e:
+        logger.error(f"设置监测分析状态失败: {e}")
+        return False
 
 def initialize_monitoring_states():
     """预初始化监测分析状态，避免第一次点击时刷新"""
     try:
-        unified_manager = get_unified_manager()
-        if unified_manager:
-            # 静默初始化所有时间筛选相关的状态
-            time_range_keys = [
-                'macro_time_range_chart1',
-                'macro_time_range_chart2',
-                'macro_time_range_chart3'
-            ]
+        import streamlit as st
+        # 静默初始化所有时间筛选相关的状态
+        time_range_keys = [
+            'macro_time_range_chart1',
+            'macro_time_range_chart2',
+            'macro_time_range_chart3'
+        ]
 
-            for key in time_range_keys:
-                full_key = f'monitoring.industrial.macro.{key}'
-                # 只有在状态不存在时才初始化
-                if unified_manager.get_state(full_key) is None:
-                    unified_manager.set_state(full_key, "3年", is_initialization=True)
+        for key in time_range_keys:
+            full_key = f'monitoring.industrial.macro.{key}'
+            # 只有在状态不存在时才初始化
+            if full_key not in st.session_state:
+                st.session_state[full_key] = "3年"
 
-            return True
+        return True
     except (AttributeError, KeyError, TypeError) as e:
         logger.warning(f"初始化监测状态失败: {e}")
         return False
@@ -540,7 +543,7 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
 
 def render_macro_operations_tab(st_obj):
     """
-    原始的分行业工业增加值同比增速分析标签页（保持向后兼容）
+    分行业工业增加值同比增速分析标签页
 
     Args:
         st_obj: Streamlit对象

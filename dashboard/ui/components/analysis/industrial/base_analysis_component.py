@@ -28,11 +28,8 @@ class BaseAnalysisComponent(ABC):
     def __init__(self, state_manager):
         """
         初始化基础分析组件
-        
-        Args:
-            state_manager: 统一状态管理器实例
         """
-        self.state_manager = state_manager
+        # 使用st.session_state进行状态管理
         self.data_loader = None
         self.component_id = str(uuid.uuid4())
         
@@ -82,34 +79,35 @@ class BaseAnalysisComponent(ABC):
     
     def get_data_from_state(self, key: str, default: Any = None) -> Any:
         """
-        从状态管理器获取数据
-        
+        从st.session_state获取数据
+
         Args:
             key: 数据键
             default: 默认值
-            
+
         Returns:
             获取的数据
         """
         try:
-            return self.state_manager.get_data(key, default)
+            return st.session_state.get(key, default)
         except Exception as e:
             logger.error(f"获取状态数据失败: {key}, 错误: {e}")
             return default
-    
+
     def set_data_to_state(self, key: str, value: Any) -> bool:
         """
-        向状态管理器设置数据
-        
+        向st.session_state设置数据
+
         Args:
             key: 数据键
             value: 数据值
-            
+
         Returns:
             是否设置成功
         """
         try:
-            return self.state_manager.set_data(key, value)
+            st.session_state[key] = value
+            return True
         except Exception as e:
             logger.error(f"设置状态数据失败: {key}, 错误: {e}")
             return False
@@ -236,6 +234,5 @@ class BaseAnalysisComponent(ABC):
             'component_id': self.component_id,
             'component_type': self.__class__.__name__,
             'loading_state': self.loading_state,
-            'error_state': self.error_state,
-            'has_state_manager': self.state_manager is not None
+            'error_state': self.error_state
         }

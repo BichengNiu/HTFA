@@ -82,7 +82,6 @@ fuser -k 8501/tcp
 dashboard/
 ├── app.py              # 主入口(713行)
 ├── core/               # 核心框架层
-│   ├── unified_state.py        # 统一状态管理
 │   ├── navigation_manager.py   # 导航管理
 │   ├── resource_loader.py      # 资源懒加载
 │   └── app_initializer.py      # 应用初始化
@@ -105,39 +104,48 @@ dashboard/
 └── analysis/           # 监测分析
 ```
 
-### 统一状态管理系统(CRITICAL)
+### 状态管理
 
-**所有状态操作必须通过UnifiedStateManager进行,严禁直接使用st.session_state!**
+**项目使用Streamlit官方推荐的st.session_state进行状态管理**
 
 ```python
-from dashboard.core.unified_state import get_unified_manager
+import streamlit as st
 
-# 获取管理器实例
-state_mgr = get_unified_manager()
+# 初始化状态
+if 'my_state' not in st.session_state:
+    st.session_state.my_state = initial_value
 
-# 基本操作
-state_mgr.set_state("key", value)          # 设置状态
-value = state_mgr.get_state("key", default) # 获取状态
-state_mgr.delete_state("key")              # 删除状态
-state_mgr.has_state("key")                 # 检查存在
+# 读取状态
+value = st.session_state.my_state
 
-# 命名空间操作
-state_mgr.set_namespaced("preview", "data", df)
-data = state_mgr.get_namespaced("preview", "data")
-state_mgr.clear_namespace("preview")
+# 修改状态
+st.session_state.my_state = new_value
 
-# DFM模块专用API
-state_mgr.set_dfm_state("data_prep", "indicators", indicators)
-state_mgr.get_dfm_state("data_prep", "indicators", [])
-state_mgr.clear_dfm_state("train_model", "results")
+# 删除状态
+if 'temp_data' in st.session_state:
+    del st.session_state.temp_data
+```
+
+**命名约定**：使用点分命名空间避免键冲突
+
+```python
+# 模块命名空间
+st.session_state['navigation.main_module'] = 'DFM'
+st.session_state['navigation.sub_module'] = '数据准备'
+
+# DFM模块命名空间
+st.session_state['train_model.dfm_training_status'] = '训练完成'
+st.session_state['train_model.dfm_prepared_data_df'] = dataframe
+
+# 组件命名空间
+st.session_state['preview.current_file'] = file_path
 ```
 
 **特性**:
-
-- 线程安全(RLock保护)
-- 单例模式(ThreadSafeSingleton)
-- 支持命名空间(避免键冲突)
-- 基于Streamlit session_state持久化
+- Streamlit原生支持，无需额外封装
+- 会话隔离，每个用户独立状态
+- 自动持久化，页面刷新时保留
+- 符合框架设计理念，学习成本低
 
 ### 导航系统
 
@@ -546,7 +554,7 @@ monitor.report()
 
 ### 关键原则
 
-1. **状态管理**: 必须使用UnifiedStateManager,严禁直接操作st.session_state
+1. **状态管理**: 使用Streamlit官方的st.session_state进行状态管理，遵循点分命名空间约定（如'data_prep.key'）
 2. **调试信息**: BUG修复时需在关键节点添加调试日志
 3. **测试清理**: 功能测试成功后删除所有测试脚本和临时文件
 4. **代码质量**: 遵循KISS、DRY、YAGNI、SOC、SRP原则
@@ -638,7 +646,6 @@ pip install -r requirements.txt
 | 功能                  | 文件路径                                               | 说明                            |
 | --------------------- | ------------------------------------------------------ | ------------------------------- |
 | 主入口                | dashboard/app.py:713                                   | 应用启动入口                    |
-| 状态管理              | dashboard/core/unified_state.py:14                     | UnifiedStateManager类           |
 | 导航管理              | dashboard/core/navigation_manager.py                   | NavigationManager类             |
 | 用户数据库            | dashboard/auth/database.py                             | AuthDatabase类                  |
 | **DFM训练**     | dashboard/models/DFM/train/                            | 模型训练模块                    |

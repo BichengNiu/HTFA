@@ -24,9 +24,7 @@ class DFMServiceManager:
 
     def __init__(self):
         self._services = {}
-        # 初始化状态管理器
-        self._init_state_manager()
-    
+
     def get_data_prep_service(self):
         """获取数据预处理服务"""
         if 'data_prep' not in self._services:
@@ -45,16 +43,6 @@ class DFMServiceManager:
         if 'analysis' not in self._services:
             self._services['analysis'] = MockAnalysisService()
         return self._services['analysis']
-
-    def _init_state_manager(self):
-        """初始化状态管理器"""
-        from dashboard.core import get_unified_manager
-        self.state_manager = get_unified_manager()
-
-        if self.state_manager is None:
-            raise RuntimeError("UnifiedStateManager初始化失败，无法继续")
-
-        print(f"[HOT] [组件基类] UnifiedStateManager初始化成功: {type(self.state_manager)}")
 
 
 class MockDataPrepService:
@@ -154,14 +142,9 @@ class DFMComponent(UIComponent):
             Any: 状态值
         """
         try:
-            # 使用DFM统一状态管理系统
-            dfm_manager = get_global_dfm_manager()
-            if dfm_manager:
-                return dfm_manager.get_dfm_state(self._module_name, key, default)
-
-            # 如果DFM管理器不可用，返回默认值
-            return default
-
+            # 直接使用st.session_state
+            full_key = f"{self._module_name}.{key}"
+            return st.session_state.get(full_key, default)
         except Exception as e:
             logger.error(f"获取状态失败: {e}")
             return default
@@ -175,15 +158,9 @@ class DFMComponent(UIComponent):
             value: 状态值
         """
         try:
-            # 使用DFM统一状态管理系统
-            dfm_manager = get_global_dfm_manager()
-            if dfm_manager:
-                success = dfm_manager.set_dfm_state(self._module_name, key, value)
-                if not success:
-                    logger.error(f"DFM状态设置失败: {key}")
-            else:
-                logger.error(f"DFM状态管理器不可用，无法设置状态: {key}")
-
+            # 直接使用st.session_state
+            full_key = f"{self._module_name}.{key}"
+            st.session_state[full_key] = value
         except Exception as e:
             logger.error(f"设置状态失败: {e}")
             raise RuntimeError(f"状态设置失败: {key} - {str(e)}")
@@ -196,19 +173,19 @@ class DFMComponent(UIComponent):
             key: 状态键，如果为None则清除所有相关状态
         """
         try:
-            # 使用DFM统一状态管理系统
-            dfm_manager = get_global_dfm_manager()
-            if dfm_manager:
-                if key is None:
-                    # 清除所有相关状态 - 通过DFM管理器
-                    # 这里应该调用DFM管理器的清理方法
-                    logger.info(f"清除{self._module_name}模块所有状态")
-                else:
-                    # 清除特定状态
-                    dfm_manager.clear_dfm_state(self._module_name, key)
+            # 直接使用st.session_state
+            if key is None:
+                # 清除所有相关状态
+                prefix = f"{self._module_name}."
+                keys_to_delete = [k for k in st.session_state.keys() if k.startswith(prefix)]
+                for k in keys_to_delete:
+                    del st.session_state[k]
+                logger.info(f"清除{self._module_name}模块所有状态")
             else:
-                logger.error(f"DFM状态管理器不可用，无法清除状态: {key}")
-
+                # 清除特定状态
+                full_key = f"{self._module_name}.{key}"
+                if full_key in st.session_state:
+                    del st.session_state[full_key]
         except Exception as e:
             logger.error(f"清除状态失败: {e}")
             raise RuntimeError(f"状态清除失败: {key} - {str(e)}")

@@ -534,7 +534,7 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
                     is_line_indicator = any(line_key in indicator for line_key in line_indicators)
 
                     if is_line_indicator:
-                        # 添加线图
+                        # 添加线图，使用xperiod让数据点居中对齐到月份
                         fig.add_trace(go.Scatter(
                             x=y_data.index,
                             y=y_data,
@@ -543,8 +543,10 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
                             line=dict(width=2.5, color=colors[i % len(colors)]),
                             marker=dict(size=4),
                             connectgaps=False,  # 不连接缺失点
+                            xperiod="M1",  # 周期为1个月
+                            xperiodalignment="middle",  # 数据点居中对齐
                             hovertemplate=f'<b>{get_legend_name(indicator)}</b><br>' +
-                                          '时间: %{x}<br>' +
+                                          '时间: %{x|%Y年%m月}<br>' +
                                           '数值: %{y:.2f}%<extra></extra>'
                         ))
 
@@ -563,15 +565,17 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
                         opacity_value = 0.9 - (i * 0.15)  # 0.9, 0.75, 0.6, 0.45...
                         opacity_value = max(0.5, opacity_value)  # 最小透明度为0.5
 
-                        # 添加堆积条形图
+                        # 添加堆积条形图，使用xperiod让柱子居中对齐到月份
                         fig.add_trace(go.Bar(
                             x=y_data.index,
                             y=y_data,
                             name=get_legend_name(indicator),
                             marker_color=colors[i % len(colors)],
                             opacity=opacity_value,
+                            xperiod="M1",  # 周期为1个月
+                            xperiodalignment="middle",  # 柱子居中对齐
                             hovertemplate=f'<b>{get_legend_name(indicator)}</b><br>' +
-                                          '时间: %{x}<br>' +
+                                          '时间: %{x|%Y年%m月}<br>' +
                                           '数值: %{y:.2f}%<extra></extra>'
                         ))
 
@@ -589,7 +593,8 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
             showgrid=True,
             gridwidth=1,
             gridcolor='lightgray',
-            dtick="M3"  # 3-month intervals
+            dtick="M3",  # 3-month intervals
+            hoverformat="%Y-%m"  # 修复hover显示：只显示年月
         )
 
         # Set the range to actual data if available
@@ -690,8 +695,10 @@ def create_profit_chart_unified(df_grouped_profit: pd.DataFrame,
                     line=dict(width=2.5, color=colors[0]),
                     marker=dict(size=4),
                     connectgaps=False,
+                    xperiod="M1",  # 周期为1个月
+                    xperiodalignment="middle",  # 数据点居中对齐
                     hovertemplate='<b>工业企业累计利润总额累计同比</b><br>' +
-                                  '时间: %{x}<br>' +
+                                  '时间: %{x|%Y年%m月}<br>' +
                                   '数值: %{y:.2f}%<extra></extra>'
                 ))
 
@@ -728,8 +735,10 @@ def create_profit_chart_unified(df_grouped_profit: pd.DataFrame,
                     name=display_name,
                     marker_color=colors[color_index % len(colors)],
                     opacity=opacity_value,
+                    xperiod="M1",  # 周期为1个月
+                    xperiodalignment="middle",  # 柱子居中对齐
                     hovertemplate=f'<b>{display_name}</b><br>' +
-                                  '时间: %{x}<br>' +
+                                  '时间: %{x|%Y年%m月}<br>' +
                                   '数值: %{y:.2f}%<extra></extra>'
                 ))
                 color_index += 1
@@ -744,7 +753,8 @@ def create_profit_chart_unified(df_grouped_profit: pd.DataFrame,
             showgrid=True,
             gridwidth=1,
             gridcolor='lightgray',
-            dtick="M3"
+            dtick="M3",
+            hoverformat="%Y-%m"  # 修复hover显示：只显示年月
         )
 
         if min_date and max_date:
@@ -763,14 +773,15 @@ def create_profit_chart_unified(df_grouped_profit: pd.DataFrame,
             barmode='relative',
             hovermode='x unified',
             height=500,
-            margin=dict(l=50, r=50, t=30, b=80),
+            margin=dict(l=50, r=50, t=30, b=100),  # 增加底部边距确保图例空间充足
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="top",
-                y=-0.1,
+                y=-0.15,  # 固定图例位置，避免自动调整
                 xanchor="center",
-                x=0.5
+                x=0.5,
+                tracegroupgap=0  # 减少trace组间距
             ),
             plot_bgcolor='white',
             paper_bgcolor='white'
@@ -792,11 +803,11 @@ def create_profit_chart_unified(df_grouped_profit: pd.DataFrame,
         return None
 
 
-# 保留向后兼容的包装函数
+# 便捷接口函数
 def create_upstream_downstream_profit_chart(df_grouped_profit: pd.DataFrame, time_range: str = "3年",
                                           custom_start_date: Optional[str] = None,
                                           custom_end_date: Optional[str] = None) -> Optional[go.Figure]:
-    """创建上中下游分组利润总额累计同比图表（向后兼容包装）"""
+    """创建上中下游分组利润总额累计同比图表"""
     return create_profit_chart_unified(
         df_grouped_profit,
         filter_prefix='上中下游_',
@@ -810,7 +821,7 @@ def create_upstream_downstream_profit_chart(df_grouped_profit: pd.DataFrame, tim
 def create_export_dependency_profit_chart(df_grouped_profit: pd.DataFrame, time_range: str = "3年",
                                          custom_start_date: Optional[str] = None,
                                          custom_end_date: Optional[str] = None) -> Optional[go.Figure]:
-    """创建出口依赖分组利润总额累计同比图表（向后兼容包装）"""
+    """创建出口依赖分组利润总额累计同比图表"""
     return create_profit_chart_unified(
         df_grouped_profit,
         filter_prefix='出口依赖_',
@@ -833,12 +844,7 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
     """
     # 如果没有传入上传的文件，尝试从统一状态管理器获取
     if uploaded_file is None:
-        from dashboard.core import get_unified_manager
-        
-        state_manager = get_unified_manager()
-        if state_manager is None:
-            raise RuntimeError("统一状态管理器不可用，无法获取文件上传状态")
-        uploaded_file = state_manager.get_state('analysis.industrial.unified_file_uploader')
+        uploaded_file = st.session_state.get("analysis.industrial.unified_file_uploader")
 
     # Remove title text as requested
 
@@ -973,7 +979,7 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
 
 def render_enterprise_operations_tab(st_obj):
     """
-    原始的企业经营分析标签页（保持向后兼容）
+    企业经营分析标签页
 
     Args:
         st_obj: Streamlit 对象

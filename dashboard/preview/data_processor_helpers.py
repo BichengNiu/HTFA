@@ -430,13 +430,27 @@ def process_single_excel_file(
     }
     indicator_source_map = {}
 
-    # 处理文件输入
-    if not (hasattr(file_input, 'name') and hasattr(file_input, 'getvalue')):
-        warnings.warn(f"Only uploaded files are supported. Skipping invalid input type: {type(file_input)}")
+    # 处理文件输入 - 兼容多种文件对象类型
+    try:
+        # 优先使用Streamlit上传文件的getvalue()方法
+        if hasattr(file_input, 'getvalue'):
+            file_buffer = io.BytesIO(file_input.getvalue())
+            file_name_for_display = getattr(file_input, 'name', 'uploaded_file.xlsx')
+        # 否则尝试使用read()方法(普通文件对象)
+        elif hasattr(file_input, 'read'):
+            content = file_input.read()
+            if isinstance(content, bytes):
+                file_buffer = io.BytesIO(content)
+            else:
+                file_buffer = io.BytesIO(content.encode())
+            file_input.seek(0)  # 重置文件指针
+            file_name_for_display = getattr(file_input, 'name', 'uploaded_file.xlsx')
+        else:
+            warnings.warn(f"Unsupported file input type: {type(file_input)}")
+            return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
+    except Exception as e:
+        warnings.warn(f"Failed to read file: {e}")
         return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
-
-    file_buffer = io.BytesIO(file_input.getvalue())
-    file_name_for_display = file_input.name
     source_name_base = file_name_for_display.rsplit('.', 1)[0] if '.' in file_name_for_display else file_name_for_display
 
     try:

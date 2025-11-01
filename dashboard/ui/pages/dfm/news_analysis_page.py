@@ -12,34 +12,32 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any
 
-# 导入统一状态管理
-from dashboard.core import get_global_dfm_manager
+# 导入新闻分析执行函数
 from dashboard.models.DFM.decomp import execute_news_analysis
-
-
-def get_dfm_manager():
-    """获取DFM模块管理器实例"""
-    try:
-        dfm_manager = get_global_dfm_manager()
-        if dfm_manager is None:
-            raise RuntimeError("全局DFM管理器不可用")
-        return dfm_manager
-    except Exception as e:
-        print(f"[DFM News Analysis] Error getting DFM manager: {e}")
-        raise RuntimeError(f"DFM管理器获取失败: {e}")
 
 
 def get_dfm_state(key, default=None):
     """获取DFM状态值 - 仅从news_analysis命名空间读取"""
-    dfm_manager = get_dfm_manager()
-    # 所有键都从news_analysis命名空间获取（不再跨命名空间读取）
-    return dfm_manager.get_dfm_state('news_analysis', key, default)
+    try:
+        import streamlit as st
+        # 所有键都从news_analysis命名空间获取
+        full_key = f'news_analysis.{key}'
+        return st.session_state.get(full_key, default)
+    except Exception as e:
+        print(f"[DFM News Analysis] Error getting state: {key}, {e}")
+        return default
 
 
 def set_dfm_state(key, value):
     """设置DFM状态值"""
-    dfm_manager = get_dfm_manager()
-    return dfm_manager.set_dfm_state('news_analysis', key, value)
+    try:
+        import streamlit as st
+        full_key = f'news_analysis.{key}'
+        st.session_state[full_key] = value
+        return True
+    except Exception as e:
+        print(f"[DFM News Analysis] Error setting state: {key}, {e}")
+        return False
 
 
 def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
@@ -455,9 +453,3 @@ def _render_download_section(st_module, result):
             )
         else:
             st_module.info("贡献分解CSV未生成")
-
-
-# 兼容性接口
-def render_dfm_news_analysis_tab(st_module: Any) -> Dict[str, Any]:
-    """兼容性接口"""
-    return render_dfm_news_analysis_page(st_module)

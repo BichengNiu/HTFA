@@ -16,75 +16,61 @@ import time
 from datetime import datetime, date
 from typing import Optional, Dict, Any
 
-# 添加路径以导入统一状态管理
+# 添加路径以导入状态管理辅助函数
 current_dir = os.path.dirname(os.path.abspath(__file__))
 dashboard_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..', '..'))
 if dashboard_root not in sys.path:
     sys.path.insert(0, dashboard_root)
 
-# 导入统一状态管理
-from dashboard.core import get_global_dfm_manager
 import logging
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
 
 
-def get_dfm_manager():
-    """获取DFM模块管理器实例（使用全局单例）"""
-    try:
-        dfm_manager = get_global_dfm_manager()
-        if dfm_manager is None:
-            raise RuntimeError("全局DFM管理器不可用")
-        return dfm_manager
-    except Exception as e:
-        print(f"[DFM Data Prep] Error getting DFM manager: {e}")
-        raise RuntimeError(f"DFM管理器获取失败: {e}")
-
-
 def get_dfm_state(key, default=None):
-    """获取DFM状态值（使用统一状态管理）"""
+    """获取DFM状态值（使用st.session_state）"""
     try:
-        dfm_manager = get_dfm_manager()
-        if dfm_manager:
-            # 只从data_prep命名空间获取，使用标准键名
-            value = dfm_manager.get_dfm_state('data_prep', key, default)
-            from dashboard.ui.utils.debug_helpers import debug_log
-            if key in ['dfm_training_data_file', 'dfm_uploaded_excel_file_path']:
-                if value is not None:
-                    if key == 'dfm_training_data_file' and hasattr(value, 'name'):
-                        debug_log(f"状态读取 - 键: {key}, 文件名: {value.name}", "DEBUG")
-                    else:
-                        debug_log(f"状态读取 - 键: {key}, 值: {value}", "DEBUG")
+        from dashboard.ui.utils.debug_helpers import debug_log
+
+        # 直接使用st.session_state，从data_prep命名空间获取
+        full_key = f'data_prep.{key}'
+        value = st.session_state.get(full_key, default)
+
+        if key in ['dfm_training_data_file', 'dfm_uploaded_excel_file_path']:
+            if value is not None:
+                if key == 'dfm_training_data_file' and hasattr(value, 'name'):
+                    debug_log(f"状态读取 - 键: {key}, 文件名: {value.name}", "DEBUG")
                 else:
-                    debug_log(f"状态读取 - 键: {key}, 值: None (使用默认值: {default})", "DEBUG")
-            return value
-        else:
-            debug_log(f"警告 - DFM统一状态管理器不可用，键: {key}", "WARNING")
-            return default
+                    debug_log(f"状态读取 - 键: {key}, 值: {value}", "DEBUG")
+            else:
+                debug_log(f"状态读取 - 键: {key}, 值: None (使用默认值: {default})", "DEBUG")
+        return value
 
     except Exception as e:
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"错误 - 获取DFM状态失败，键: {key}, 错误: {e}", "ERROR")
         return default
 
 
 def set_dfm_state(key, value):
-    """设置DFM状态值（使用统一状态管理）"""
+    """设置DFM状态值（使用st.session_state）"""
     try:
-        dfm_manager = get_dfm_manager()
-        if dfm_manager:
-            success = dfm_manager.set_dfm_state('data_prep', key, value)
-            from dashboard.ui.utils.debug_helpers import debug_log
-            if key in ['dfm_training_data_file', 'dfm_uploaded_excel_file_path']:
-                if key == 'dfm_training_data_file' and hasattr(value, 'name'):
-                    debug_log(f"状态设置 - 键: {key}, 文件名: {value.name}, 成功: {success}", "DEBUG")
-                else:
-                    debug_log(f"状态设置 - 键: {key}, 值: {value}, 成功: {success}", "DEBUG")
-            return success
-        else:
-            debug_log(f"警告 - DFM统一状态管理器不可用，无法设置键: {key}", "WARNING")
-            return False
+        from dashboard.ui.utils.debug_helpers import debug_log
+
+        # 直接使用st.session_state，设置到data_prep命名空间
+        full_key = f'data_prep.{key}'
+        st.session_state[full_key] = value
+
+        if key in ['dfm_training_data_file', 'dfm_uploaded_excel_file_path']:
+            if key == 'dfm_training_data_file' and hasattr(value, 'name'):
+                debug_log(f"状态设置 - 键: {key}, 文件名: {value.name}, 成功: True", "DEBUG")
+            else:
+                debug_log(f"状态设置 - 键: {key}, 值: {value}, 成功: True", "DEBUG")
+        return True
+
     except Exception as e:
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"错误 - 设置DFM状态失败，键: {key}, 错误: {e}", "ERROR")
         return False
 
@@ -92,18 +78,16 @@ def set_dfm_state(key, value):
 def sync_dates_to_train_model():
     """将数据准备tab的日期设置同步到模型训练tab"""
     try:
-        dfm_manager = get_dfm_manager()
-
         # 获取数据准备tab的日期设置
-        data_start = dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', None)
-        data_end = dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', None)
+        data_start = st.session_state.get('data_prep.dfm_param_data_start_date', None)
+        data_end = st.session_state.get('data_prep.dfm_param_data_end_date', None)
 
         # 同步到模型训练tab
         if data_start:
-            dfm_manager.set_dfm_state('train_model', 'dfm_training_start_date', data_start)
+            st.session_state['train_model.dfm_training_start_date'] = data_start
 
         if data_end:
-            dfm_manager.set_dfm_state('train_model', 'dfm_validation_end_date', data_end)
+            st.session_state['train_model.dfm_validation_end_date'] = data_end
 
         return True
     except Exception as e:
@@ -111,31 +95,27 @@ def sync_dates_to_train_model():
 
 def get_dfm_param(key, default=None):
     """获取DFM参数的便捷函数"""
-    dfm_manager = get_dfm_manager()
-    if dfm_manager:
-        # 尝试从多个可能的位置获取
-        value = dfm_manager.get_dfm_state('data_prep', key, None)
-        if value is None:
-            value = dfm_manager.get_state(key, None)
-        if value is None:
-            value = dfm_manager.get_state(f'dfm_{key}', default)
-        return value
-    else:
-        return default
+    # 尝试从多个可能的位置获取
+    value = st.session_state.get(f'data_prep.{key}', None)
+    if value is None:
+        value = st.session_state.get(key, None)
+    if value is None:
+        value = st.session_state.get(f'dfm_{key}', default)
+    return value
 
 
 def set_dfm_param(key, value):
     """设置DFM参数的便捷函数"""
-    dfm_manager = get_dfm_manager()
-    if dfm_manager:
-        success = dfm_manager.set_dfm_state('data_prep', key, value)
-        return success
-    else:
+    try:
+        full_key = f'data_prep.{key}'
+        st.session_state[full_key] = value
+        return True
+    except Exception:
         return False
 
 
-def render_dfm_data_prep_tab(st):
-    """Renders the DFM Model Data Preparation tab."""
+def render_dfm_data_prep_page(st):
+    """Renders the DFM Model Data Preparation page."""
 
     # 初始化文件存储
     if get_dfm_state('dfm_training_data_file') is None:
@@ -152,7 +132,7 @@ def render_dfm_data_prep_tab(st):
     if get_dfm_state('dfm_var_type_map_obj') is None:
         set_dfm_state("dfm_var_type_map_obj", None)
 
-    # 初始化导出相关的状态 - 使用统一状态管理器
+    # 初始化导出相关的状态
     if get_dfm_state('dfm_export_base_name') is None:
         set_dfm_state("dfm_export_base_name", "dfm_prepared_output")
     if get_dfm_state('dfm_processed_outputs') is None:
@@ -171,7 +151,7 @@ def render_dfm_data_prep_tab(st):
         with col1:
             st.success(f"已加载文件: {existing_file_path}")
         with col2:
-            if st.button("重新上传", key="dfm_reupload_btn"):
+            if st.button("重新上传", key="dfm_reupload_btn", type="primary"):
                 set_dfm_state("dfm_training_data_file", None)
                 set_dfm_state("dfm_uploaded_excel_file_path", None)
                 set_dfm_state("dfm_training_data_bytes", None)
@@ -342,11 +322,8 @@ def render_dfm_data_prep_tab(st):
     else:
         cache_key = "date_range_none"
 
-    # 优化：使用dfm_manager实例进行缓存操作
-    dfm_manager = get_dfm_manager()
-
     # 检查缓存是否存在且有效
-    cached_result = dfm_manager.get_dfm_state('data_prep', cache_key, None)
+    cached_result = get_dfm_state(cache_key, None)
     cache_valid = (
         cached_result is not None and
         not get_dfm_state('dfm_date_detection_needed')
@@ -359,7 +336,7 @@ def render_dfm_data_prep_tab(st):
             with st.spinner("[VIEW] 正在检测数据日期范围..."):
                 detected_start, detected_end = detect_data_date_range(current_file)
             # 缓存结果
-            dfm_manager.set_dfm_state('data_prep', cache_key, (detected_start, detected_end))
+            set_dfm_state(cache_key, (detected_start, detected_end))
             # 同时保存到专门的状态键，供按钮处理时使用
             set_dfm_state("dfm_detected_start_date", detected_start)
             set_dfm_state("dfm_detected_end_date", detected_end)
@@ -368,15 +345,15 @@ def render_dfm_data_prep_tab(st):
             # 清理旧的缓存
             try:
                 # 获取所有状态键，查找以date_range_开头的旧缓存
-                all_keys = dfm_manager.get_all_keys() if hasattr(dfm_manager, 'get_all_keys') else []
-                old_keys = [k for k in all_keys if k.startswith("date_range_") and k != cache_key]
+                all_keys = [k for k in st.session_state.keys() if k.startswith("data_prep.date_range_")]
+                old_keys = [k for k in all_keys if k != f"data_prep.{cache_key}"]
                 for old_key in old_keys:
-                    dfm_manager.delete_state(old_key)
+                    del st.session_state[old_key]
             except Exception as e:
                 print(f"[缓存清理] 清理旧缓存时出错: {e}")
         else:
             detected_start, detected_end = None, None
-            dfm_manager.set_dfm_state('data_prep', cache_key, (None, None))
+            set_dfm_state(cache_key, (None, None))
     else:
         # 使用缓存的结果
         detected_start, detected_end = cached_result if cached_result else (None, None)
@@ -402,16 +379,14 @@ def render_dfm_data_prep_tab(st):
     }
 
     # 只在首次初始化时设置默认值，不自动覆盖用户已设置的值
-    # 优化：批量获取参数以减少重复调用
-    dfm_manager = get_dfm_manager()
     for key, default_value in param_defaults.items():
-        current_value = dfm_manager.get_dfm_state('data_prep', key, None)
+        current_value = get_dfm_state(key, None)
         if current_value is None:
             # 首次初始化：使用默认值
-            dfm_manager.set_dfm_state('data_prep', key, default_value)
+            set_dfm_state(key, default_value)
         elif key == 'dfm_param_data_end_date' and detected_end:
             # 结束日期特殊处理：如果检测到新的结束日期，自动更新（用户通常希望使用最新数据）
-            dfm_manager.set_dfm_state('data_prep', key, default_end_date)
+            set_dfm_state(key, default_end_date)
         # 注意：开始日期不再自动更新，保持用户设置或默认值2020-01-01
 
     # 显示检测结果
@@ -423,13 +398,12 @@ def render_dfm_data_prep_tab(st):
     if current_file:
         _auto_load_mapping_data_if_needed(current_file)
 
-    # 优化：批量获取参数值以减少重复调用
-    dfm_manager = get_dfm_manager()
+    # 批量获取参数值
     param_values = {
-        'data_start_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', default_start_date),
-        'data_end_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', default_end_date),
-        'target_sheet_name': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_sheet_name', None),
-        'target_variable': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_variable', None)
+        'data_start_date': get_dfm_state('dfm_param_data_start_date', default_start_date),
+        'data_end_date': get_dfm_state('dfm_param_data_end_date', default_end_date),
+        'target_sheet_name': get_dfm_state('dfm_param_target_sheet_name', None),
+        'target_variable': get_dfm_state('dfm_param_target_variable', None)
     }
 
     # 根据检测到的日期范围设置日期选择器的限制
@@ -484,10 +458,10 @@ def render_dfm_data_prep_tab(st):
 
     # 继续批量获取剩余参数值
     param_values.update({
-        'consecutive_nan_threshold': dfm_manager.get_dfm_state('data_prep', 'dfm_param_consecutive_nan_threshold', None),
-        'remove_consecutive_nans': dfm_manager.get_dfm_state('data_prep', 'dfm_param_remove_consecutive_nans', None),
-        'target_freq': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_freq', None),
-        'type_mapping_sheet': dfm_manager.get_dfm_state('data_prep', 'dfm_param_type_mapping_sheet', None)
+        'consecutive_nan_threshold': get_dfm_state('dfm_param_consecutive_nan_threshold', None),
+        'remove_consecutive_nans': get_dfm_state('dfm_param_remove_consecutive_nans', None),
+        'target_freq': get_dfm_state('dfm_param_target_freq', None),
+        'type_mapping_sheet': get_dfm_state('dfm_param_type_mapping_sheet', None)
     })
 
     row3_col1, row3_col2 = st.columns(2)
@@ -535,7 +509,7 @@ def render_dfm_data_prep_tab(st):
 
     with left_col:
         # 获取导出基础名称参数
-        export_base_name = dfm_manager.get_dfm_state('data_prep', 'dfm_export_base_name', None)
+        export_base_name = get_dfm_state('dfm_export_base_name', None)
         set_dfm_state("dfm_export_base_name", st.text_input(
             "导出文件基础名称 (Export Base Filename)",
             value=export_base_name,
@@ -545,7 +519,7 @@ def render_dfm_data_prep_tab(st):
         # 将按钮放在一行，使用列布局
         btn_col1, btn_col2, btn_col3 = st.columns(3)
         with btn_col1:
-            run_button_clicked = st.button("开始预处理", key="ss_dfm_run_preprocessing", use_container_width=True)
+            run_button_clicked = st.button("开始预处理", key="ss_dfm_run_preprocessing", type="primary", use_container_width=True)
         with btn_col2:
             # 下载按钮占位，实际按钮在后面根据数据可用性显示
             download_data_placeholder = st.empty()
@@ -566,17 +540,17 @@ def render_dfm_data_prep_tab(st):
         current_file = get_dfm_state('dfm_training_data_file')
         if current_file is None:
             st.error("错误：请先上传训练数据集！")
-        # 优化：批量获取所有需要的参数
+        # 批量获取所有需要的参数
         processing_params = {
-            'export_base_name': dfm_manager.get_dfm_state('data_prep', 'dfm_export_base_name', None),
-            'data_start_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_start_date', None),
-            'data_end_date': dfm_manager.get_dfm_state('data_prep', 'dfm_param_data_end_date', None),
-            'target_freq': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_freq', None),
-            'target_sheet_name': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_sheet_name', None),
-            'target_variable': dfm_manager.get_dfm_state('data_prep', 'dfm_param_target_variable', None),
-            'remove_consecutive_nans': dfm_manager.get_dfm_state('data_prep', 'dfm_param_remove_consecutive_nans', None),
-            'consecutive_nan_threshold': dfm_manager.get_dfm_state('data_prep', 'dfm_param_consecutive_nan_threshold', None),
-            'type_mapping_sheet': dfm_manager.get_dfm_state('data_prep', 'dfm_param_type_mapping_sheet', None)
+            'export_base_name': get_dfm_state('dfm_export_base_name', None),
+            'data_start_date': get_dfm_state('dfm_param_data_start_date', None),
+            'data_end_date': get_dfm_state('dfm_param_data_end_date', None),
+            'target_freq': get_dfm_state('dfm_param_target_freq', None),
+            'target_sheet_name': get_dfm_state('dfm_param_target_sheet_name', None),
+            'target_variable': get_dfm_state('dfm_param_target_variable', None),
+            'remove_consecutive_nans': get_dfm_state('dfm_param_remove_consecutive_nans', None),
+            'consecutive_nan_threshold': get_dfm_state('dfm_param_consecutive_nan_threshold', None),
+            'type_mapping_sheet': get_dfm_state('dfm_param_type_mapping_sheet', None)
         }
 
         if not processing_params['export_base_name']:
@@ -717,7 +691,7 @@ def render_dfm_data_prep_tab(st):
                         status_text.text("[INFO] 正在处理结果数据...")
                         progress_bar.progress(80)
 
-                        # 保存数据对象到统一状态管理器
+                        # 保存数据对象到状态管理
                         print(f"[DEBUG] 保存removed_variables_detailed_log到状态: {len(removed_variables_detailed_log) if removed_variables_detailed_log else 0} 条记录")
                         set_dfm_state("dfm_prepared_data_df", prepared_data)
                         set_dfm_state("dfm_transform_log_obj", transform_log)
@@ -773,7 +747,7 @@ def render_dfm_data_prep_tab(st):
                                 st.warning(f"映射文件转换到CSV时出错: {e_im}")
                                 processed_outputs['industry_map'] = None
 
-                        # 保存处理结果到统一状态管理器
+                        # 保存处理结果到状态管理
                         set_dfm_state("dfm_processed_outputs", processed_outputs)
 
                     else:
@@ -850,7 +824,8 @@ def render_dfm_data_prep_tab(st):
                     file_name=f"{base_name}.csv",
                     mime='text/csv',
                     key='download_data_csv',
-                    use_container_width=True
+                    use_container_width=True,
+                    type="primary"
                 )
 
         with download_map_placeholder.container():
@@ -861,7 +836,8 @@ def render_dfm_data_prep_tab(st):
                     file_name=f"{base_name}_industry_map.csv",
                     mime='text/csv',
                     key='download_industry_map_csv',
-                    use_container_width=True
+                    use_container_width=True,
+                    type="primary"
                 )
 
 
@@ -921,34 +897,3 @@ def _auto_load_mapping_data_if_needed(current_file):
     except Exception as e:
         # 静默处理映射数据加载失败
         pass
-
-
-def render_dfm_data_prep_page(st_module: Any) -> Dict[str, Any]:
-    """
-    渲染DFM数据预处理页面
-
-    Args:
-        st_module: Streamlit模块
-
-    Returns:
-        Dict[str, Any]: 渲染结果
-    """
-    try:
-        # 调用主要的UI渲染函数
-        render_dfm_data_prep_tab(st_module)
-
-        return {
-            'status': 'success',
-            'page': 'data_prep',
-            'components': ['file_upload', 'parameter_config', 'data_processing']
-        }
-
-    except Exception as e:
-        st_module.error(f"数据预处理页面渲染失败: {str(e)}")
-        return {
-            'status': 'error',
-            'page': 'data_prep',
-            'error': str(e)
-        }
-
-

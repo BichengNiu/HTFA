@@ -17,14 +17,12 @@ import traceback
 import threading
 from typing import Dict, List, Optional, Union, Any
 
-# 添加路径以导入统一状态管理
+# 添加路径以导入状态管理辅助函数
 current_dir = os.path.dirname(os.path.abspath(__file__))
 dashboard_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..'))
 if dashboard_root not in sys.path:
     sys.path.insert(0, dashboard_root)
 
-# 导入统一状态管理
-from dashboard.core import get_global_dfm_manager
 import logging
 
 # 导入文本标准化工具
@@ -314,9 +312,9 @@ def validate_date_consistency():
     return True
 
 
-def load_mappings_from_unified_state(available_data_columns=None):
+def load_mappings_from_state(available_data_columns=None):
     """
-    从统一状态管理器中获取映射数据构建行业到指标的映射
+    从会话状态中获取映射数据构建行业到指标的映射
     优先使用数据准备模块已经加载好的映射，避免重复读取Excel文件
 
     Args:
@@ -331,7 +329,7 @@ def load_mappings_from_unified_state(available_data_columns=None):
         dfm_default_map = get_dfm_state('dfm_default_variables_map', {})
 
         if var_industry_map is None:
-            print("[WARNING] [映射加载] 统一状态管理器中未找到行业映射数据")
+            print("[WARNING] [映射加载] 会话状态中未找到行业映射数据")
             return None, None, None, None
 
         if not var_industry_map:
@@ -382,7 +380,7 @@ def load_mappings_from_unified_state(available_data_columns=None):
         return unique_industries, industry_to_indicators_map, all_indicators_flat, dfm_default_map
 
     except Exception as e:
-        print(f"[ERROR] [映射加载] 从统一状态管理器加载映射数据失败: {e}")
+        print(f"[ERROR] [映射加载] 从状态管理加载映射数据失败: {e}")
         return None, None, None, None
 
 
@@ -412,9 +410,9 @@ def _reset_training_state():
         ]
 
         for key in training_keys:
-            # 从统一状态管理中删除
+            # 从状态管理中删除
             set_dfm_state(key, None)
-            debug_log(f"状态重置 - 已清理统一状态管理器键: {key}", "DEBUG")
+            debug_log(f"状态重置 - 已清理状态键: {key}", "DEBUG")
 
         set_dfm_state('dfm_training_status', '等待开始')
         set_dfm_state('dfm_training_log', [])
@@ -468,36 +466,23 @@ def _reset_training_state():
     set_dfm_state('dfm_training_log', [])
 
 
-def get_dfm_manager():
-    """获取DFM模块管理器实例（使用全局单例）"""
-    try:
-        dfm_manager = get_global_dfm_manager()
-        if dfm_manager is None:
-            raise RuntimeError("全局DFM管理器不可用")
-
-        return dfm_manager
-    except Exception as e:
-        raise RuntimeError(f"DFM管理器初始化失败: {e}")
 
 
 def get_dfm_state(key, default=None):
-    """获取DFM状态值（使用统一状态管理）- 仅从train_model命名空间读取"""
+    """获取DFM状态值 - 仅从train_model命名空间读取"""
     try:
         # 导入调试工具
         from dashboard.ui.utils.debug_helpers import debug_log
+        import streamlit as st
 
-        dfm_manager = get_dfm_manager()
-        if dfm_manager:
-            # 所有键都从train_model命名空间获取（不再跨命名空间读取）
-            value = dfm_manager.get_dfm_state('train_model', key, default)
+        # 直接使用st.session_state，不再通过get_global_dfm_manager
+        full_key = f'train_model.{key}'
+        value = st.session_state.get(full_key, default)
 
-            # 详细的状态读取日志（仅在调试模式下输出）
-            debug_log(f"前端状态读取 - 键: {key}, 值类型: {type(value).__name__}, 来源: train_model", "DEBUG")
+        # 详细的状态读取日志（仅在调试模式下输出）
+        debug_log(f"前端状态读取 - 键: {key}, 值类型: {type(value).__name__}, 来源: train_model", "DEBUG")
 
-            return value
-        else:
-            debug_log(f"警告 - DFM管理器不可用，键: {key}", "WARNING")
-            return default
+        return value
     except Exception as e:
         from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"状态读取 - 异常 - 键: {key}, 错误: {str(e)}", "ERROR")
@@ -505,8 +490,12 @@ def get_dfm_state(key, default=None):
 
 
 def set_dfm_state(key, value):
-    """设置DFM状态值（修复缓存不一致问题）"""
+    """设置DFM状态值（直接使用st.session_state）"""
     try:
+        import streamlit as st
+        from dashboard.ui.utils.debug_helpers import debug_log
+
+        # 训练相关键列表
         training_keys = [
             'dfm_training_status',
             'dfm_training_log',
@@ -519,46 +508,16 @@ def set_dfm_state(key, value):
             'training_completion_polling_count'
         ]
 
-        if key in training_keys:
-            from dashboard.core import get_global_dfm_manager
-            dfm_manager = get_global_dfm_manager()
-            if dfm_manager:
-                success = dfm_manager.set_dfm_state('train_model', key, value)
+        # 直接使用st.session_state
+        full_key = f'train_model.{key}'
+        st.session_state[full_key] = value
 
-                from dashboard.ui.utils.debug_helpers import debug_log
-                debug_mode = dfm_manager.get_dfm_state('train_model', 'dfm_debug_mode', False)
-                if debug_mode:
-                    debug_log(f"统一状态设置 - 键: {key}, 值类型: {type(value)}, 成功: {success}", "DEBUG")
-
-                # 同时尝试组件化方法，确保双重写入
-                try:
-                    training_component = get_training_status_component()
-                    training_component._set_state(key, value)
-                    if debug_mode:
-                        debug_log(f"组件状态设置 - 键: {key}, 值类型: {type(value)}, 成功: True", "DEBUG")
-                except Exception as e:
-                    if debug_mode:
-                        debug_log(f"组件状态设置失败 - 键: {key}, 错误: {str(e)}", "ERROR")
-
-                return success
-            else:
-                debug_log(f"警告 - DFM统一状态管理器不可用，无法设置键: {key}", "WARNING")
-                return False
-
-        # 其他状态使用原有方法
-        from dashboard.ui.utils.debug_helpers import debug_log
-        dfm_manager = get_dfm_manager()
-        if dfm_manager:
-            success = dfm_manager.set_dfm_state('train_model', key, value)
-            debug_log(f"状态设置 - 键: {key}, 值类型: {type(value)}, 成功: {success}", "DEBUG")
-            return success
-        else:
-            debug_log(f"状态设置 - 失败 - DFM管理器不可用, 键: {key}", "WARNING")
-            return False
+        # 调试日志（仅在调试模式下输出）
+        debug_log(f"状态设置 - 键: {key}, 值类型: {type(value)}", "DEBUG")
+        return True
     except Exception as e:
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"状态设置 - 异常 - 键: {key}, 错误: {str(e)}", "ERROR")
-        import traceback
-        debug_log(f"状态设置 - 异常堆栈: {traceback.format_exc()}", "ERROR")
         return False
 
 
@@ -583,7 +542,7 @@ def convert_to_datetime(date_input):
         return None
 
 
-def render_dfm_train_model_tab(st_instance):
+def render_dfm_model_training_page(st_instance):
 
     # 确保datetime在函数开头就可用
     from datetime import datetime
@@ -639,7 +598,7 @@ def render_dfm_train_model_tab(st_instance):
         """不再检测已存在的训练结果文件，所有结果通过UI下载获得"""
         return None
 
-    # 检测已有结果并更新状态（兼容新旧状态管理）
+    # 检测已有结果并更新状态
     if (get_dfm_state('dfm_training_status') == '等待开始' and
         get_dfm_state('existing_results_checked') is None):
 
@@ -692,7 +651,7 @@ def render_dfm_train_model_tab(st_instance):
             print("[HOT] [UI更新] 检测到强制刷新标志，清除标志并刷新UI")
             set_dfm_state('last_forced_refresh_time', current_time)
 
-            # 清除刷新标志（使用统一状态管理）
+            # 清除刷新标志
             set_dfm_state('ui_refresh_needed', False)
             if training_completion_timestamp:
                 set_dfm_state('last_processed_completion_timestamp', training_completion_timestamp)
@@ -931,12 +890,11 @@ def render_dfm_train_model_tab(st_instance):
             st_instance.info(f"使用默认目标变量: {default_target}")
 
 
-    # 1. 首先尝试从统一状态管理器中获取已经准备好的映射数据
+    # 1. 首先尝试从会话状态中获取已经准备好的映射数据
     available_data_columns = list(input_df.columns) if input_df is not None else None
 
-
-    # 优先使用统一状态管理器中的映射数据
-    map_data = load_mappings_from_unified_state(available_data_columns)
+    # 优先使用会话状态中的映射数据
+    map_data = load_mappings_from_state(available_data_columns)
 
     if map_data and all(x is not None for x in map_data[:3]):
         unique_industries, var_to_indicators_map_by_industry, _, dfm_default_map = map_data
@@ -959,7 +917,7 @@ def render_dfm_train_model_tab(st_instance):
     # 添加变量选择大标题
     st_instance.subheader("变量选择")
 
-    # 1. 选择目标变量（兼容新旧状态管理）
+    # 1. 选择目标变量
     st_instance.markdown("**选择目标变量**")
     if available_target_vars:
         # 初始化目标变量状态
@@ -1073,7 +1031,7 @@ def render_dfm_train_model_tab(st_instance):
 
             # 确保 session_state 中一定有初始值（避免 Streamlit 警告）
             if multiselect_key not in st.session_state:
-                # 优先从 UnifiedStateManager 读取已保存的选择
+                # 使用默认选择初始化
                 st.session_state[multiselect_key] = valid_default
                 print(f"[DEBUG] 初始化multiselect状态: {industry_name}, {len(valid_default)}个指标")
 
@@ -1869,13 +1827,6 @@ def render_dfm_train_model_tab(st_instance):
                                 st_instance.warning(f"[WARNING] {file_name} 文件读取失败: {e}")
                     else:
                         st_instance.warning("[WARNING] 未找到可用的结果文件")
-
-                elif isinstance(training_results, list) and training_results:
-                    # 兼容旧的列表格式
-                    st_instance.markdown("**生成的文件:**")
-                    for i, file_path in enumerate(training_results, 1):
-                        st_instance.write(f"{i}. {file_path}")
-                    st_instance.info("[INFO] 文件路径已显示，请手动复制")
                 else:
                     st_instance.warning("[WARNING] 训练完成但未找到结果文件")
 
@@ -1887,37 +1838,6 @@ def render_dfm_train_model_tab(st_instance):
 
         elif training_status == '等待开始':
             st_instance.info("[NONE] 无结果")
-
-
-def render_dfm_model_training_page(st_module: Any) -> Dict[str, Any]:
-    """
-    渲染DFM模型训练页面
-
-    Args:
-        st_module: Streamlit模块
-
-    Returns:
-        Dict[str, Any]: 渲染结果
-    """
-    try:
-        render_dfm_train_model_tab(st_module)
-
-        return {
-            'status': 'success',
-            'page': 'model_training',
-            'components': ['variable_selection', 'date_range', 'model_parameters', 'training_status']
-        }
-
-    except Exception as e:
-        st_module.error(f"模型训练页面渲染失败: {str(e)}")
-        return {
-            'status': 'error',
-            'page': 'model_training',
-            'error': str(e)
-        }
-
-
-# 原来的render_dfm_train_model_tab函数已经在第122行定义，这里不需要重复定义
 
 def _get_file_size(file_path: str) -> str:
     """获取文件大小的可读格式"""

@@ -210,9 +210,20 @@ def create_time_series_chart(
         # 获取颜色
         color = get_chart_color(i)
 
-        # 创建并添加trace
+        # 创建并添加trace，使用xperiod让数据点居中对齐
         try:
-            trace = create_line_trace(series, display_name, color)
+            trace = go.Scatter(
+                x=series.index,
+                y=series.values.tolist(),
+                showlegend=True,
+                line=dict(color=color, width=1.5),
+                connectgaps=True,
+                mode='lines+markers',
+                marker=dict(size=3),
+                name=display_name,
+                xperiod="M1",  # 周期为1个月
+                xperiodalignment="middle"  # 数据点居中对齐
+            )
             fig.add_trace(trace)
         except Exception as e:
             logger.error(f"创建变量 {var} 的trace时出错: {e}")
@@ -318,7 +329,7 @@ def create_mixed_chart(
         # 显示名称
         display_name = var_name_mapping.get(var, var) if var_name_mapping else var
 
-        # 添加线图
+        # 添加线图，使用xperiod让数据点居中对齐到月份
         fig.add_trace(go.Scatter(
             x=series.index,
             y=series,
@@ -327,7 +338,9 @@ def create_mixed_chart(
             line=dict(width=2.5, color=get_chart_color(color_index)),
             marker=dict(size=4),
             connectgaps=False,
-            hovertemplate=f'<b>{display_name}</b><br>时间: %{{x}}<br>数值: %{{y:.2f}}%<extra></extra>'
+            xperiod="M1",  # 周期为1个月
+            xperiodalignment="middle",  # 数据点居中对齐
+            hovertemplate=f'<b>{display_name}</b><br>时间: %{{x|%Y年%m月}}<br>数值: %{{y:.2f}}%<extra></extra>'
         ))
         color_index += 1
 
@@ -347,14 +360,16 @@ def create_mixed_chart(
         opacity = 0.9 - (i * 0.15)
         opacity = max(0.5, opacity)
 
-        # 添加条形图
+        # 添加条形图，使用xperiod让柱子居中对齐到月份
         fig.add_trace(go.Bar(
             x=series.index,
             y=series,
             name=display_name,
             marker_color=get_chart_color(color_index),
             opacity=opacity,
-            hovertemplate=f'<b>{display_name}</b><br>时间: %{{x}}<br>数值: %{{y:.2f}}%<extra></extra>'
+            xperiod="M1",  # 周期为1个月
+            xperiodalignment="middle",  # 柱子居中对齐
+            hovertemplate=f'<b>{display_name}</b><br>时间: %{{x|%Y年%m月}}<br>数值: %{{y:.2f}}%<extra></extra>'
         ))
         color_index += 1
 

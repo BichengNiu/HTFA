@@ -3,6 +3,7 @@
 监测分析欢迎页面组件
 """
 
+import streamlit as st
 from typing import List
 
 from dashboard.ui.components.base import UIComponent
@@ -48,16 +49,10 @@ class MonitoringAnalysisWelcomePage(UIComponent):
                 use_container_width=True,
                 help="进行工业增加值和工业企业利润拆解分析",
             ):
-                from dashboard.core import get_unified_manager
                 import time
-
-                state_manager = get_unified_manager()
-                if state_manager is None:
-                    raise RuntimeError("统一状态管理器不可用，无法导航到工业子模块")
-
                 current_time = time.time()
-                state_manager.set_state("dashboard.last_navigation_time", current_time)
-                state_manager.set_state("navigation.navigate_to_sub_module", "工业")
+                st.session_state["dashboard.last_navigation_time"] = current_time
+                st.session_state["navigation.navigate_to_sub_module"] = "工业"
                 st_obj.rerun()
 
         st_obj.markdown(
@@ -74,29 +69,29 @@ class MonitoringAnalysisWelcomePage(UIComponent):
 
     def _navigate_to_sub_module(self, st_obj, sub_module: str) -> None:
         """导航到子模块"""
-        from dashboard.core import get_unified_manager
-        from dashboard.core.navigation_manager import get_navigation_manager
+        try:
+            import streamlit as st
+            from dashboard.core.navigation_manager import get_navigation_manager
 
-        unified_manager = get_unified_manager()
-        if unified_manager is None:
-            raise RuntimeError("统一状态管理器不可用，无法执行导航操作")
-
-        nav_manager = get_navigation_manager(unified_manager)
-        nav_manager.set_current_sub_module(sub_module)
-        st_obj.rerun()
+            # 使用st.session_state获取导航管理器
+            nav_manager = get_navigation_manager(st.session_state)
+            nav_manager.set_current_sub_module(sub_module)
+            st_obj.rerun()
+        except Exception as e:
+            st_obj.error(f"导航失败: {e}")
 
     def _handle_navigation(self, st_obj) -> None:
         """处理导航事件"""
-        from dashboard.core import get_unified_manager
+        try:
+            import streamlit as st
 
-        state_manager = get_unified_manager()
-        if state_manager is None:
-            raise RuntimeError("统一状态管理器不可用，无法处理导航事件")
-
-        sub_module = state_manager.get_state("navigation.navigate_to_sub_module")
-        if sub_module:
-            state_manager.clear_state("navigation.navigate_to_sub_module")
-            self._navigate_to_sub_module(st_obj, sub_module)
+            sub_module = st.session_state.get("navigation.navigate_to_sub_module")
+            if sub_module:
+                if "navigation.navigate_to_sub_module" in st.session_state:
+                    del st.session_state["navigation.navigate_to_sub_module"]
+                self._navigate_to_sub_module(st_obj, sub_module)
+        except Exception as e:
+            st_obj.error(f"处理导航事件失败: {e}")
 
     def get_state_keys(self) -> List[str]:
         """获取组件相关的状态键"""

@@ -18,48 +18,50 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-# 统一状态管理器导入
+# 导入路径配置
 current_dir = os.path.dirname(os.path.abspath(__file__))
 dashboard_root = os.path.abspath(os.path.join(current_dir, '..', '..', '..', '..'))
 if dashboard_root not in sys.path:
     sys.path.insert(0, dashboard_root)
 
-from dashboard.core import get_unified_manager
-print("[DFM Model Analysis] [SUCCESS] 统一状态管理器导入成功")
+print("[DFM Model Analysis] [SUCCESS] 模块导入成功")
 
 
 def get_dfm_state(key, default=None):
     """获取DFM状态值"""
-    unified_manager = get_unified_manager()
-    if not unified_manager:
+    try:
+        import streamlit as st
+
+        # 简化：数据相关的键从data_prep命名空间获取，其他从model_analysis获取
+        data_keys = [
+            'dfm_prepared_data_df',
+            'dfm_transform_log_obj',
+            'dfm_industry_map_obj',
+            'dfm_removed_vars_log_obj',
+            'dfm_var_type_map_obj'
+        ]
+
+        if key in data_keys:
+            full_key = f'data_prep.{key}'
+        else:
+            full_key = f'model_analysis.{key}'
+
+        return st.session_state.get(full_key, default)
+    except Exception as e:
+        print(f"[DFM Model Analysis] [ERROR] 获取状态失败: {key}, 错误: {e}")
         return default
-
-    # 简化：数据相关的键从data_prep命名空间获取，其他从model_analysis获取
-    data_keys = [
-        'dfm_prepared_data_df',
-        'dfm_transform_log_obj',
-        'dfm_industry_map_obj',
-        'dfm_removed_vars_log_obj',
-        'dfm_var_type_map_obj'
-    ]
-
-    if key in data_keys:
-        return unified_manager.get_dfm_state('data_prep', key, default)
-    else:
-        return unified_manager.get_dfm_state('model_analysis', key, default)
 
 
 def set_dfm_state(key, value):
     """设置DFM状态值"""
-    unified_manager = get_unified_manager()
-    if not unified_manager:
-        print(f"[DFM Model Analysis] [WARNING] 统一状态管理器不可用: {key}")
+    try:
+        import streamlit as st
+        full_key = f'model_analysis.{key}'
+        st.session_state[full_key] = value
+        return True
+    except Exception as e:
+        print(f"[DFM Model Analysis] [ERROR] 设置状态失败: {key}, 错误: {e}")
         return False
-
-    success = unified_manager.set_dfm_state('model_analysis', key, value)
-    if not success:
-        print(f"[DFM Model Analysis] [WARNING] 统一状态管理器设置失败: {key}")
-    return success
 
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -752,7 +754,8 @@ def render_dfm_tab(st):
                 data=csv_data,
                 file_name=f"nowcast_vs_{target_variable_name_for_plot}_aligned.csv",
                 mime="text/csv",
-                key="download_nowcast_comparison"
+                key="download_nowcast_comparison",
+                type="primary"
             )
         except Exception as e:
             st.error(f"生成下载文件时出错: {e}")
@@ -781,7 +784,7 @@ def render_dfm_tab(st):
             st.write("**修复建议:**")
             if has_nowcast and has_target:
                 st.success("[SUCCESS] 可以从现有数据重新生成complete_aligned_table")
-                if st.button("[CONFIG] 立即修复数据", key="repair_data_btn"):
+                if st.button("[CONFIG] 立即修复数据", key="repair_data_btn", type="primary"):
                     try:
                         # 尝试从现有数据重新生成
                         nowcast_data = metadata['calculated_nowcast_orig']
@@ -811,7 +814,7 @@ def render_dfm_tab(st):
                         st.error(f"[ERROR] 修复过程出错: {e}")
             elif has_all_data and target_var:
                 st.warning("[WARNING] 可以从原始数据生成基本对齐表格")
-                if st.button("[CONFIG] 生成基本数据", key="generate_basic_btn"):
+                if st.button("[CONFIG] 生成基本数据", key="generate_basic_btn", type="primary"):
                     try:
                         all_data = metadata['all_data_aligned_weekly']
                         if target_var in all_data.columns:
@@ -919,7 +922,8 @@ def render_dfm_tab(st):
                     data=excel_data,
                     file_name=filename,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="r2_analysis_download_file"
+                    key="r2_analysis_download_file",
+                    type="primary"
                 )
             else:
                 st.info("生成Excel文件失败")
@@ -1016,7 +1020,8 @@ def render_dfm_tab(st):
                 data=csv_loadings,
                 file_name="factor_loadings.csv",
                 mime="text/csv",
-                key="download_factor_loadings"
+                key="download_factor_loadings",
+                type="primary"
             )
         except Exception as e_csv_loadings:
             st.error(f"生成因子载荷下载文件时出错: {e_csv_loadings}")
@@ -1097,7 +1102,8 @@ def render_dfm_tab(st):
                         data=all_factors_csv,
                         file_name="所有因子时间序列.csv",
                         mime="text/csv",
-                        key="download_all_factors_timeseries"
+                        key="download_all_factors_timeseries",
+                        type="primary"
                     )
                 except Exception as e_all_factors:
                     st.error(f"生成所有因子下载文件时出错: {e_all_factors}")
@@ -1139,16 +1145,3 @@ def render_dfm_model_analysis_page(st_module: Any) -> Dict[str, Any]:
             'page': 'model_analysis',
             'error': str(e)
         }
-
-
-def render_dfm_analysis_tab(st_module: Any) -> Dict[str, Any]:
-    """
-    兼容性接口：渲染DFM模型分析标签页
-
-    Args:
-        st_module: Streamlit模块
-
-    Returns:
-        Dict[str, Any]: 渲染结果
-    """
-    return render_dfm_model_analysis_page(st_module)

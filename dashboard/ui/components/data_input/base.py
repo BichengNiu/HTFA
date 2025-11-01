@@ -12,11 +12,10 @@ import logging
 
 from dashboard.ui.components.base import UIComponent
 from dashboard.ui.utils.state_helpers import (
-    get_tools_manager_instance,
     get_exploration_state,
     set_exploration_state
 )
-from dashboard.core import get_global_tools_manager
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 
@@ -44,40 +43,25 @@ class DataInputComponent(UIComponent):
         ]
     
     def get_state(self, key: str, default=None):
-        """获取组件状态 - 使用ToolsModuleManager"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            # 使用data_input作为工具类型，component_name作为子模块
-            full_key = f'{self.component_name}.{key}'
-            return tools_manager.get_tools_state('data_input', full_key, default)
-        else:
-            self.logger.warning(f"ToolsModuleManager不可用，使用fallback获取状态: {key}")
-            full_key = f'{self.component_name}.{key}'
-            return get_exploration_state('data_input', full_key, default)
+        """获取组件状态 - 使用st.session_state"""
+        full_key = f'{self.component_name}.{key}'
+        state_key = f'tools.data_input.{full_key}'
+        return st.session_state.get(state_key, default)
 
     def set_state(self, key: str, value):
-        """设置组件状态 - 使用ToolsModuleManager"""
-        tools_manager = get_global_tools_manager()
-        print(f"[DataInput] set_state - 组件: {self.component_name}, 键: {key}, 工具管理器: {tools_manager is not None}")
+        """设置组件状态 - 使用st.session_state"""
+        full_key = f'{self.component_name}.{key}'
+        state_key = f'tools.data_input.{full_key}'
 
-        if tools_manager:
-            # 使用data_input作为工具类型，component_name作为子模块
-            full_key = f'{self.component_name}.{key}'
-            success = tools_manager.set_tools_state('data_input', full_key, value)
-            print(f"[DataInput] set_state - 完整键: {full_key}, 保存结果: {success}")
-
-            if success:
-                self.logger.debug(f"设置数据输入状态成功: {self.component_name}.{key}")
-                return True
-            else:
-                self.logger.warning(f"设置数据输入状态失败: {self.component_name}.{key}")
-                print(f"[DataInput] WARNING - 状态保存失败: {full_key}")
-                return False
-        else:
-            self.logger.warning(f"ToolsModuleManager不可用，使用fallback设置状态: {key}")
-            print(f"[DataInput] WARNING - 工具管理器不可用，使用fallback")
-            full_key = f'{self.component_name}.{key}'
-            return set_exploration_state('data_input', full_key, value)
+        try:
+            st.session_state[state_key] = value
+            print(f"[DataInput] set_state - 完整键: {state_key}, 保存结果: True")
+            self.logger.debug(f"设置数据输入状态成功: {self.component_name}.{key}")
+            return True
+        except Exception as e:
+            self.logger.warning(f"设置数据输入状态失败: {self.component_name}.{key}, 错误: {e}")
+            print(f"[DataInput] WARNING - 状态保存失败: {state_key}")
+            return False
     
     def validate_data_format(self, df: pd.DataFrame) -> Tuple[bool, str, Optional[str]]:
         """

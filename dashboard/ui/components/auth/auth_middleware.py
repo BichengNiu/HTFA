@@ -13,26 +13,19 @@ from datetime import datetime
 from dashboard.auth.authentication import AuthManager
 from dashboard.auth.permissions import PermissionManager
 from dashboard.auth.models import User, UserSession
-from dashboard.core import get_unified_manager
 
 # 导入持久化存储工具
-from dashboard.ui.utils.persistent_storage import auth_storage_manager
+from dashboard.ui.utils.persistent_storage import get_auth_storage_manager
 
 
 class AuthMiddleware:
     """认证中间件"""
-    
+
     def __init__(self):
         """初始化认证中间件"""
         self.auth_manager = AuthManager()
         self.permission_manager = PermissionManager()
         self.logger = logging.getLogger(__name__)
-        
-        # 获取统一状态管理器
-        try:
-            self.state_manager = get_unified_manager()
-        except:
-            self.state_manager = None
     
     def check_authentication(self) -> tuple[bool, Optional[User]]:
         """
@@ -65,22 +58,18 @@ class AuthMiddleware:
                 # 更新用户信息到session state
                 st.session_state['current_user'] = user
                 st.session_state['last_activity'] = datetime.now()
-                
+
                 # [新增] 如果从持久化存储恢复成功，更新持久化存储的活动时间
                 self._update_persistent_storage_activity()
-                
-                # 同步到统一状态管理器
-                try:
-                    if self.state_manager:
-                        self.state_manager.set_state('auth.current_user', user)
-                        self.state_manager.set_state('auth.user_session_id', session_id)
-                        
-                        # 设置用户可访问模块
-                        accessible_modules = self.permission_manager.get_accessible_modules(user)
-                        self.state_manager.set_state('auth.user_accessible_modules', set(accessible_modules))
-                except Exception as e:
-                    self.logger.warning(f"统一状态管理器同步失败，但不影响认证: {e}")
-                
+
+                # 存储认证信息到session_state
+                st.session_state['auth.current_user'] = user
+                st.session_state['auth.user_session_id'] = session_id
+
+                # 设置用户可访问模块
+                accessible_modules = self.permission_manager.get_accessible_modules(user)
+                st.session_state['auth.user_accessible_modules'] = set(accessible_modules)
+
                 return True, user
             else:
                 # 清除无效会话
@@ -129,17 +118,15 @@ class AuthMiddleware:
                         self._save_auth_state_to_persistent_storage(session.session_id, user, remember_me)
                     except Exception as e:
                         self.logger.warning(f"[AUTH_FIX] 保存到持久化存储失败，但不影响登录: {e}")
-                    
-                    # 同步到统一状态管理器
-                    state_manager = get_unified_manager()
-                    if state_manager:
-                        state_manager.set_state('auth.current_user', user)
-                        state_manager.set_state('auth.user_session_id', session.session_id)
 
-                        # 设置用户可访问模块
-                        accessible_modules = self.permission_manager.get_accessible_modules(user)
-                        state_manager.set_state('auth.user_accessible_modules', set(accessible_modules))
-                    
+                    # 存储到session_state
+                    st.session_state['auth.current_user'] = user
+                    st.session_state['auth.user_session_id'] = session.session_id
+
+                    # 设置用户可访问模块
+                    accessible_modules = self.permission_manager.get_accessible_modules(user)
+                    st.session_state['auth.user_accessible_modules'] = set(accessible_modules)
+
                     # 刷新页面以进入主应用
                     st.rerun()
             
@@ -242,19 +229,17 @@ class AuthMiddleware:
         
         # [新增] 清除持久化存储
         try:
-            auth_storage_manager.clear_auth_state()
+            auth_mgr = get_auth_storage_manager()
+            auth_mgr.clear_auth_state()
             self.logger.debug("[AUTH_FIX] 已清除持久化存储中的认证状态")
         except Exception as e:
             self.logger.warning(f"[AUTH_FIX] 清除持久化存储失败: {e}")
-        
-        # 如果有统一状态管理器，也清除相关状态
-        try:
-            if self.state_manager:
-                self.state_manager.set_state('auth.current_user', None)
-                self.state_manager.set_state('auth.user_session_id', None)
-                self.state_manager.set_state('auth.user_accessible_modules', set())
-        except Exception as e:
-            self.logger.warning(f"清除统一状态管理器状态失败: {e}")
+
+        # 清除session_state中的认证状态
+        auth_keys = ['auth.current_user', 'auth.user_session_id', 'auth.user_accessible_modules']
+        for key in auth_keys:
+            if key in st.session_state:
+                del st.session_state[key]
     
     def _try_restore_from_persistent_storage(self) -> bool:
         """
@@ -269,7 +254,8 @@ class AuthMiddleware:
                 return True
             
             # 尝试从持久化存储恢复
-            restored_auth = auth_storage_manager.restore_auth_state_to_session()
+            auth_mgr = get_auth_storage_manager()
+            restored_auth = auth_mgr.restore_auth_state_to_session()
             if restored_auth:
                 self.logger.info(f"[AUTH_FIX] 认证状态恢复成功: 用户 {restored_auth['user_info'].get('username', 'unknown')} "
                                f"(来源: {restored_auth.get('restored_from', 'unknown')})")
@@ -291,10 +277,11 @@ class AuthMiddleware:
         """
         try:
             # 尝试从文件存储获取会话ID
-            if hasattr(auth_storage_manager, 'file_storage'):
+            auth_mgr = get_auth_storage_manager()
+            if hasattr(auth_mgr, 'file_storage'):
                 for storage_type in ["local", "session"]:
-                    session_id = auth_storage_manager.file_storage.get_item(
-                        auth_storage_manager.AUTH_KEYS['session_id'], 
+                    session_id = auth_mgr.file_storage.get_item(
+                        auth_mgr.AUTH_KEYS['session_id'],
                         storage_type=storage_type
                     )
                     if session_id:
@@ -316,9 +303,10 @@ class AuthMiddleware:
             
             # 更新活动时间
             current_time = int(datetime.now().timestamp() * 1000)
-            if hasattr(auth_storage_manager, 'file_storage'):
-                auth_storage_manager.file_storage.set_item(
-                    auth_storage_manager.AUTH_KEYS['last_activity'],
+            auth_mgr = get_auth_storage_manager()
+            if hasattr(auth_mgr, 'file_storage'):
+                auth_mgr.file_storage.set_item(
+                    auth_mgr.AUTH_KEYS['last_activity'],
                     current_time,
                     storage_type=storage_type
                 )
@@ -351,7 +339,8 @@ class AuthMiddleware:
             }
             
             # 保存到持久化存储
-            success = auth_storage_manager.save_auth_state(session_id, user_info, remember_me)
+            auth_mgr = get_auth_storage_manager()
+            success = auth_mgr.save_auth_state(session_id, user_info, remember_me)
             if success:
                 self.logger.info(f"[AUTH_FIX] 认证状态已保存到持久化存储: 用户 {user.username}, 记住登录: {remember_me}")
             else:

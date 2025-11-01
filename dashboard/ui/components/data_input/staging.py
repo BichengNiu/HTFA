@@ -12,8 +12,6 @@ import logging
 from datetime import datetime
 
 from dashboard.ui.components.data_input.base import DataInputComponent
-from dashboard.ui.utils.state_helpers import get_tools_manager_instance
-from dashboard.core import get_global_tools_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,25 +24,20 @@ class DataStagingComponent(DataInputComponent):
     
     def get_staged_data_dict(self) -> Dict[str, pd.DataFrame]:
         """获取所有暂存数据 - 使用统一命名约定"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            # 使用统一的命名约定：data_input.staging.staged_data_dict
-            return tools_manager.get_tools_state('data_input', 'staging.staged_data_dict', {})
-        else:
-            logger.warning("ToolsModuleManager不可用，返回空字典")
-            return {}
+        import streamlit as st
+        # 使用统一的命名约定：data_input.staging.staged_data_dict
+        return st.session_state.get('tools.data_input.staging.staged_data_dict', {})
 
     def set_staged_data_dict(self, staged_data_dict: Dict[str, pd.DataFrame]) -> bool:
         """设置暂存数据字典 - 使用统一命名约定"""
-        tools_manager = get_global_tools_manager()
-        if tools_manager:
-            # 使用统一的命名约定：data_input.staging.staged_data_dict
-            success = tools_manager.set_tools_state('data_input', 'staging.staged_data_dict', staged_data_dict)
-            if success:
-                logger.debug(f"设置暂存数据成功，共{len(staged_data_dict)}个数据集")
-            return success
-        else:
-            logger.warning("ToolsModuleManager不可用，无法设置暂存数据")
+        import streamlit as st
+        # 使用统一的命名约定：data_input.staging.staged_data_dict
+        try:
+            st.session_state['tools.data_input.staging.staged_data_dict'] = staged_data_dict
+            logger.debug(f"设置暂存数据成功，共{len(staged_data_dict)}个数据集")
+            return True
+        except Exception as e:
+            logger.warning(f"设置暂存数据失败: {e}")
             return False
     
     def add_to_staging(self, data: pd.DataFrame, name: str, overwrite: bool = False) -> Tuple[bool, str]:

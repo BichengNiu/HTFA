@@ -2,6 +2,7 @@
 """
 持久化存储工具
 提供本地文件持久化存储功能，解决页面刷新后状态丢失问题
+支持多用户session隔离
 """
 
 import streamlit as st
@@ -14,6 +15,18 @@ from typing import Any, Optional, Dict
 import time
 import hashlib
 from pathlib import Path
+
+def _get_session_id() -> str:
+    """获取当前Streamlit会话ID"""
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        if ctx:
+            return ctx.session_id
+        else:
+            return "default"
+    except Exception:
+        return "default"
 
 
 class FilePersistentStorage:
@@ -41,19 +54,25 @@ class FilePersistentStorage:
         
     def _get_file_path(self, key: str, storage_type: str = "local") -> Path:
         """
-        获取存储文件路径
-        
+        获取存储文件路径（包含session隔离）
+
         Args:
             key: 存储键
             storage_type: 存储类型
-            
+
         Returns:
             文件路径
         """
+        session_id = _get_session_id()
+
+        # 为当前session创建独立目录
+        session_dir = self.storage_dir / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+
         # 创建安全的文件名
         safe_key = hashlib.md5(key.encode()).hexdigest()
         filename = f"{storage_type}_{safe_key}.json"
-        return self.storage_dir / filename
+        return session_dir / filename
     
     def set_item(self, key: str, value: Any, storage_type: str = "local") -> bool:
         """
@@ -163,28 +182,74 @@ class FilePersistentStorage:
     
     def clear_all(self, storage_type: str = None) -> bool:
         """
-        清空持久化存储
-        
+        清空当前session的持久化存储
+
         Args:
             storage_type: 存储类型，None表示清空所有类型
-            
+
         Returns:
             是否清空成功
         """
         try:
+            session_id = _get_session_id()
+            session_dir = self.storage_dir / session_id
+
+            if not session_dir.exists():
+                self.logger.debug(f"Session目录不存在: {session_id}")
+                return True
+
             cleared_count = 0
-            
-            for file_path in self.storage_dir.glob("*.json"):
+
+            for file_path in session_dir.glob("*.json"):
                 if storage_type is None or file_path.name.startswith(f"{storage_type}_"):
                     file_path.unlink()
                     cleared_count += 1
-            
-            self.logger.info(f"持久化存储已清空: {storage_type or '所有'}, 清理文件数: {cleared_count}")
+
+            self.logger.info(f"持久化存储已清空: session={session_id}, 类型={storage_type or '所有'}, 清理文件数: {cleared_count}")
             return True
-            
+
         except Exception as e:
             self.logger.error(f"清空持久化存储失败: {storage_type}, 错误: {e}")
             return False
+
+    def clear_old_sessions(self, max_age_hours: int = 24) -> int:
+        """
+        清理过期的session数据
+
+        Args:
+            max_age_hours: 最大保留时间（小时）
+
+        Returns:
+            清理的session数量
+        """
+        try:
+            current_time = time.time()
+            max_age_seconds = max_age_hours * 3600
+            cleared_sessions = 0
+
+            for session_dir in self.storage_dir.iterdir():
+                if not session_dir.is_dir():
+                    continue
+
+                # 检查目录的最后修改时间
+                dir_mtime = session_dir.stat().st_mtime
+                if current_time - dir_mtime > max_age_seconds:
+                    try:
+                        import shutil
+                        shutil.rmtree(session_dir)
+                        cleared_sessions += 1
+                        self.logger.info(f"清理过期session: {session_dir.name}")
+                    except Exception as e:
+                        self.logger.warning(f"清理session目录失败: {session_dir.name}, 错误: {e}")
+
+            if cleared_sessions > 0:
+                self.logger.info(f"清理完成: 共清理 {cleared_sessions} 个过期session")
+
+            return cleared_sessions
+
+        except Exception as e:
+            self.logger.error(f"清理过期session失败: {e}")
+            return 0
 
 
 class BrowserPersistentStorage:
@@ -631,7 +696,25 @@ class AuthStorageManager:
         return debug_info
 
 
-# 全局实例
-file_persistent_storage = FilePersistentStorage()
-browser_persistent_storage = BrowserPersistentStorage()
-auth_storage_manager = AuthStorageManager()
+# Session级别的存储管理器获取函数
+
+def get_file_persistent_storage() -> FilePersistentStorage:
+    """获取当前session的文件持久化存储实例"""
+    if '_file_persistent_storage' not in st.session_state:
+        st.session_state['_file_persistent_storage'] = FilePersistentStorage()
+    return st.session_state['_file_persistent_storage']
+
+
+def get_browser_persistent_storage() -> BrowserPersistentStorage:
+    """获取当前session的浏览器持久化存储实例"""
+    if '_browser_persistent_storage' not in st.session_state:
+        st.session_state['_browser_persistent_storage'] = BrowserPersistentStorage()
+    return st.session_state['_browser_persistent_storage']
+
+
+def get_auth_storage_manager() -> AuthStorageManager:
+    """获取当前session的认证存储管理器实例"""
+    if '_auth_storage_manager' not in st.session_state:
+        st.session_state['_auth_storage_manager'] = AuthStorageManager()
+    return st.session_state['_auth_storage_manager']
+

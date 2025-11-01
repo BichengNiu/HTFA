@@ -223,17 +223,6 @@ def display_summary_table(
                 )
 
             st.dataframe(styled_table, hide_index=True)
-
-        # 下载按钮（使用原始数据，包含单位和类型）
-        csv_string = summary_sorted.to_csv(index=False, encoding='utf-8-sig')
-        csv_data = csv_string.encode('utf-8-sig')
-        st.download_button(
-            label=UI_TEXT['download_label'],
-            data=csv_data,
-            file_name=f"{download_prefix}_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv",
-            key=f"download_{download_prefix}_csv"
-        )
     except KeyError as e:
         st.error(f"格式化/高亮摘要表时出错,列名可能不匹配: {e}")
         st.dataframe(summary_sorted, hide_index=True)

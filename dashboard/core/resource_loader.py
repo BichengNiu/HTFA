@@ -153,14 +153,3 @@ class ResourceLoader:
 def get_resource_loader() -> ResourceLoader:
     """获取全局资源加载器实例"""
     return ResourceLoader()
-
-
-# 向后兼容的别名函数
-def get_lazy_loader() -> ResourceLoader:
-    """向后兼容：获取懒加载器"""
-    return get_resource_loader()
-
-
-def get_component_loader() -> ResourceLoader:
-    """向后兼容：获取组件加载器"""
-    return get_resource_loader()

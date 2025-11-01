@@ -115,13 +115,7 @@ class WelcomeComponent(UIComponent):
         
         # 添加选择按钮
         if st_obj.button(f"进入{sub_module}", key=f"enter_{sub_module}", use_container_width=True):
-            from dashboard.core import get_unified_manager
-
-            state_manager = get_unified_manager()
-            if state_manager is None:
-                raise RuntimeError("统一状态管理器不可用，无法设置导航状态")
-
-            state_manager.set_state('navigation.navigate_to_sub_module', sub_module)
+            st.session_state["navigation.navigate_to_sub_module"] = sub_module
             st_obj.rerun()
     
     def _render_function_card(self, st_obj, function_config: Dict[str, str]):

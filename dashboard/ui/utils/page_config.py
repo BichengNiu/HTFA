@@ -48,15 +48,8 @@ def get_page_config_status() -> bool:
 
 def reset_page_config_flag() -> None:
     """
-    Reset the configuration flag in both the unified state manager and session_state.
+    Reset the configuration flag in session_state.
     """
-    from dashboard.core import get_unified_manager
-
-    state_manager = get_unified_manager()
-    if state_manager is None:
-        raise RuntimeError("统一状态管理器不可用，无法重置页面配置标志")
-
-    state_manager.clear_state("dashboard.page.config_set")
     st.session_state.pop("dashboard_page_config_set", None)
 
 

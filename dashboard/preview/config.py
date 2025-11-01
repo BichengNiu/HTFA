@@ -183,57 +183,44 @@ PLOT_CONFIGS = {
 # 摘要计算配置
 SUMMARY_CONFIGS = {
     'weekly': {
-        'lookback_years': 5,
         'indicator_name_column': '周度指标名称',
         'date_column': '最新日期',
         'column_order': [
             '周度指标名称', '最新日期', '最新值', '上周值',
-            '环比上周',
-            '近5年最大值', '近5年最小值', '近5年平均值'
+            '环比上周'
         ]
     },
     'monthly': {
-        'lookback_years': 5,
         'indicator_name_column': '月度指标名称',
         'date_column': '最新月份',
         'column_order': [
             '月度指标名称', '最新月份', '最新值', '上月值',
-            '环比上月', '上年同月值', '同比上年',
-            '近5年最大值', '近5年最小值', '近5年平均值'
+            '环比上月', '同比上年'
         ]
     },
     'daily': {
-        'lookback_years': 1,
         'indicator_name_column': '日度指标名称',
         'date_column': '最新日期',
         'column_order': [
             '日度指标名称', '最新日期', '最新值',
             '昨日值', '环比昨日',
-            '上周值', '环比上周',
-            '上月值', '环比上月',
-            '上年值', '同比上年',
-            '上周均值', '上月均值', '上年均值',
-            '近1年最大值', '近1年最小值', '近1年平均值'
+            '上周均值', '上月均值'
         ]
     },
     'ten_day': {
-        'lookback_years': 5,
         'indicator_name_column': '旬度指标名称',
         'date_column': '最新日期',
         'column_order': [
             '旬度指标名称', '最新日期', '最新值',
-            '上旬值', '环比上旬',
-            '近5年最大值', '近5年最小值', '近5年平均值'
+            '上旬值', '环比上旬'
         ]
     },
     'yearly': {
-        'lookback_years': 5,
         'indicator_name_column': '年度指标名称',
         'date_column': '最新年份',
         'column_order': [
             '年度指标名称', '最新年份', '最新值', '上年值', '同比上年',
-            '两年前值', '三年前值',
-            '近5年最大值', '近5年最小值', '近5年平均值'
+            '两年前值', '三年前值'
         ]
     }
 }

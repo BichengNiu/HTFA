@@ -122,7 +122,7 @@ class VariableSelectionComponent(DFMComponent):
 
             # 1. 目标变量选择 - 与老代码第895行完全一致
             available_target_vars = self._get_available_target_variables(training_data)
-            selected_target_var = self._render_target_variable_selection_legacy(
+            selected_target_var = self._render_target_variable_selection(
                 st_obj, available_target_vars
             )
 
@@ -137,7 +137,7 @@ class VariableSelectionComponent(DFMComponent):
                 print(f"[DEBUG] DFM变量列为空或全部为非'是'值，将不选择任何变量")
 
             # 3. 预测指标选择 - 直接显示所有行业的指标供用户选择
-            selected_indicators = self._render_indicator_selection_legacy(
+            selected_indicators = self._render_indicator_selection(
                 st_obj, all_industries, industry_to_vars, dfm_default_map
             )
 
@@ -157,7 +157,7 @@ class VariableSelectionComponent(DFMComponent):
             selected_industries = sorted(list(actual_industries_set))
 
             # 5. 显示汇总信息 - 与老代码第1108行完全一致
-            self._render_selection_summary_legacy(st_obj, selected_target_var,
+            self._render_selection_summary(st_obj, selected_target_var,
                                                 selected_industries, selected_indicators)
 
             # 返回选择结果
@@ -273,243 +273,6 @@ class VariableSelectionComponent(DFMComponent):
             default_states = {industry: True for industry in industries}
             self._set_state('dfm_industry_checkbox_states', default_states)
     
-    def _render_target_variable_selection(self, st_obj, available_vars: List[str]) -> str:
-        """
-        渲染目标变量选择
-        
-        Args:
-            st_obj: Streamlit对象
-            available_vars: 可用变量列表
-            
-        Returns:
-            选择的目标变量
-        """
-        # 初始化目标变量
-        current_target = self._initialize_target_variable(available_vars)
-        
-        # 确保当前目标变量在可选列表中
-        if current_target not in available_vars:
-            current_target = available_vars[0]
-            self._set_state('dfm_target_variable', current_target)
-        
-        selected_target_var = st_obj.selectbox(
-            "**选择目标变量**",
-            options=available_vars,
-            index=available_vars.index(current_target),
-            key=f"{self.get_state_key_prefix()}_target_variable",
-            help="选择您希望模型预测的目标序列。"
-        )
-        
-        # 更新状态
-        self._set_state('dfm_target_variable', selected_target_var)
-        
-        return selected_target_var
-    
-    def _render_industry_selection(self, st_obj, industries: List[str]) -> List[str]:
-        """
-        渲染行业选择
-        
-        Args:
-            st_obj: Streamlit对象
-            industries: 行业列表
-            
-        Returns:
-            选择的行业列表
-        """
-        st_obj.markdown("**选择行业**")
-        
-        if not industries:
-            st_obj.info("没有可用的行业数据。")
-            return []
-        
-        
-        # 初始化行业选择状态
-        self._initialize_industry_selection(industries)
-        
-        # 批量操作按钮
-        col1, col2, col3 = st_obj.columns(3)
-        
-        with col1:
-            if st_obj.button("[LOADING] 重置", key=f"{self.get_state_key_prefix()}_reset_industries"):
-                default_states = {industry: True for industry in industries}
-                self._set_state('dfm_industry_checkbox_states', default_states)
-                st_obj.rerun()
-        
-        with col2:
-            if st_obj.button("取消全行业", key=f"{self.get_state_key_prefix()}_deselect_all"):
-                deselect_states = {industry: False for industry in industries}
-                self._set_state('dfm_industry_checkbox_states', deselect_states)
-                st_obj.rerun()
-        
-        with col3:
-            if st_obj.button("选择全行业", key=f"{self.get_state_key_prefix()}_select_all"):
-                select_states = {industry: True for industry in industries}
-                self._set_state('dfm_industry_checkbox_states', select_states)
-                st_obj.rerun()
-        
-        # 创建列布局显示复选框
-        industry_cols = st_obj.columns(self._default_num_cols)
-        current_checkbox_states = self._get_state('dfm_industry_checkbox_states', {})
-        
-        # 渲染行业复选框
-        for idx, industry_name in enumerate(industries):
-            with industry_cols[idx % self._default_num_cols]:
-                current_value = current_checkbox_states.get(industry_name, True)
-                
-                new_state = st_obj.checkbox(
-                    industry_name,
-                    value=current_value,
-                    key=f"{self.get_state_key_prefix()}_industry_{idx}"
-                )
-                current_checkbox_states[industry_name] = new_state
-        
-        # 更新状态
-        self._set_state('dfm_industry_checkbox_states', current_checkbox_states)
-        
-        # 获取选中的行业
-        selected_industries = [
-            industry for industry, checked in current_checkbox_states.items() if checked
-        ]
-        
-        # 显示选择统计
-        st_obj.text(f"已选择 {len(selected_industries)} 个行业")
-        
-        return selected_industries
-
-    def _render_indicator_selection(self, st_obj, selected_industries: List[str],
-                                   industry_to_vars: Dict[str, List[str]]) -> List[str]:
-        """
-        渲染预测指标选择
-
-        Args:
-            st_obj: Streamlit对象
-            selected_industries: 选择的行业列表
-            industry_to_vars: 行业到变量的映射
-
-        Returns:
-            选择的指标列表
-        """
-        st_obj.markdown("**选择预测指标**")
-
-        if not selected_industries:
-            st_obj.info("请先在上方选择至少一个行业。")
-            return []
-
-        final_selected_indicators = []
-
-        # 为每个选中的行业渲染指标选择
-        for industry_name in selected_industries:
-            all_indicators_for_industry = industry_to_vars.get(industry_name, [])
-            
-            # 修复：排除目标变量，确保用户无法选择目标变量作为预测变量
-            current_target_var = self._get_state('dfm_target_variable', None)
-            if current_target_var:
-                indicators_for_industry = [
-                    indicator for indicator in all_indicators_for_industry 
-                    if indicator != current_target_var
-                ]
-            else:
-                indicators_for_industry = all_indicators_for_industry
-
-            # 修复：完全跳过没有可用指标的行业，不显示任何内容
-            if not indicators_for_industry:
-                # 清空该行业的选择状态
-                current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
-                current_selection[industry_name] = []
-                self._set_state('dfm_selected_indicators_per_industry', current_selection)
-                continue
-
-            # 只有当行业有可用指标时才显示行业标题
-            st_obj.markdown(f"**行业: {industry_name}**")
-            
-            # 只有在有指标被排除且仍有可用指标时才显示提示
-            excluded_count = len(all_indicators_for_industry) - len(indicators_for_industry)
-            if excluded_count > 0:
-                st_obj.text(f"  已自动排除目标变量 '{current_target_var}' (共排除 {excluded_count} 个)")
-
-            # 获取该行业的当前选择状态
-            current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
-            default_selection = current_selection.get(industry_name, indicators_for_industry)
-
-            # 确保默认值是实际可选列表的子集
-            valid_default = [item for item in default_selection if item in indicators_for_industry]
-            if not valid_default and indicators_for_industry:
-                valid_default = indicators_for_industry  # 默认全选
-
-            # 取消全选复选框
-            deselect_all_checked = st_obj.checkbox(
-                f"取消全选 {industry_name} 指标",
-                key=f"{self.get_state_key_prefix()}_deselect_{industry_name}",
-                help=f"勾选此框将取消所有已为 '{industry_name}' 选中的指标。"
-            )
-
-            # 如果取消全选被勾选，清空该行业的选择
-            if deselect_all_checked:
-                valid_default = []
-
-            # 渲染多选框
-            selected_in_widget = st_obj.multiselect(
-                f"为 '{industry_name}' 选择指标",
-                options=indicators_for_industry,
-                default=valid_default,
-                key=f"{self.get_state_key_prefix()}_indicators_{industry_name}",
-                help=f"从 {industry_name} 行业中选择预测指标。"
-            )
-
-            # 更新该行业的选择状态
-            current_selection[industry_name] = selected_in_widget
-            self._set_state('dfm_selected_indicators_per_industry', current_selection)
-
-            # 添加到最终选择列表
-            final_selected_indicators.extend(selected_in_widget)
-
-        # 清理不再被选中的行业条目
-        self._clean_unused_industry_states(selected_industries)
-
-        # 去重并排序
-        final_indicators = sorted(list(set(final_selected_indicators)))
-
-        return final_indicators
-
-    def _render_variable_selection_method(self, st_obj) -> str:
-        """
-        渲染变量选择方法
-
-        Args:
-            st_obj: Streamlit对象
-
-        Returns:
-            选择的变量选择方法
-        """
-        # 变量选择方法选项
-        variable_selection_options = {
-            'none': "无筛选 (使用全部已选变量)",
-            'global_backward': "全局后向剔除 (在已选变量中筛选)"
-        }
-
-        # 获取当前方法
-        current_method = self._get_state('dfm_variable_selection_method', 'none')
-
-        selected_method = st_obj.selectbox(
-            "变量选择方法",
-            options=list(variable_selection_options.keys()),
-            format_func=lambda x: variable_selection_options[x],
-            index=list(variable_selection_options.keys()).index(current_method),
-            key=f"{self.get_state_key_prefix()}_selection_method",
-            help=(
-                "选择在已选变量基础上的筛选方法：\n"
-                "- 无筛选: 直接使用所有已选择的变量\n"
-                "- 全局后向剔除: 从已选变量开始，逐个剔除不重要的变量"
-            )
-        )
-
-        # 更新状态
-        self._set_state('dfm_variable_selection_method', selected_method)
-        
-        # 注：global_backward方法基于性能提升自动决定剔除，不需要阈值参数
-
-        return selected_method
-
     # === 与老代码完全一致的辅助方法 ===
 
     def _get_available_target_variables(self, training_data: pd.DataFrame) -> List[str]:
@@ -570,7 +333,7 @@ class VariableSelectionComponent(DFMComponent):
             logger.error(f"获取行业映射失败: {e}")
             return {}
 
-    def _render_target_variable_selection_legacy(self, st_obj, available_target_vars: List[str]) -> str:
+    def _render_target_variable_selection(self, st_obj, available_target_vars: List[str]) -> str:
         """渲染目标变量选择 - 与老代码第881-906行完全一致"""
         if available_target_vars:
             # 初始化目标变量状态
@@ -599,7 +362,7 @@ class VariableSelectionComponent(DFMComponent):
             self._set_state('dfm_target_variable', None)
             return None
 
-    def _render_industry_selection_legacy(self, st_obj, unique_industries: List[str],
+    def _render_industry_selection(self, st_obj, unique_industries: List[str],
                                         industry_to_vars: Dict[str, List[str]]) -> List[str]:
         """渲染行业选择 - 与老代码第934-1030行完全一致"""
         # 检查复选框状态是否需要初始化
@@ -765,7 +528,7 @@ class VariableSelectionComponent(DFMComponent):
         self._set_state('dfm_selected_industries', selected_industries)
         return selected_industries
 
-    def _render_indicator_selection_legacy(self, st_obj, selected_industries: List[str],
+    def _render_indicator_selection(self, st_obj, selected_industries: List[str],
                                          industry_to_vars: Dict[str, List[str]],
                                          dfm_default_map: Dict[str, str] = None) -> List[str]:
         """渲染预测指标选择 - 与老代码第1032-1104行完全一致"""
@@ -873,7 +636,7 @@ class VariableSelectionComponent(DFMComponent):
         self._set_state('dfm_selected_indicators', final_indicators)
         return final_indicators
 
-    def _render_selection_summary_legacy(self, st_obj, selected_target_var: str,
+    def _render_selection_summary(self, st_obj, selected_target_var: str,
                                        selected_industries: List[str], selected_indicators: List[str]):
         """渲染选择摘要 - 与老代码第1108-1114行完全一致"""
         st_obj.markdown("--- ")
@@ -901,35 +664,6 @@ class VariableSelectionComponent(DFMComponent):
 
         except Exception as e:
             logger.error(f"更新选择状态失败: {e}")
-
-    def _render_selection_summary(self, st_obj) -> None:
-        """
-        渲染选择摘要
-
-        Args:
-            st_obj: Streamlit对象
-        """
-        try:
-            st_obj.markdown("---")
-
-            # 获取当前选择状态
-            current_target_var = self._get_state('dfm_target_variable', None)
-            current_selected_industries = self._get_state('dfm_selected_industries', [])
-            current_selected_indicators = self._get_state('dfm_selected_indicators', [])
-
-            # 显示摘要信息
-            st_obj.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
-            st_obj.text(f" - 选定行业数: {len(current_selected_industries)}")
-            st_obj.text(f" - 选定预测指标总数: {len(current_selected_indicators)}")
-
-            # 可选：显示详细的指标列表
-            if current_selected_indicators:
-                with st_obj.expander("查看已选指标列表", expanded=False):
-                    for indicator in current_selected_indicators:
-                        st_obj.text(f"  • {indicator}")
-
-        except Exception as e:
-            logger.error(f"渲染选择摘要失败: {e}")
 
     def _clean_unused_industry_states(self, current_industries: List[str]) -> None:
         """

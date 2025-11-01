@@ -1,22 +1,13 @@
 # -*- coding: utf-8 -*-
 """Utilities for managing the navigation button state."""
 
+import streamlit as st
 import logging
 import time
 from collections.abc import Iterable
 from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
-
-
-def _require_state_manager():
-    """Return the unified state manager or raise if it is unavailable."""
-    from dashboard.core import get_unified_manager
-
-    state_manager = get_unified_manager()
-    if state_manager is None:
-        raise RuntimeError("Unified state manager is required but is not available.")
-    return state_manager
 
 
 def optimize_button_state_management(
@@ -49,9 +40,7 @@ def get_button_state_for_module(module: str, current_module: str) -> str:
 
 
 def clear_button_state_cache() -> None:
-    """Remove cached button state information from the unified state manager."""
-    state_manager = _require_state_manager()
-
+    """Remove cached button state information."""
     cache_keys = [
         "ui.button_state_cache",
         "ui.button_state_time",
@@ -64,19 +53,17 @@ def clear_button_state_cache() -> None:
         "sidebar_cache",
     ]
 
-    existing_keys = set(state_manager.get_all_keys())
     for key in cache_keys:
-        if key in existing_keys:
-            state_manager.clear_state(key)
+        if key in st.session_state:
+            del st.session_state[key]
 
     logger.debug("Button state cache cleared.")
 
 
 def get_cached_button_states() -> Dict[str, Any]:
     """Return cached button state information."""
-    state_manager = _require_state_manager()
-    cache_data = state_manager.get_state("ui.button_state_cache")
-    cache_time = state_manager.get_state("ui.button_state_time")
+    cache_data = st.session_state.get("ui.button_state_cache")
+    cache_time = st.session_state.get("ui.button_state_time")
 
     if cache_time is not None and not isinstance(cache_time, (int, float)):
         raise TypeError("Cached timestamp must be numeric.")
@@ -97,11 +84,10 @@ def update_button_state_cache(
         main_module_options,
         current_main_module,
     )
-    state_manager = _require_state_manager()
     timestamp = time.time()
 
-    state_manager.set_state("ui.button_state_cache", button_states)
-    state_manager.set_state("ui.button_state_time", timestamp)
+    st.session_state["ui.button_state_cache"] = button_states
+    st.session_state["ui.button_state_time"] = timestamp
 
     logger.debug("Button state cache updated.")
 
