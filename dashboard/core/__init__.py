@@ -12,139 +12,55 @@ Core基础框架模块
 
 # 配置管理
 from dashboard.core.backend.config import (
-    CoreConfig,
-    get_core_config,
-    EnvironmentConfig,
-    ResourcePathsConfig,
-    NavigationConfig,
-    ConfigCache,
-    get_config_cache
+    get_core_config
 )
 
-# 导航管理
+# 导航管理 - 只导出辅助函数，不导出不存在的 get_navigation_manager
 from dashboard.core.backend.navigation import (
-    NavigationManager,
     NavigationStateKeys,
-    get_navigation_manager,
-    reset_navigation_manager
+    get_current_main_module,
+    get_current_sub_module,
+    set_current_main_module,
+    set_current_sub_module,
+    reset_navigation
 )
 
 # 资源加载
 from dashboard.core.backend.resource import (
-    ResourceLoader,
-    get_resource_loader,
-    LazyModuleLoader,
-    get_lazy_loader,
-    get_cached_lazy_loader,
-    ComponentLoader,
-    get_component_loader,
-    lazy_load_component,
-    preload_components_async
-)
-
-# 应用初始化
-from dashboard.core.backend.initialization import (
-    AppInitializer,
-    EnvironmentInitializer,
-    StreamlitInitializer,
-    CacheCleanupManager,
-    get_app_initializer,
-    initialize_app
-)
-
-# 工具装饰器
-from dashboard.core.backend.utils import (
-    safe_operation,
-    timed_operation,
-    thread_safe,
-    validate_required_attributes,
-    ThreadSafeSingleton
+    get_resource_loader
 )
 
 # ========== UI框架导出 ==========
+# 注意：UI组件应该由各业务模块直接导入，core 不应该重导出所有 UI 组件
+# 这里只导出核心基类和最常用的工具
 
-# UI组件
-from dashboard.core.ui.components import (
-    UIComponent,
-    BaseWelcomePage,
-    WelcomeComponent,
-    NavigationComponent,
-    LayoutComponent,
-    ModuleCard,
-    FeatureCard,
-    ComponentRegistry,
-    get_component_registry
-)
+# UI基类
+from dashboard.core.ui.components.base import UIComponent
 
-# 数据输入组件
-from dashboard.core.ui.components.data_input import (
-    DataInputComponent,
-    UnifiedDataUploadComponent,
-    DataUploadSidebar,
-    DataValidationComponent,
-    DataStagingComponent,
-    DataPreviewComponent
-)
-
-# UI工具
-from dashboard.core.ui.utils import (
-    StyleManager,
-    get_style_manager,
-    StyleLoader,
-    inject_cached_styles,
-    load_cached_styles,
-    get_style_loader,
-    UIInitializer,
-    initialize_ui,
-    load_ui_styles,
-    is_ui_initialized,
-    get_ui_initializer,
-    TabStateDetector
-)
-
-# UI常量
-from dashboard.core.ui.constants import UIConstants, NavigationLevel
+# UI工具 - 只导出最常用的
+from dashboard.core.ui.utils.style_loader import inject_cached_styles
+from dashboard.core.ui.utils.state_helpers import get_state, set_state
 
 __version__ = "5.0.0"
 
 __all__ = [
     # ===== Backend Services =====
-    # Config
-    'CoreConfig', 'get_core_config', 'EnvironmentConfig', 'ResourcePathsConfig',
-    'NavigationConfig', 'ConfigCache', 'get_config_cache',
+    'get_core_config',
 
     # Navigation
-    'NavigationManager', 'NavigationStateKeys', 'get_navigation_manager',
-    'reset_navigation_manager',
+    'NavigationStateKeys',
+    'get_current_main_module',
+    'get_current_sub_module',
+    'set_current_main_module',
+    'set_current_sub_module',
+    'reset_navigation',
 
     # Resource Loading
-    'ResourceLoader', 'get_resource_loader', 'LazyModuleLoader', 'get_lazy_loader',
-    'get_cached_lazy_loader', 'ComponentLoader', 'get_component_loader',
-    'lazy_load_component', 'preload_components_async',
-
-    # Initialization
-    'AppInitializer', 'EnvironmentInitializer', 'StreamlitInitializer',
-    'CacheCleanupManager', 'get_app_initializer', 'initialize_app',
-
-    # Utils
-    'safe_operation', 'timed_operation', 'thread_safe',
-    'validate_required_attributes', 'ThreadSafeSingleton',
+    'get_resource_loader',
 
     # ===== UI Framework =====
-    # Components
-    'UIComponent', 'BaseWelcomePage', 'WelcomeComponent', 'NavigationComponent',
-    'LayoutComponent', 'ModuleCard', 'FeatureCard', 'ComponentRegistry',
-    'get_component_registry',
-
-    # Data Input Components
-    'DataInputComponent', 'UnifiedDataUploadComponent', 'DataUploadSidebar',
-    'DataValidationComponent', 'DataStagingComponent', 'DataPreviewComponent',
-
-    # UI Utils
-    'StyleManager', 'get_style_manager', 'StyleLoader', 'inject_cached_styles',
-    'load_cached_styles', 'get_style_loader', 'UIInitializer', 'initialize_ui',
-    'load_ui_styles', 'is_ui_initialized', 'get_ui_initializer', 'TabStateDetector',
-
-    # UI Constants
-    'UIConstants', 'NavigationLevel'
+    'UIComponent',
+    'inject_cached_styles',
+    'get_state',
+    'set_state'
 ]

@@ -8,9 +8,78 @@ import streamlit as st
 from typing import Any, Optional
 from functools import lru_cache
 import logging
+from dashboard.core.backend.utils import safe_operation
 
 # 设置日志
 logger = logging.getLogger(__name__)
+
+
+# === 统一命名空间定义 ===
+
+class StateNamespace:
+    """状态管理命名空间常量"""
+    DASHBOARD = "dashboard"
+    NAVIGATION = "navigation"
+    DATA_INPUT = "data_input"
+    ANALYSIS = "analysis"
+    TOOLS = "tools"
+    AUTH = "auth"
+    CORE = "core"
+
+
+# === 统一状态管理接口 ===
+
+def get_state(namespace: str, key: str, default: Any = None) -> Any:
+    """
+    统一状态获取接口
+
+    Args:
+        namespace: 命名空间
+        key: 状态键
+        default: 默认值
+
+    Returns:
+        状态值
+    """
+    full_key = f"{namespace}.{key}"
+    return st.session_state.get(full_key, default)
+
+
+@safe_operation(default_return=False, log_error=True)
+def set_state(namespace: str, key: str, value: Any) -> bool:
+    """
+    统一状态设置接口
+
+    Args:
+        namespace: 命名空间
+        key: 状态键
+        value: 状态值
+
+    Returns:
+        设置是否成功
+    """
+    full_key = f"{namespace}.{key}"
+    st.session_state[full_key] = value
+    return True
+
+
+@safe_operation(default_return=False, log_error=True)
+def clear_state_by_prefix(prefix: str) -> bool:
+    """
+    根据前缀清理状态
+
+    Args:
+        prefix: 状态键前缀
+
+    Returns:
+        清理是否成功
+    """
+    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
+    for k in keys_to_delete:
+        del st.session_state[k]
+    logger.info(f"清理状态: 删除了{len(keys_to_delete)}个键（前缀: {prefix}）")
+    return True
+
 
 # === Dashboard专用状态管理函数 ===
 
@@ -29,6 +98,7 @@ def get_dashboard_state(key: str, default: Any = None) -> Any:
     return st.session_state.get(full_key, default)
 
 
+@safe_operation(default_return=False, log_error=True)
 def set_dashboard_state(key: str, value: Any) -> bool:
     """
     设置dashboard状态值
@@ -40,13 +110,9 @@ def set_dashboard_state(key: str, value: Any) -> bool:
     Returns:
         bool: 设置是否成功
     """
-    try:
-        full_key = f"dashboard.{key}"
-        st.session_state[full_key] = value
-        return True
-    except Exception as e:
-        logger.error(f"设置dashboard状态失败: {key}, 错误: {e}")
-        return False
+    full_key = f"dashboard.{key}"
+    st.session_state[full_key] = value
+    return True
 
 
 def get_staged_data() -> dict:
@@ -70,6 +136,7 @@ def get_staged_data_options() -> list:
     return [''] + list(staged_data.keys())
 
 
+@safe_operation(default_return=False, log_error=True)
 def clear_analysis_states(analysis_type: str) -> bool:
     """
     清理特定分析类型的状态
@@ -80,17 +147,14 @@ def clear_analysis_states(analysis_type: str) -> bool:
     Returns:
         bool: 清理是否成功
     """
-    try:
-        prefix = f"analysis.{analysis_type}."
-        keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
-        for k in keys_to_delete:
-            del st.session_state[k]
-        return True
-    except Exception as e:
-        logger.error(f"清理分析状态失败: {analysis_type}, 错误: {e}")
-        return False
+    prefix = f"analysis.{analysis_type}."
+    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
+    for k in keys_to_delete:
+        del st.session_state[k]
+    return True
 
 
+@safe_operation(default_return=False, log_error=True)
 def set_analysis_data(analysis_type: str, dataset_name: str, dataset_df: Any) -> bool:
     """
     设置分析数据
@@ -103,13 +167,9 @@ def set_analysis_data(analysis_type: str, dataset_name: str, dataset_df: Any) ->
     Returns:
         bool: 设置是否成功
     """
-    try:
-        key = f"analysis.{analysis_type}.{dataset_name}.data"
-        st.session_state[key] = dataset_df
-        return True
-    except Exception as e:
-        logger.error(f"设置分析数据失败: {analysis_type}.{dataset_name}, 错误: {e}")
-        return False
+    key = f"analysis.{analysis_type}.{dataset_name}.data"
+    st.session_state[key] = dataset_df
+    return True
 
 
 def clear_analysis_data(analysis_type: str) -> bool:
@@ -132,15 +192,12 @@ def get_tools_state(module_name: str, key: str, default: Any = None) -> Any:
     full_key = f"tools.{module_name}.{key}"
     return st.session_state.get(full_key, default)
 
+@safe_operation(default_return=False, log_error=True)
 def set_tools_state(module_name: str, key: str, value: Any) -> bool:
     """设置工具模块状态值（通用版本）"""
-    try:
-        full_key = f"tools.{module_name}.{key}"
-        st.session_state[full_key] = value
-        return True
-    except Exception as e:
-        logger.error(f"设置工具状态失败: {module_name}.{key}, 错误: {e}")
-        return False
+    full_key = f"tools.{module_name}.{key}"
+    st.session_state[full_key] = value
+    return True
 
 # === 特定模块的状态管理函数 ===
 
@@ -251,6 +308,7 @@ def get_all_preview_data(cache_key: Optional[str] = None) -> dict:
         'data_loaded_files': get_preview_state('data_loaded_files'),
     }
 
+@safe_operation(default_return=False, log_error=True)
 def clear_preview_data() -> bool:
     """
     清空所有预览数据状态
@@ -258,16 +316,12 @@ def clear_preview_data() -> bool:
     Returns:
         bool: 清理是否成功
     """
-    try:
-        prefix = 'tools.data_input.preview.'
-        keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
-        for k in keys_to_delete:
-            del st.session_state[k]
-        logger.info(f"清空预览数据: 删除了{len(keys_to_delete)}个状态键")
-        return True
-    except Exception as e:
-        logger.error(f"清空预览数据失败: {e}")
-        return False
+    prefix = 'tools.data_input.preview.'
+    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
+    for k in keys_to_delete:
+        del st.session_state[k]
+    logger.info(f"清空预览数据: 删除了{len(keys_to_delete)}个状态键")
+    return True
 
 # === 导航状态缓存管理 ===
 
@@ -330,6 +384,12 @@ __description__ = "状态管理辅助函数模块"
 
 # 导出的公共接口
 __all__ = [
+    # 统一接口
+    'StateNamespace',
+    'get_state',
+    'set_state',
+    'clear_state_by_prefix',
+    # 专用函数（向后兼容）
     'get_tools_state',
     'set_tools_state',
     'get_property_state',

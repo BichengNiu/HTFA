@@ -39,13 +39,13 @@ class ResourcePathsConfig:
         'dfm_train_model': 'dashboard.DFM.train_model.train_model_ui',
         'news_analysis': 'dashboard.models.DFM.decomp.news_analysis_front_end',
 
-        # 工具模块（已迁移到explore/ui目录）
+        # 探索模块
         'stationarity_analysis': 'dashboard.explore.ui.stationarity',
         'dtw_analysis': 'dashboard.explore.ui.dtw',
         'correlation_analysis': 'dashboard.explore.ui.correlation',
         'lead_lag_analysis': 'dashboard.explore.ui.lead_lag',
 
-        # UI组件（将更新为core.ui）
+        # UI组件
         'data_upload_sidebar': 'dashboard.core.ui.components.sidebar',
         'parameter_sidebar': 'dashboard.core.ui.components.sidebar'
     })
@@ -95,36 +95,17 @@ class CoreConfig:
         """
         return self.resource_paths.module_paths.get(module_name)
 
-    def add_module_path(self, module_name: str, module_path: str):
-        """
-        添加模块路径（支持运行时扩展）
-
-        Args:
-            module_name: 模块名称
-            module_path: 模块路径
-        """
-        self.resource_paths.module_paths[module_name] = module_path
-
     def get_cache_keys(self) -> List[str]:
         """获取缓存键列表"""
         return self.navigation.cache_keys.copy()
 
-    def add_cache_key(self, cache_key: str):
-        """
-        添加缓存键
-
-        Args:
-            cache_key: 缓存键
-        """
-        if cache_key not in self.navigation.cache_keys:
-            self.navigation.cache_keys.append(cache_key)
-
 
 # ==================== 全局配置实例 ====================
 
-_core_config = None
+import streamlit as st
 
 
+@st.cache_resource
 def get_core_config() -> CoreConfig:
     """
     获取核心配置实例（单例模式）
@@ -132,7 +113,4 @@ def get_core_config() -> CoreConfig:
     Returns:
         CoreConfig: 核心配置实例
     """
-    global _core_config
-    if _core_config is None:
-        _core_config = CoreConfig()
-    return _core_config
+    return CoreConfig()

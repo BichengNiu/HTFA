@@ -12,7 +12,6 @@ from typing import Dict, Any
 
 from dashboard.core.ui.utils.style_loader import inject_cached_styles
 from dashboard.core.ui.components.registry import get_component_registry
-from dashboard.core.ui.utils.style_manager import get_style_manager
 
 logger = logging.getLogger(__name__)
 
@@ -26,24 +25,16 @@ class UIInitializer:
     def load_styles(self):
         """加载应用样式"""
         start_time = time.time()
-        
+
         try:
             inject_cached_styles()
             logger.info("UI样式加载成功")
         except Exception as e:
-            logger.warning(f"Failed to load styles: {e}")
-            # 回退到基本样式
-            self._load_default_styles()
-        
+            logger.warning(f"样式加载失败: {e}, 应用将使用默认样式")
+
         setup_time = time.time() - start_time
         logger.debug(f"Styles loaded in {setup_time:.3f}s")
         self.initialized_components.add('styles')
-    
-    def _handle_style_loading_failure(self, error: Exception):
-        """处理样式加载失败"""
-        logger.error(f"样式加载失败: {error}")
-        # 不再加载fallback样式，而是记录错误并继续
-        # 应用程序应该能够在没有自定义样式的情况下正常运行
     
     def initialize_ui_components(self):
         """初始化UI组件"""
@@ -58,25 +49,13 @@ class UIInitializer:
         logger.debug(f"UI components initialized in {setup_time:.3f}s")
         self.initialized_components.add('components')
     
-    def initialize_style_manager(self):
-        """初始化样式管理器"""
-        start_time = time.time()
-
-        style_manager = get_style_manager()
-        logger.info("样式管理器初始化完成")
-
-        setup_time = time.time() - start_time
-        logger.debug(f"Style manager initialized in {setup_time:.3f}s")
-        self.initialized_components.add('style_manager')
-    
     def full_initialize(self) -> Dict[str, Any]:
         """完整初始化UI模块"""
         total_start_time = time.time()
-        
+
         # 按顺序执行UI初始化步骤
         initialization_steps = [
             ('styles', self.load_styles),
-            ('style_manager', self.initialize_style_manager),
             ('components', self.initialize_ui_components)
         ]
         
@@ -110,18 +89,17 @@ class UIInitializer:
     
     def is_complete(self) -> bool:
         """检查UI初始化是否完成"""
-        required_components = {'styles', 'style_manager', 'components'}
+        required_components = {'styles', 'components'}
         return required_components.issubset(self.initialized_components)
 
 # 全局UI初始化器实例
-_ui_initializer = None
+import streamlit as st
 
+
+@st.cache_resource
 def get_ui_initializer() -> UIInitializer:
     """获取全局UI初始化器实例"""
-    global _ui_initializer
-    if _ui_initializer is None:
-        _ui_initializer = UIInitializer()
-    return _ui_initializer
+    return UIInitializer()
 
 def initialize_ui() -> Dict[str, Any]:
     """UI初始化函数"""

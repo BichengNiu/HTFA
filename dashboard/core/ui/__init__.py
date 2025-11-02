@@ -13,7 +13,6 @@ from dashboard.core.ui.components.navigation import NavigationComponent
 from dashboard.core.ui.components.layout import LayoutComponent
 from dashboard.core.ui.components.cards import ModuleCard, FeatureCard
 from dashboard.core.ui.utils.tab_detector import TabStateDetector
-from dashboard.core.ui.utils.style_manager import StyleManager, get_style_manager
 from dashboard.core.ui.constants import UIConstants, NavigationLevel
 
 # 导入迁移的样式功能
@@ -64,12 +63,10 @@ __all__ = [
     'ModuleCard',
     'FeatureCard',
     'TabStateDetector',
-    'StyleManager',
-    'get_style_manager',
     'UIConstants',
     'NavigationLevel',
     'STATIC_DIR',
-    # 迁移的样式功能
+    # 样式功能
     'StyleLoader',
     'inject_cached_styles',
     'load_cached_styles',

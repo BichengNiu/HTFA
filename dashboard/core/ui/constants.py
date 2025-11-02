@@ -168,7 +168,6 @@ class UIConstants:
                 "time_lag_corr": "time_lag_tab_set_time"
             }
         },
-        # 向后兼容的旧键名（数据探索）
         "active_tab": "data_exploration_active_tab",
         "tab_flags": {
             "stationarity": "currently_in_stationarity_tab",

@@ -179,11 +179,10 @@ class TabStateDetector:
             st.session_state[flag] = False
 
 # 全局单例
-_tab_detector = None
+import streamlit as st
 
+
+@st.cache_resource
 def get_tab_detector() -> TabStateDetector:
     """获取全局标签页检测器实例"""
-    global _tab_detector
-    if _tab_detector is None:
-        _tab_detector = TabStateDetector()
-    return _tab_detector
+    return TabStateDetector()

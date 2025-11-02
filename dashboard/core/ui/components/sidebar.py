@@ -18,29 +18,32 @@ from dashboard.core.ui.utils.button_state_manager import clear_button_state_cach
 
 logger = logging.getLogger(__name__)
 
+
 class SidebarComponent:
     """侧边栏组件基类"""
 
     def __init__(self):
-        pass
+        self.logger = logging.getLogger(f"Sidebar.{self.__class__.__name__}")
 
-    def render(self, st_obj, **kwargs) -> None:
-        """渲染侧边栏组件"""
-        pass
+    def render(self, st_obj, **kwargs):
+        """
+        渲染侧边栏内容
 
-    def get_state_keys(self) -> List[str]:
-        """获取组件相关的状态键"""
-        return []
+        Args:
+            st_obj: Streamlit对象
+            **kwargs: 其他参数
 
-# 注意: DataUploadSidebar 已移至 ui/components/data_input/upload.py
-# 使用统一的数据上传组件: from dashboard.core.ui.components.data_input import DataUploadSidebar
+        Returns:
+            渲染结果
+        """
+        raise NotImplementedError("子类必须实现render方法")
 
-class ParameterSidebar(SidebarComponent):
+
+class ParameterSidebar:
     """参数配置侧边栏组件"""
-    
-    def __init__(self, title: str = "参数配置", 
+
+    def __init__(self, title: str = "参数配置",
                  parameters: List[Dict[str, Any]] = None):
-        super().__init__()
         self.title = title
         self.parameters = parameters or []
     

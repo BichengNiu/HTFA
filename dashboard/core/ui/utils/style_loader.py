@@ -11,18 +11,9 @@ from pathlib import Path
 import hashlib
 import time
 import logging
+from dashboard.core.backend.utils import safe_operation
 
 logger = logging.getLogger(__name__)
-
-# 全局StyleLoader实例，避免重复创建
-_global_style_loader = None
-
-def get_style_loader():
-    """获取全局StyleLoader实例"""
-    global _global_style_loader
-    if _global_style_loader is None:
-        _global_style_loader = StyleLoader()
-    return _global_style_loader
 
 class StyleLoader:
     """样式加载器"""
@@ -33,24 +24,18 @@ class StyleLoader:
         self.cache = {}
         self.file_hashes = {}
     
+    @safe_operation(default_return="", log_error=True)
     def _get_file_hash(self, file_path: Path) -> str:
         """获取文件哈希值"""
-        try:
-            with open(file_path, 'rb') as f:
-                content = f.read()
-                return hashlib.md5(content).hexdigest()
-        except Exception as e:
-            logger.error(f"Error getting file hash for {file_path}: {e}")
-            return ""
-    
+        with open(file_path, 'rb') as f:
+            content = f.read()
+            return hashlib.md5(content).hexdigest()
+
+    @safe_operation(default_return="", log_error=True)
     def _load_css_file(self, file_path: Path) -> str:
         """加载CSS文件内容"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            logger.error(f"Error loading CSS file {file_path}: {e}")
-            return ""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
     
     def load_styles(self, css_file: str = "styles.css") -> str:
         """加载样式文件"""
@@ -82,14 +67,11 @@ class StyleLoader:
             logger.info(f"Loaded CSS file: {css_file}")
         return content
     
+    @safe_operation(default_return="", log_error=True)
     def _load_js_file(self, file_path: Path) -> str:
         """加载JavaScript文件内容"""
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                return f.read()
-        except Exception as e:
-            logger.error(f"Error loading JS file {file_path}: {e}")
-            return ""
+        with open(file_path, 'r', encoding='utf-8') as f:
+            return f.read()
 
     def inject_styles(self, css_file: str = "styles.css"):
         """注入样式和JavaScript到Streamlit应用"""
@@ -117,14 +99,10 @@ class StyleLoader:
         self.file_hashes.clear()
 
 # 全局样式加载器实例
-_style_loader = None
-
+@st.cache_resource
 def get_style_loader() -> StyleLoader:
     """获取全局样式加载器实例"""
-    global _style_loader
-    if _style_loader is None:
-        _style_loader = StyleLoader()
-    return _style_loader
+    return StyleLoader()
 
 def load_cached_styles(css_file: str = "styles.css") -> str:
     """加载样式文件 - 优化版本，使用智能缓存"""

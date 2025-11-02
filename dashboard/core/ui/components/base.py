@@ -125,26 +125,8 @@ class UIComponent(UnifiedBaseComponent, ABC):
         # 初始化统一基类
         super().__init__(component_name)
 
-        # 基本属性初始化，避免循环导入
+        # 基本属性初始化
         self.component_id = component_name or self.__class__.__name__
-        self.performance_monitor = None
-        self.async_helper = None
-
-        # 标记为未初始化，延迟到真正需要时再初始化这些功能
-        self._advanced_features_initialized = False
-
-    def _initialize_advanced_features(self):
-        """延迟初始化高级功能，避免循环导入"""
-        if self._advanced_features_initialized:
-            return
-
-        from dashboard.core.ui.utils.performance_monitor import get_ui_performance_monitor
-        from dashboard.core.ui.utils.async_processor import get_streamlit_async_helper
-
-        self.performance_monitor = get_ui_performance_monitor()
-        self.async_helper = get_streamlit_async_helper()
-
-        self._advanced_features_initialized = True
 
     @abstractmethod
     def render(self, st_obj, **kwargs) -> None:
@@ -159,17 +141,13 @@ class UIComponent(UnifiedBaseComponent, ABC):
 
     def render_with_monitoring(self, st_obj, **kwargs) -> None:
         """
-        带性能监控的渲染方法
+        渲染方法（已移除性能监控）
 
         Args:
             st_obj: Streamlit对象
             **kwargs: 其他参数
         """
-        if self.performance_monitor:
-            with self.performance_monitor.monitor_operation(self.component_id, "render"):
-                return self.render(st_obj, **kwargs)
-        else:
-            return self.render(st_obj, **kwargs)
+        return self.render(st_obj, **kwargs)
 
     def process_async(self, st_obj, processor_func, data, description: str = "处理中..."):
         """

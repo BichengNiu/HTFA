@@ -100,14 +100,12 @@ class ComponentRegistry:
         }
 
 # 全局组件注册表实例
-_component_registry = None
+import streamlit as st
 
+@st.cache_resource
 def get_component_registry() -> ComponentRegistry:
     """获取全局组件注册表实例"""
-    global _component_registry
-    if _component_registry is None:
-        _component_registry = ComponentRegistry()
-    return _component_registry
+    return ComponentRegistry()
 
 # 便捷函数
 def register_ui_component(component_name: str, module_path: str, dependencies: Set[str] = None):
