@@ -7,17 +7,23 @@ DFM数据准备模块包
 - 数据对齐和清理
 - 平稳性处理
 - 映射管理
+
+使用 api.py 中的标准化API接口进行前后端分离开发。
 """
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "DFM Data Preparation Team"
 
-# 导入主要接口函数
-from dashboard.models.DFM.prep.data_preparation import prepare_data, load_mappings
-from dashboard.models.DFM.prep.modules.stationarity_processor import apply_stationarity_transforms
+from dashboard.models.DFM.prep.api import (
+    prepare_dfm_data,
+    load_variable_mappings,
+    apply_stationarity_transforms,
+    validate_preparation_parameters
+)
 
 __all__ = [
-    'prepare_data',
-    'load_mappings',
-    'apply_stationarity_transforms'
+    'prepare_dfm_data',
+    'load_variable_mappings',
+    'apply_stationarity_transforms',
+    'validate_preparation_parameters'
 ]

@@ -39,7 +39,7 @@ from dashboard.analysis.industrial.utils import (
 
 # 导入拉动率计算模块
 from dashboard.analysis.industrial.utils.contribution_calculator import calculate_all_contributions
-from dashboard.ui.utils.debug_helpers import debug_log
+from dashboard.core.ui.utils.debug_helpers import debug_log
 
 def get_monitoring_state(key: str, default: Any = None):
     """获取监测分析状态"""

@@ -26,8 +26,8 @@ from dashboard.models.DFM.prep.modules.data_processing_helpers import (
     collect_data_parts,
     merge_and_align_parts
 )
-from dashboard.models.DFM.prep.modules.ui_input_helpers import (
-    map_ui_variables_to_columns,
+from dashboard.models.DFM.prep.modules.input_adapters import (
+    map_input_variables_to_columns,
     build_final_variable_list,
     filter_by_date_range as filter_data_by_date_range,
     apply_stationarity_check
@@ -232,7 +232,7 @@ def _finalize_data_processing(
         raw_columns_across_all_sheets, reference_predictor_variables
     )
 
-def prepare_data_from_ui_input(
+def prepare_data_from_dataframe(
     input_df: pd.DataFrame,
     target_variable: str,
     selected_variables: List[str] = None,
@@ -241,7 +241,9 @@ def prepare_data_from_ui_input(
     skip_stationarity_check: bool = False
 ) -> Tuple[pd.DataFrame, Dict[str, Any], Dict[str, Any]]:
     """
-    从UI输入准备训练数据
+    从DataFrame准备训练数据
+
+    接收已加载的DataFrame并进行变量选择、日期筛选和平稳性转换
 
     Args:
         input_df: 输入数据DataFrame
@@ -254,7 +256,7 @@ def prepare_data_from_ui_input(
     Returns:
         Tuple[pd.DataFrame, Dict[str, Any], Dict[str, Any]]: (处理后的数据, 转换详情, 移除变量日志)
     """
-    print(f"\n--- [UI数据准备] 开始处理UI输入数据 ---")
+    print(f"\n--- [数据准备] 开始处理输入数据 ---")
 
     try:
         # 验证输入数据
@@ -264,14 +266,14 @@ def prepare_data_from_ui_input(
         if target_variable not in input_df.columns:
             raise ValueError(f"目标变量 '{target_variable}' 不在数据中")
 
-        # 步骤1: 映射UI变量到实际列名
+        # 步骤1: 映射输入变量到实际列名
         final_variables = [target_variable]
         if selected_variables:
-            print(f"  [VIEW] [UI数据准备] 开始变量名映射:")
-            print(f"    UI选择的变量: {selected_variables}")
+            print(f"  [VIEW] [数据准备] 开始变量名映射:")
+            print(f"    输入的变量: {selected_variables}")
 
             available_columns = list(input_df.columns)
-            variable_mapping = map_ui_variables_to_columns(selected_variables, available_columns)
+            variable_mapping = map_input_variables_to_columns(selected_variables, available_columns)
 
             final_variables = build_final_variable_list(target_variable, variable_mapping)
 
@@ -284,11 +286,11 @@ def prepare_data_from_ui_input(
             raise ValueError(f"以下变量在数据中不存在: {missing_vars}")
 
         filtered_df = input_df[final_variables].copy()
-        print(f"  [DATA] [UI数据准备] 筛选后数据形状: {filtered_df.shape}")
+        print(f"  [DATA] [数据准备] 筛选后数据形状: {filtered_df.shape}")
 
         # 步骤3: 日期范围筛选
         if training_start_date or validation_end_date:
-            print(f"  [DATE] [UI数据准备] 应用日期范围筛选:")
+            print(f"  [DATE] [数据准备] 应用日期范围筛选:")
             filtered_df, original_rows = filter_data_by_date_range(
                 filtered_df, training_start_date, validation_end_date
             )
@@ -300,7 +302,7 @@ def prepare_data_from_ui_input(
         )
 
         # 生成处理摘要
-        print(f"\n  [INFO] [UI数据准备] 处理摘要:")
+        print(f"\n  [INFO] [数据准备] 处理摘要:")
         print(f"    最终数据形状: {filtered_df.shape}")
         print(f"    目标变量: {target_variable}")
         print(f"    预测变量数量: {len(final_variables) - 1}")
@@ -312,7 +314,7 @@ def prepare_data_from_ui_input(
         return filtered_df, transform_details, removed_variables_log
 
     except Exception as e:
-        print(f"\n[ERROR] [UI数据准备] 处理失败: {str(e)}")
+        print(f"\n[ERROR] [数据准备] 处理失败: {str(e)}")
         import traceback
         traceback.print_exc()
 
@@ -323,5 +325,5 @@ def prepare_data_from_ui_input(
 # 导出的函数
 __all__ = [
     'prepare_data',
-    'prepare_data_from_ui_input'
+    'prepare_data_from_dataframe'
 ]

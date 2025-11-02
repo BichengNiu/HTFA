@@ -21,19 +21,19 @@ def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
     load_errors = []
 
     if model is None:
-        logger.warning("接收到的 DFM 模型对象为 None，将检查是否有足够的metadata数据")
-        # 不立即添加到错误列表，先检查是否有足够的数据
+        logger.warning("接收到的 DFM 模型对象为 None")
     else:
-        logger.info("成功接收 DFM 模型对象。")
+        logger.info("成功接收 DFM 模型对象")
 
     if metadata is None:
-        error_msg = "接收到的 DFM 元数据对象为 None。"
-        logger.warning(error_msg)
+        error_msg = "接收到的 DFM 元数据对象为 None"
+        logger.error(error_msg)
         load_errors.append(error_msg)
+        return model, metadata, load_errors
     else:
-        logger.info("成功接收 DFM 元数据对象。")
-        
-    logger.info("检查并加载评估指标...")
+        logger.info("成功接收 DFM 元数据对象")
+
+    logger.info("检查并加载评估指标")
 
     # 检查元数据中是否包含训练模块计算的标准指标
     standard_metric_keys = ['is_rmse', 'oos_rmse', 'is_mae', 'oos_mae', 'is_hit_rate', 'oos_hit_rate']
@@ -48,32 +48,15 @@ def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
         logger.info(f"                 IS_RMSE={metadata['is_rmse']:.4f}, OOS_RMSE={metadata['oos_rmse']:.4f}")
         logger.info(f"                 IS_MAE={metadata['is_mae']:.4f}, OOS_MAE={metadata['oos_mae']:.4f}")
     else:
-        logger.warning("未在元数据中找到训练模块计算的标准指标，这可能是旧版本模型文件")
-        logger.warning("使用默认值作为fallback（建议重新训练模型以获取真实指标）")
-        # 使用默认指标值（向后兼容旧模型）
-        metadata['is_hit_rate'] = 60.0
-        metadata['oos_hit_rate'] = 50.0
-        metadata['is_rmse'] = 0.08
-        metadata['oos_rmse'] = 0.10
-        metadata['is_mae'] = 0.08
-        metadata['oos_mae'] = 0.10
+        error_msg = "元数据中缺少必要的性能指标，请使用最新版本的训练模块重新训练模型"
+        logger.error(error_msg)
+        load_errors.append(error_msg)
 
-    # 最终检查：如果模型为None但有足够的数据，移除相关错误
+    # 检查模型对象是否有效
     if model is None:
-        # 检查是否有足够的数据来显示UI
-        has_complete_table = 'complete_aligned_table' in metadata and metadata.get('complete_aligned_table') is not None
-        has_basic_metrics = all(key in metadata for key in ['is_hit_rate', 'oos_hit_rate', 'is_rmse', 'oos_rmse'])
-
-        if has_complete_table and has_basic_metrics:
-            logger.info("虽然模型为None，但metadata包含足够数据供UI使用，移除模型相关错误")
-            # 移除模型为None的错误信息
-            load_errors = [error for error in load_errors if "模型对象为 None" not in error]
-        else:
-            # 如果数据不足，添加具体的错误信息
-            if not has_complete_table:
-                load_errors.append("缺少complete_aligned_table数据，无法显示Nowcast对比图")
-            if not has_basic_metrics:
-                load_errors.append("缺少基本性能指标数据")
+        error_msg = "模型对象为空，请上传有效的模型文件"
+        logger.error(error_msg)
+        load_errors.append(error_msg)
 
     return model, metadata, load_errors
 

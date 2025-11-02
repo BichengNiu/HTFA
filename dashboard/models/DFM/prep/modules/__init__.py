@@ -15,10 +15,10 @@
 __version__ = "1.0.0"
 __author__ = "Data Preparation Module"
 
-# 导入主要接口以保持向后兼容性
-from dashboard.models.DFM.prep.modules.main_data_processor import prepare_data, prepare_data_from_ui_input
+# 导入主要接口
+from dashboard.models.DFM.prep.modules.main_data_processor import prepare_data, prepare_data_from_dataframe
 
 __all__ = [
     'prepare_data',
-    'prepare_data_from_ui_input'
+    'prepare_data_from_dataframe'
 ]

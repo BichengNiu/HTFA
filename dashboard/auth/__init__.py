@@ -7,10 +7,12 @@
 from dashboard.auth.authentication import AuthManager
 from dashboard.auth.permissions import PermissionManager
 from dashboard.auth.models import User, UserSession
+from dashboard.auth.config import AuthConfig
 
 __all__ = [
     'AuthManager',
-    'PermissionManager', 
+    'PermissionManager',
     'User',
-    'UserSession'
+    'UserSession',
+    'AuthConfig'
 ]

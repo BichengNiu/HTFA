@@ -228,11 +228,8 @@ def finalize_results(
     # 自动加载映射数据（简化版本）
     try:
         print(f"[映射加载] 尝试保存映射数据到统一状态管理器...")
-        from dashboard.core import get_global_dfm_manager
-        dfm_manager = get_global_dfm_manager()
-        if dfm_manager:
-            dfm_manager.set_dfm_state('data_prep', 'dfm_industry_map_obj', updated_var_industry_map)
-            print(f"[映射加载] 成功保存行业映射 {len(updated_var_industry_map)} 个")
+        st.session_state['data_prep.dfm_industry_map_obj'] = updated_var_industry_map
+        print(f"[映射加载] 成功保存行业映射 {len(updated_var_industry_map)} 个")
     except Exception as e:
         print(f"[映射加载] 警告：保存映射数据失败: {e}")
     

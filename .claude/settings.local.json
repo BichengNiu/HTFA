@@ -5,7 +5,16 @@
       "Bash(sqlite3:*)",
       "Bash(netstat:*)",
       "Bash(findstr:*)",
-      "Bash(tasklist:*)"
+      "Bash(tasklist:*)",
+      "Bash(for f in dashboard/preview/*.py)",
+      "Bash(do echo '=== $f ===')",
+      "Bash(done)",
+      "Bash(find:*)",
+      "Bash(nul)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
+      "Bash(powershell -Command \"(Get-ChildItem -Path ''E:\\同步文件夹\\HTFA\\dashboard\\core'' -Filter *.py -Recurse | Get-Content | Measure-Object -Line).Lines\")",
+      "Bash(powershell:*)"
     ],
     "deny": [],
     "ask": []

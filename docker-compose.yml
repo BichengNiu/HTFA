@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: htfa-economic-analysis:latest
+    image: htfa.alpha.1101:latest
     container_name: htfa-app
     ports:
       - "8501:8501"

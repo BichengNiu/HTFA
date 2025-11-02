@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import numpy as np
 
-from dashboard.ui.utils.debug_helpers import debug_log
+from dashboard.core.ui.utils.debug_helpers import debug_log
 
 
 def prepare_weights_series_for_contribution(

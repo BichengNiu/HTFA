@@ -145,15 +145,15 @@ import traceback as tb
 # 延迟导入避免触发 @st.cache_resource
 
 # === 导入UI调试工具 ===
-from dashboard.ui.utils.debug_helpers import (
+from dashboard.core.ui.utils.debug_helpers import (
     debug_log, debug_state_change, debug_navigation, debug_button_click
 )
 
 # === 导入核心模块 ===
-from dashboard.core.resource_loader import get_resource_loader
-from dashboard.core.config_cache import get_config_cache
-from dashboard.core.navigation_manager import get_navigation_manager
-from dashboard.ui.utils.style_loader import inject_cached_styles
+from dashboard.core import get_resource_loader
+from dashboard.core import get_config_cache
+from dashboard.core import get_navigation_manager
+from dashboard.core.ui.utils.style_loader import inject_cached_styles
 
 # 简化初始化，避免循环导入
 lazy_loader = None
@@ -263,7 +263,7 @@ def _perform_managers_health_check(nav_manager):
 # 注释：已使用统一的 navigation_manager，不再需要 check_navigation_change 函数
 
 # 使用UI模块的按钮状态管理
-from dashboard.ui.utils.button_state_manager import optimize_button_state_management
+from dashboard.core.ui.utils.button_state_manager import optimize_button_state_management
 
 
 # 配置Altair数据转换器
@@ -274,7 +274,7 @@ alt.data_transformers.enable("vegafusion")
 
 # extract_industry_name函数已移至utils模块，避免重复定义
 
-from dashboard.ui.utils.state_helpers import (
+from dashboard.core.ui.utils.state_helpers import (
     get_dashboard_state, set_dashboard_state, get_staged_data,
     get_staged_data_options, clear_analysis_states as ui_clear_analysis_states,
     set_analysis_data, clear_analysis_data
@@ -336,8 +336,8 @@ inject_styles_always()
 lazy_loader, nav_manager = get_managers()
 
 # 集成认证中间件
-from dashboard.ui.components.auth.auth_middleware import get_auth_middleware
-from dashboard.config.auth_config import AuthConfig
+from dashboard.auth.ui.middleware import get_auth_middleware
+from dashboard.auth.config import AuthConfig
 
 auth_middleware = get_auth_middleware()
 
@@ -467,8 +467,8 @@ if not stable_key_prefix:
 key_prefix = stable_key_prefix
 
 # 使用UI模块的完整侧边栏组件
-from dashboard.ui.components.sidebar import render_complete_sidebar
-from dashboard.ui.components.content_router import force_navigation_state_sync
+from dashboard.core.ui.components.sidebar import render_complete_sidebar
+from dashboard.core.ui.components.content_router import force_navigation_state_sync
 
 # 在侧边栏渲染前强制同步导航状态，确保按钮状态正确
 if nav_manager:
@@ -575,7 +575,7 @@ else:
 
 
 # 使用UI模块的主内容路由组件
-from dashboard.ui.components.content_router import render_main_content
+from dashboard.core.ui.components.content_router import render_main_content
 
 # 渲染主内容
 content_result = render_main_content(nav_manager)

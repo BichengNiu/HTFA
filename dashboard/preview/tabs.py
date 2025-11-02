@@ -15,7 +15,7 @@ from dashboard.preview.config import UNIFIED_FREQUENCY_CONFIGS, UI_TEXT
 from dashboard.preview.calculators import calculate_summary
 from dashboard.preview.plotting import plot_indicator
 from dashboard.preview.components import create_filter_ui, display_summary_table
-from dashboard.ui.utils.state_helpers import get_all_preview_data, set_preview_state, get_preview_state
+from dashboard.core.ui.utils.state_helpers import get_all_preview_data, set_preview_state, get_preview_state
 from dashboard.preview.frequency_utils import get_indicator_frequencies, filter_indicators_by_frequency
 from dashboard.preview.config import FREQUENCY_ORDER
 

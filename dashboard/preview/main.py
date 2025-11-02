@@ -6,7 +6,7 @@ import logging
 
 from dashboard.preview.data_loader import load_and_process_data
 from dashboard.preview.tabs import display_time_series_tab, display_overview_tab
-from dashboard.ui.utils.state_helpers import get_all_preview_data, get_preview_state, set_preview_state, clear_preview_data
+from dashboard.core.ui.utils.state_helpers import get_all_preview_data, get_preview_state, set_preview_state, clear_preview_data
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,7 @@ def render_file_upload_sidebar(st_module):
         st_module.markdown("### 上传数据文件")
 
         # 使用统一的数据上传组件
-        from dashboard.ui.components.data_input import UnifiedDataUploadComponent
+        from dashboard.core.ui.components.data_input import UnifiedDataUploadComponent
 
         # 创建上传组件（返回文件对象模式）
         upload_component = UnifiedDataUploadComponent(

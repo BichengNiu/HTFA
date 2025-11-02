@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 from dashboard.analysis.industrial.utils import load_macro_data, load_weights_data
 
 # 导入新的UI组件
-from dashboard.ui.components.analysis import (
+from dashboard.analysis.industrial.ui import (
     IndustrialFileUploadComponent,
     IndustrialWelcomeComponent
 )
