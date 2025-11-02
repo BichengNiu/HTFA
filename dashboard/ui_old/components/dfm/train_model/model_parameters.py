@@ -11,7 +11,8 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
-from dashboard.models.DFM.ui import DFMComponent
+from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
+from dashboard.core import get_global_dfm_manager
 from dashboard.models.DFM.config import TrainDefaults, UIDefaults
 
 
@@ -21,9 +22,14 @@ logger = logging.getLogger(__name__)
 class ModelParametersComponent(DFMComponent):
     """DFM模型参数组件"""
     
-    def __init__(self):
-        """初始化模型参数组件"""
-        super().__init__()
+    def __init__(self, service_manager: Optional[DFMServiceManager] = None):
+        """
+        初始化模型参数组件
+        
+        Args:
+            service_manager: DFM服务管理器
+        """
+        super().__init__(service_manager)
         self._parameter_constraints = self._define_parameter_constraints()
     
     def get_component_id(self) -> str:
@@ -416,10 +422,16 @@ class ModelParametersComponent(DFMComponent):
     def _get_state(self, key: str, default: Any = None) -> Any:
         """获取状态值"""
         try:
-            value = self.get_state(key, None)
-            if value is not None:
-                return value
-            return default
+            dfm_manager = get_global_dfm_manager()
+            if dfm_manager:
+                value = dfm_manager.get_dfm_state('train_model', key, None)
+                if value is not None:
+                    return value
+                return default
+            else:
+                # 如果DFM状态管理器不可用，抛出明确错误
+                raise RuntimeError(f"DFM状态管理器不可用，无法获取状态: {key}")
+
         except Exception as e:
             logger.error(f"获取状态失败: {e}")
             raise RuntimeError(f"状态获取失败: {key} - {str(e)}")
@@ -427,7 +439,13 @@ class ModelParametersComponent(DFMComponent):
     def _set_state(self, key: str, value: Any) -> None:
         """设置状态值"""
         try:
-            self.set_state(key, value)
+            dfm_manager = get_global_dfm_manager()
+            if dfm_manager:
+                dfm_manager.set_dfm_state('train_model', key, value)
+            else:
+                # 如果DFM状态管理器不可用，抛出明确错误
+                raise RuntimeError(f"DFM状态管理器不可用，无法设置状态: {key}")
+
         except Exception as e:
             logger.error(f"设置状态失败: {e}")
             raise RuntimeError(f"状态设置失败: {key} - {str(e)}")

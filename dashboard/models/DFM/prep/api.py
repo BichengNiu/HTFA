@@ -18,7 +18,7 @@ import logging
 import tempfile
 from datetime import datetime
 
-from dashboard.models.DFM.prep.data_preparation import prepare_data as _prepare_data_internal
+from dashboard.models.DFM.prep.modules.main_data_processor import prepare_data as _prepare_data_internal
 from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings as _load_mappings_internal
 from dashboard.models.DFM.prep.modules.stationarity_processor import apply_stationarity_transforms as _apply_transforms_internal
 

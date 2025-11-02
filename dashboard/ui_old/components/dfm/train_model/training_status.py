@@ -15,8 +15,8 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple, Callable
 from datetime import datetime
 
-from dashboard.models.DFM.ui import DFMComponent
-from dashboard.models.DFM.train import DFMTrainer, TrainingConfig, TrainingResult
+from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
+from dashboard.core import get_global_dfm_manager
 
 # train_model已被删除，所有功能已迁移到train模块
 # 这个组件提供训练状态监控和结果管理
@@ -32,9 +32,14 @@ print("[INFO] TrainingStatusComponent: 使用标准日志系统(train_model已�
 class TrainingStatusComponent(DFMComponent):
     """DFM训练状态组件"""
     
-    def __init__(self):
-        """初始化训练状态组件"""
-        super().__init__()
+    def __init__(self, service_manager: Optional[DFMServiceManager] = None):
+        """
+        初始化训练状态组件
+
+        Args:
+            service_manager: DFM服务管理器
+        """
+        super().__init__(service_manager)
         self._training_thread = None
         self._training_lock = threading.Lock()
         self._current_training_id = None
@@ -487,49 +492,23 @@ class TrainingStatusComponent(DFMComponent):
     def _execute_training(self, training_config: Dict[str, Any],
                          progress_callback: Optional[Callable] = None) -> Optional[Dict[str, str]]:
         """
-        执行训练（已更新为使用新的DFMTrainer接口）
+        执行训练
 
         Args:
-            training_config: 训练配置字典
+            training_config: 训练配置
             progress_callback: 进度回调函数
 
         Returns:
             训练结果路径字典或None
         """
         try:
-            # 准备训练数据
-            prepared_data = training_config.get('training_data')
-            if prepared_data is None:
-                raise ValueError("缺少训练数据")
+            # 准备训练参数
+            training_params = self._prepare_training_params(training_config, progress_callback)
 
-            # 创建TrainingConfig对象
-            config = TrainingConfig(
-                data=prepared_data,
-                target_variable=training_config['target_variable'],
-                predictor_variables=training_config.get('selected_indicators', []),
-                training_start_date=training_config['training_start_date'],
-                validation_start_date=training_config['validation_start_date'],
-                validation_end_date=training_config['validation_end_date'],
-                factor_selection_strategy=training_config.get('factor_selection_strategy', 'information_criteria'),
-                fixed_number_of_factors=training_config.get('fixed_number_of_factors'),
-                max_iterations=training_config.get('max_iterations', 30),
-                factor_ar_order=training_config.get('max_lags', 1),
-                variable_selection_method=training_config.get('variable_selection_method', 'none'),
-                enable_variable_selection=training_config.get('enable_variable_selection', False)
-            )
+            # 执行训练
+            results = train_and_save_dfm_results(**training_params)
 
-            # 创建训练器并执行训练
-            trainer = DFMTrainer(config)
-            result: TrainingResult = trainer.train(
-                progress_callback=progress_callback,
-                enable_export=True
-            )
-
-            # 转换结果为路径字典格式（保持向后兼容）
-            if result and result.export_paths:
-                return result.export_paths
-
-            return None
+            return results
 
         except Exception as e:
             logger.error(f"训练执行失败: {e}")
@@ -551,10 +530,13 @@ class TrainingStatusComponent(DFMComponent):
         """
         # 获取训练数据
         prepared_data = training_config['training_data']
-        # 存储数据到train_model模块，使用多个键名以确保兼容性
-        st.session_state['train_model.prepared_data'] = prepared_data
-        st.session_state['train_model.dfm_prepared_data_df'] = prepared_data
-        logger.info("已将训练数据存储到train_model模块")
+
+        dfm_manager = get_global_dfm_manager()
+        if dfm_manager:
+            # 存储数据到train_model模块，使用多个键名以确保兼容性
+            dfm_manager.set_dfm_state('train_model', 'prepared_data', prepared_data)
+            dfm_manager.set_dfm_state('train_model', 'dfm_prepared_data_df', prepared_data)
+            logger.info("已将训练数据存储到train_model模块")
 
         # [CRITICAL FIX] 修正参数名称映射
         params = {
@@ -605,10 +587,12 @@ class TrainingStatusComponent(DFMComponent):
             var_type_map = self._get_state('dfm_var_type_map_obj', None)
             if var_type_map is None:
                 # 尝试从data_prep模块获取
-                    var_type_map = st.session_state.get('data_prep.dfm_var_type_map_obj', None)
+                dfm_manager = get_global_dfm_manager()
+                if dfm_manager:
+                    var_type_map = dfm_manager.get_dfm_state('data_prep', 'dfm_var_type_map_obj', None)
                     if var_type_map is not None:
                         # 将数据复制到train_model模块，方便后续使用
-                        st.session_state['train_model.dfm_var_type_map_obj'] = var_type_map
+                        dfm_manager.set_dfm_state('train_model', 'dfm_var_type_map_obj', var_type_map)
                         logger.info("从data_prep模块成功获取类型映射数据并复制到train_model模块")
             
             if var_type_map and isinstance(var_type_map, dict):
@@ -623,10 +607,12 @@ class TrainingStatusComponent(DFMComponent):
             var_industry_map = self._get_state('dfm_industry_map_obj', None)
             if var_industry_map is None:
                 # 尝试从data_prep模块获取
-                    var_industry_map = st.session_state.get('data_prep.dfm_industry_map_obj', None)
+                dfm_manager = get_global_dfm_manager()
+                if dfm_manager:
+                    var_industry_map = dfm_manager.get_dfm_state('data_prep', 'dfm_industry_map_obj', None)
                     if var_industry_map is not None:
                         # 将数据复制到train_model模块，方便后续使用
-                        st.session_state['train_model.dfm_industry_map_obj'] = var_industry_map
+                        dfm_manager.set_dfm_state('train_model', 'dfm_industry_map_obj', var_industry_map)
                         logger.info("从data_prep模块成功获取行业映射数据并复制到train_model模块")
             
             if var_industry_map and isinstance(var_industry_map, dict):

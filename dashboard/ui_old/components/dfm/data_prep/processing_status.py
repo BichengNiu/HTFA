@@ -13,9 +13,9 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
-from dashboard.models.DFM.ui import DFMComponent
-from dashboard.models.DFM.prep import prepare_dfm_data
-from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
+from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
+from dashboard.models.DFM.prep.data_preparation import prepare_data, load_mappings
+from dashboard.core import get_global_dfm_manager
 
 
 logger = logging.getLogger(__name__)
@@ -24,9 +24,14 @@ logger = logging.getLogger(__name__)
 class ProcessingStatusComponent(DFMComponent):
     """DFM数据处理状态组件"""
     
-    def __init__(self):
-        """初始化数据处理状态组件"""
-        super().__init__()
+    def __init__(self, service_manager: Optional[DFMServiceManager] = None):
+        """
+        初始化数据处理状态组件
+        
+        Args:
+            service_manager: DFM服务管理器
+        """
+        super().__init__(service_manager)
         self._processing_stages = [
             "正在执行数据预处理...",
             "数据预处理完成，正在生成结果...",
@@ -271,8 +276,8 @@ class ProcessingStatusComponent(DFMComponent):
             self._update_processing_progress(progress_bar, status_text, 30, "[CONFIG] 正在执行数据预处理...")
 
             # 调用数据预处理函数
-            result = prepare_dfm_data(
-                uploaded_file=excel_file_like_object,
+            results = prepare_data(
+                excel_path=excel_file_like_object,
                 target_freq=processing_params['target_freq'],
                 target_sheet_name=processing_params['target_sheet_name'],
                 target_variable_name=processing_params['target_variable'],
@@ -281,16 +286,13 @@ class ProcessingStatusComponent(DFMComponent):
                 data_end_date=str(processing_params['data_end_date']),
                 reference_sheet_name=processing_params['type_mapping_sheet']
             )
-
+            
             # 更新进度：处理结果
             self._update_processing_progress(progress_bar, status_text, 70, "[SUCCESS] 数据预处理完成，正在生成结果...")
-
-            if result['status'] == 'success':
-                # 从result中提取数据
-                prepared_data = result['data']
-                industry_map = result['metadata']['variable_mapping']
-                transform_log = result['metadata']['transform_log']
-                removed_variables_detailed_log = result['metadata']['removal_log']
+            
+            if results:
+                # 解包结果
+                prepared_data, industry_map, transform_log, removed_variables_detailed_log = results
                 
                 # 更新进度：分析结果
                 self._update_processing_progress(progress_bar, status_text, 80, "[INFO] 正在处理结果数据...")
@@ -333,7 +335,7 @@ class ProcessingStatusComponent(DFMComponent):
                 
                 return True
             else:
-                st.error(f"数据预处理失败: {result.get('message', '未知错误')}")
+                st.error("数据预处理失败或未返回数据。请检查控制台日志获取更多信息。")
                 self._clear_processing_results()
                 return False
                 
@@ -653,12 +655,35 @@ class ProcessingStatusComponent(DFMComponent):
 
     def _get_state(self, key: str, default: Any = None) -> Any:
         """获取状态值"""
-        import streamlit as st
-        full_key = f'data_prep.{key}'
-        return st.session_state.get(full_key, default)
+        try:
+            # 使用DFM统一状态管理系统
+            dfm_manager = get_global_dfm_manager()
+            if dfm_manager:
+                value = dfm_manager.get_dfm_state('data_prep', key, None)
+                if value is not None:
+                    return value
+                return default
+            else:
+                # 如果DFM状态管理器不可用，抛出明确错误
+                raise RuntimeError(f"DFM状态管理器不可用，无法获取状态: {key}")
+
+        except Exception as e:
+            logger.error(f"获取状态失败: {e}")
+            raise RuntimeError(f"状态获取失败: {key} - {str(e)}")
 
     def _set_state(self, key: str, value: Any) -> None:
         """设置状态值"""
-        import streamlit as st
-        full_key = f'data_prep.{key}'
-        st.session_state[full_key] = value
+        try:
+            # 使用DFM统一状态管理系统
+            dfm_manager = get_global_dfm_manager()
+            if dfm_manager:
+                success = dfm_manager.set_dfm_state('data_prep', key, value)
+                if success:
+                    return
+
+            # 如果DFM管理器不可用，记录错误
+            logger.error(f"DFM状态管理器不可用，无法设置状态: {key}")
+
+        except Exception as e:
+            logger.error(f"设置状态失败: {e}")
+            raise RuntimeError(f"状态设置失败: {key} - {str(e)}")

@@ -11,7 +11,8 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import date, datetime, timedelta
 
-from dashboard.models.DFM.ui import DFMComponent
+from dashboard.ui.components.dfm.base import DFMComponent, DFMServiceManager
+from dashboard.core import get_global_dfm_manager
 
 
 logger = logging.getLogger(__name__)
@@ -20,9 +21,14 @@ logger = logging.getLogger(__name__)
 class DateRangeComponent(DFMComponent):
     """DFM日期范围组件"""
     
-    def __init__(self):
-        """初始化日期范围组件"""
-        super().__init__()
+    def __init__(self, service_manager: Optional[DFMServiceManager] = None):
+        """
+        初始化日期范围组件
+        
+        Args:
+            service_manager: DFM服务管理器
+        """
+        super().__init__(service_manager)
         self._default_training_years = 5  # 默认训练期年数
         self._default_validation_months = 6  # 默认验证期月数
     
@@ -424,8 +430,13 @@ class DateRangeComponent(DFMComponent):
     def _set_state(self, key: str, value: Any) -> None:
         """设置状态值"""
         try:
-            success = self.set_state(key, value)
-            if not success:
-                logger.error(f"设置DFM状态失败: {key}")
+            dfm_manager = get_global_dfm_manager()
+            if dfm_manager:
+                success = dfm_manager.set_dfm_state('train_model', key, value)
+                if not success:
+                    logger.error(f"设置DFM状态失败: {key}")
+            else:
+                logger.error(f"DFM统一状态管理器不可用，无法设置状态: {key}")
+
         except Exception as e:
             logger.error(f"设置状态失败: {e}")

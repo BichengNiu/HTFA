@@ -29,7 +29,7 @@ import logging
 from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 
 # 导入组件化训练状态管理
-from dashboard.models.DFM.train.ui.components.training_status import TrainingStatusComponent
+from dashboard.ui.components.dfm.train_model.training_status import TrainingStatusComponent
 
 # 配置日志记录器
 logger = logging.getLogger(__name__)
@@ -160,7 +160,8 @@ data_preparation = _DATA_PREPARATION_MODULE
 # 3. 导入DFM训练脚本
 try:
     # 导入train模块
-    from dashboard.models.DFM.train import DFMTrainer, TrainingConfig, TrainingResult
+    from dashboard.models.DFM.train.training import DFMTrainer, TrainingConfig
+    from dashboard.models.DFM.train.training.trainer import TrainingResult
     print("[SUCCESS] 成功导入DFMTrainer和TrainingConfig from train")
     _TRAIN_UI_IMPORT_ERROR_MESSAGE = None
 except ImportError as e:
@@ -219,6 +220,8 @@ class TrainDefaults:
     VALIDATION_END_MONTH = 12
     VALIDATION_END_DAY = 31
 
+# 全局DFM管理器实例
+_dfm_manager = None
 
 
 def manage_download_state(action, session_id=None):
@@ -387,7 +390,7 @@ def _reset_training_state():
         training_component = get_training_status_component()
         training_component._reset_training_state()
 
-        from dashboard.core.ui.utils.debug_helpers import debug_log
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log("状态重置 - 使用组件化方法重置训练状态", "DEBUG")
 
         import streamlit as st
@@ -469,10 +472,10 @@ def get_dfm_state(key, default=None):
     """获取DFM状态值 - 仅从train_model命名空间读取"""
     try:
         # 导入调试工具
-        from dashboard.core.ui.utils.debug_helpers import debug_log
+        from dashboard.ui.utils.debug_helpers import debug_log
         import streamlit as st
 
-        # 使用st.session_state管理状态
+        # 直接使用st.session_state，不再通过get_global_dfm_manager
         full_key = f'train_model.{key}'
         value = st.session_state.get(full_key, default)
 
@@ -481,7 +484,7 @@ def get_dfm_state(key, default=None):
 
         return value
     except Exception as e:
-        from dashboard.core.ui.utils.debug_helpers import debug_log
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"状态读取 - 异常 - 键: {key}, 错误: {str(e)}", "ERROR")
         return default
 
@@ -490,7 +493,7 @@ def set_dfm_state(key, value):
     """设置DFM状态值（直接使用st.session_state）"""
     try:
         import streamlit as st
-        from dashboard.core.ui.utils.debug_helpers import debug_log
+        from dashboard.ui.utils.debug_helpers import debug_log
 
         # 训练相关键列表
         training_keys = [
@@ -513,7 +516,7 @@ def set_dfm_state(key, value):
         debug_log(f"状态设置 - 键: {key}, 值类型: {type(value)}", "DEBUG")
         return True
     except Exception as e:
-        from dashboard.core.ui.utils.debug_helpers import debug_log
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"状态设置 - 异常 - 键: {key}, 错误: {str(e)}", "ERROR")
         return False
 
@@ -631,7 +634,7 @@ def render_dfm_model_training_page(st_instance):
     # 合并刷新标志
     force_ui_refresh = ui_refresh_needed or training_just_completed
 
-    from dashboard.core.ui.utils.debug_helpers import debug_log
+    from dashboard.ui.utils.debug_helpers import debug_log
     debug_log(f"UI状态检查 - 当前训练状态: {training_status}", "DEBUG")
     debug_log(f"UI状态检查 - UI刷新需要标志: {ui_refresh_needed}", "DEBUG")
     debug_log(f"UI状态检查 - 强制刷新标志: {force_ui_refresh}", "DEBUG")
@@ -710,14 +713,7 @@ def render_dfm_model_training_page(st_instance):
 
     # 文件上传区域 - 替代从data_prep命名空间读取数据
     st_instance.markdown("### 数据文件上传")
-
-    # 检查是否已有上传的文件
-    existing_data = get_dfm_state('train_uploaded_data_file', None)
-    existing_map = get_dfm_state('train_uploaded_industry_map_file', None)
-
-    # 只在文件未完全上传时显示提示
-    if existing_data is None or existing_map is None:
-        st_instance.info("请上传数据准备模块导出的预处理数据和行业映射文件")
+    st_instance.info("请上传数据准备模块导出的预处理数据和行业映射文件")
 
     col_upload1, col_upload2 = st_instance.columns(2)
 
@@ -732,11 +728,10 @@ def render_dfm_model_training_page(st_instance):
 
         if uploaded_data_file:
             set_dfm_state("train_uploaded_data_file", uploaded_data_file)
-            st_instance.success(f"已上传: {uploaded_data_file.name}")
         else:
             existing_data_file = get_dfm_state('train_uploaded_data_file', None)
             if existing_data_file is not None and hasattr(existing_data_file, 'name'):
-                st_instance.success(f"当前文件: {existing_data_file.name}")
+                st_instance.info(f"当前文件: {existing_data_file.name}")
 
     with col_upload2:
         st_instance.markdown("**行业映射文件 (.csv)**")
@@ -749,13 +744,10 @@ def render_dfm_model_training_page(st_instance):
 
         if uploaded_industry_map_file:
             set_dfm_state("train_uploaded_industry_map_file", uploaded_industry_map_file)
-            st_instance.success(f"已上传: {uploaded_industry_map_file.name}")
         else:
             existing_map_file = get_dfm_state('train_uploaded_industry_map_file', None)
             if existing_map_file is not None and hasattr(existing_map_file, 'name'):
-                st_instance.success(f"当前文件: {existing_map_file.name}")
-
-    st_instance.markdown("---")
+                st_instance.info(f"当前文件: {existing_map_file.name}")
 
     # 加载上传的文件
     data_file = get_dfm_state('train_uploaded_data_file', None)
@@ -842,43 +834,14 @@ def render_dfm_model_training_page(st_instance):
                 import traceback
                 st_instance.code(traceback.format_exc(), language="python")
 
-    # 检查文件是否都已上传并成功解析
+    # 检查文件是否都已上传
     if input_df is None or not var_industry_map:
-        missing_details = []
+        missing = []
         if input_df is None:
-            if data_file is None:
-                missing_details.append("预处理数据文件：未上传")
-            else:
-                missing_details.append("预处理数据文件：上传成功但解析失败，请检查CSV格式是否正确")
-
+            missing.append("预处理数据文件")
         if not var_industry_map:
-            if industry_map_file is None:
-                missing_details.append("行业映射文件：未上传")
-            else:
-                missing_details.append("行业映射文件：上传成功但解析失败，可能原因：\n  - 缺少必需的列（需要包含'Indicator'和'Industry'列）\n  - 数据行全部为空或格式不正确")
-
-        st_instance.error(f"数据验证失败：\n\n" + "\n\n".join([f"{i+1}. {detail}" for i, detail in enumerate(missing_details)]))
-
-        # 添加排查建议
-        with st_instance.expander("查看排查建议"):
-            st_instance.markdown("""
-            **预处理数据文件要求：**
-            - 必须是CSV格式
-            - 第一列为日期索引
-            - 包含所有变量列
-
-            **行业映射文件要求：**
-            - 必须是CSV格式
-            - 必须包含'Indicator'和'Industry'两列
-            - 每行数据不能为空
-            - 可选包含'DFM_Default'列（标记默认变量）
-
-            **常见问题：**
-            - 文件编码问题：确保使用UTF-8编码
-            - 列名拼写错误：检查列名是否完全匹配
-            - 数据为空：确保文件中有有效数据行
-            """)
-
+            missing.append("行业映射文件")
+        st_instance.warning(f"缺少必要文件: {', '.join(missing)}。请上传后再继续。")
         return
 
     available_target_vars = []
@@ -1801,7 +1764,7 @@ def render_dfm_model_training_page(st_instance):
                 # 同步回状态管理器
                 set_dfm_state('dfm_model_results_paths', training_results)
 
-        from dashboard.core.ui.utils.debug_helpers import debug_log
+        from dashboard.ui.utils.debug_helpers import debug_log
         debug_log(f"UI状态检查 - 当前训练状态: {training_status}", "DEBUG")
         debug_log(f"UI状态检查 - 结果文件数量: {len(training_results) if training_results else 0}", "DEBUG")
 
