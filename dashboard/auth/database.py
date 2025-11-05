@@ -16,8 +16,11 @@ class AuthDatabase:
     """认证数据库管理器"""
 
     # SQL字段列表常量
-    USER_FIELDS = '''id, username, password_hash, email, wechat, phone, organization,
-                     permissions, created_at, last_login, is_active, failed_login_attempts, locked_until'''
+    USER_COLUMNS = (
+        'id', 'username', 'password_hash', 'email', 'wechat', 'phone',
+        'organization', 'permissions', 'created_at', 'last_login',
+        'is_active', 'failed_login_attempts', 'locked_until'
+    )
 
     def __init__(self, db_path: str = None):
         """初始化数据库连接"""
@@ -136,7 +139,7 @@ class AuthDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
-                    SELECT {self.USER_FIELDS}
+                    SELECT {', '.join(self.USER_COLUMNS)}
                     FROM users WHERE username = ?
                 ''', (username,))
 
@@ -152,7 +155,7 @@ class AuthDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
-                    SELECT {self.USER_FIELDS}
+                    SELECT {', '.join(self.USER_COLUMNS)}
                     FROM users WHERE id = ?
                 ''', (user_id,))
 
@@ -197,7 +200,7 @@ class AuthDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute(f'''
-                    SELECT {self.USER_FIELDS}
+                    SELECT {', '.join(self.USER_COLUMNS)}
                     FROM users ORDER BY created_at DESC
                 ''')
 

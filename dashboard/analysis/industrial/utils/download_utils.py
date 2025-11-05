@@ -100,7 +100,8 @@ def create_excel_download_button(
     additional_sheets: Optional[Dict[str, pd.DataFrame]] = None,
     add_notes: bool = False,
     notes_content: Optional[list] = None,
-    column_ratio: tuple = (1, 3)
+    column_ratio: tuple = (1, 3),
+    type: str = "primary"
 ) -> None:
     """
     创建Excel下载按钮
@@ -120,6 +121,7 @@ def create_excel_download_button(
         add_notes: 是否添加注释说明sheet
         notes_content: 注释内容列表
         column_ratio: 列宽比例（按钮列, 空白列）
+        type: 按钮类型（primary/secondary）
 
     Returns:
         None
@@ -150,7 +152,8 @@ def create_excel_download_button(
             data=excel_data,
             file_name=f"{file_name}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=button_key or f"download_{file_name}"
+            key=button_key or f"download_{file_name}",
+            type=type
         )
 
 
@@ -163,7 +166,8 @@ def create_download_with_annotation(
     annotation_sheet_name: str = "注释说明",
     button_label: str = "下载数据",
     button_key: Optional[str] = None,
-    additional_notes: Optional[list] = None
+    additional_notes: Optional[list] = None,
+    type = "primary"
 ) -> None:
     """
     创建带注释的Excel下载
@@ -180,6 +184,7 @@ def create_download_with_annotation(
         button_label: 按钮文字
         button_key: 按钮key
         additional_notes: 额外的说明文字列表
+        type: 按钮类型（primary/secondary）
 
     Returns:
         None
@@ -214,7 +219,8 @@ def create_download_with_annotation(
         button_key=button_key,
         additional_sheets=additional_sheets,
         add_notes=bool(notes_content),
-        notes_content=notes_content if notes_content else None
+        notes_content=notes_content if notes_content else None,
+        type=type
     )
 
 

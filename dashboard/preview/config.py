@@ -113,11 +113,11 @@ PLOT_CONFIGS = {
         'x_tick_interval': 4,
         'historical_years': 5,
         'layout': {
-            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 100},
+            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 120},
             'legend': {
                 'orientation': 'h',
                 'yanchor': 'bottom',
-                'y': -0.2,
+                'y': -0.3,
                 'xanchor': 'center',
                 'x': 0.5
             }
@@ -129,11 +129,11 @@ PLOT_CONFIGS = {
         'x_tick_interval': 1,
         'historical_years': 5,
         'layout': {
-            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 100},
+            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 120},
             'legend': {
                 'orientation': 'h',
                 'yanchor': 'bottom',
-                'y': -0.2,
+                'y': -0.3,
                 'xanchor': 'center',
                 'x': 0.5
             }
@@ -146,11 +146,11 @@ PLOT_CONFIGS = {
         'x_tick_labels': ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
         'historical_years': 5,
         'layout': {
-            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 100},
+            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 120},
             'legend': {
                 'orientation': 'h',
                 'yanchor': 'bottom',
-                'y': -0.2,
+                'y': -0.3,
                 'xanchor': 'center',
                 'x': 0.5
             }
@@ -163,11 +163,11 @@ PLOT_CONFIGS = {
         'x_tick_labels': [f"{i}月" for i in range(1, 13)],
         'historical_years': 5,
         'layout': {
-            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 100},
+            'margin': {'l': 50, 'r': 30, 't': 60, 'b': 120},
             'legend': {
                 'orientation': 'h',
                 'yanchor': 'bottom',
-                'y': -0.2,
+                'y': -0.3,
                 'xanchor': 'center',
                 'x': 0.5
             }

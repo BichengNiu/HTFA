@@ -4,7 +4,7 @@ Industrial Macro Operations Analysis Module
 """
 
 # 导出本模块定义的函数
-__all__ = ['render_macro_operations_tab', 'render_macro_operations_analysis_with_data', '_render_macro_operations_analysis']
+__all__ = ['render_macro_operations_analysis_with_data', '_render_macro_operations_analysis']
 
 # 导入必要的模块
 import streamlit as st
@@ -39,122 +39,36 @@ from dashboard.analysis.industrial.utils import (
 
 # 导入拉动率计算模块
 from dashboard.analysis.industrial.utils.contribution_calculator import calculate_all_contributions
+from dashboard.analysis.industrial.utils.weighted_calculation import (
+    build_weights_mapping,
+    categorize_indicators
+)
 from dashboard.core.ui.utils.debug_helpers import debug_log
+from dashboard.analysis.industrial.validation import validate_data_format, display_validation_result
+from dashboard.analysis.industrial.constants import (
+    TOTAL_INDUSTRIAL_GROWTH_COLUMN,
+    get_simplified_name,
+    STATE_NAMESPACE_INDUSTRIAL,
+    STATE_KEY_UPLOADED_FILE,
+    STATE_KEY_MACRO_DATA,
+    STATE_KEY_WEIGHTS_DATA,
+    STATE_KEY_FILE_NAME,
+    STATE_KEY_CONTRIBUTION_EXPORT,
+    STATE_KEY_CONTRIBUTION_STREAM,
+    STATE_KEY_CONTRIBUTION_INDUSTRY,
+    STATE_KEY_CONTRIBUTION_INDIVIDUAL,
+    STATE_KEY_TOTAL_GROWTH,
+    STATE_KEY_VALIDATION_RESULT
+)
 
-def get_monitoring_state(key: str, default: Any = None):
-    """获取监测分析状态"""
-    try:
-        import streamlit as st
-        full_key = f'monitoring.industrial.macro.{key}'
-        return st.session_state.get(full_key, default)
-    except Exception as e:
-        logger.error(f"获取监测分析状态失败: {e}")
-        return default
+# 状态管理辅助函数
+def _get_state(key: str, default=None):
+    """获取工业分析状态"""
+    return st.session_state.get(f'{STATE_NAMESPACE_INDUSTRIAL}.{key}', default)
 
-
-def set_monitoring_state(key: str, value: Any, is_initialization: bool = False):
-    """设置监测分析状态"""
-    try:
-        import streamlit as st
-        full_key = f'monitoring.industrial.macro.{key}'
-        st.session_state[full_key] = value
-        return True
-    except Exception as e:
-        logger.error(f"设置监测分析状态失败: {e}")
-        return False
-
-def initialize_monitoring_states():
-    """预初始化监测分析状态，避免第一次点击时刷新"""
-    try:
-        import streamlit as st
-        # 静默初始化所有时间筛选相关的状态
-        time_range_keys = [
-            'macro_time_range_chart1',
-            'macro_time_range_chart2',
-            'macro_time_range_chart3'
-        ]
-
-        for key in time_range_keys:
-            full_key = f'monitoring.industrial.macro.{key}'
-            # 只有在状态不存在时才初始化
-            if full_key not in st.session_state:
-                st.session_state[full_key] = "3年"
-
-        return True
-    except (AttributeError, KeyError, TypeError) as e:
-        logger.warning(f"初始化监测状态失败: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"初始化监测状态时发生未预期错误: {e}", exc_info=True)
-        return False
-
-
-# 数据加载函数已移至utils.data_loader模块，删除重复代码
-
-
-def validate_data_format(df_macro: pd.DataFrame, df_weights: pd.DataFrame, target_columns: List[str]) -> tuple:
-    """
-    验证数据格式并返回详细的诊断信息
-
-    Returns:
-        (is_valid: bool, error_message: str, debug_info: dict)
-    """
-    debug_info = {}
-
-    # 检查基本数据
-    if df_macro.empty:
-        return False, "分行业工业增加值同比增速数据为空", debug_info
-    if df_weights.empty:
-        return False, "权重数据为空", debug_info
-
-    debug_info['macro_shape'] = df_macro.shape
-    debug_info['weights_shape'] = df_weights.shape
-    debug_info['target_columns_count'] = len(target_columns)
-
-    # 检查权重数据必要列
-    required_weight_columns = ['指标名称', '出口依赖', '上中下游']
-    weight_year_columns = ['权重_2012', '权重_2018', '权重_2020']
-
-    missing_columns = [col for col in required_weight_columns if col not in df_weights.columns]
-    if missing_columns:
-        return False, f"权重数据缺少必要列: {missing_columns}", debug_info
-
-    # 检查是否至少有一个权重年份列
-    available_weight_columns = [col for col in weight_year_columns if col in df_weights.columns]
-    if not available_weight_columns:
-        return False, f"权重数据缺少权重列，需要以下任一列: {weight_year_columns}", debug_info
-
-    debug_info['available_weight_columns'] = available_weight_columns
-
-    debug_info['weights_columns'] = list(df_weights.columns)
-
-    # 检查目标列匹配情况
-    available_columns = [col for col in target_columns if col in df_macro.columns]
-    debug_info['available_columns_count'] = len(available_columns)
-    debug_info['available_columns'] = available_columns[:5]  # 只显示前5个
-
-    if not available_columns:
-        return False, "目标列在分行业工业增加值同比增速数据中未找到匹配项", debug_info
-
-    # 检查权重数据中的指标名称匹配
-    weight_indicators = df_weights['指标名称'].dropna().tolist()
-    matched_indicators = [ind for ind in weight_indicators if ind in available_columns]
-    debug_info['matched_indicators_count'] = len(matched_indicators)
-    debug_info['matched_indicators'] = matched_indicators[:5]  # 只显示前5个
-
-    if not matched_indicators:
-        return False, "权重数据中的指标名称与分行业工业增加值同比增速数据列名无匹配项", debug_info
-
-    return True, "数据格式验证通过", debug_info
-
-
-# 旧的calculate_weighted_groups函数已删除，请使用utils中的calculate_weighted_groups_optimized
-# 该优化版本性能提升10-100倍，代码更简洁，参见：dashboard/analysis/industrial/utils/weighted_calculation.py
-
-# 旧的图表创建函数已删除，请使用utils中的create_time_series_chart
-# create_single_axis_chart (173行) 和 create_overall_industrial_chart (207行) 已替换为统一的图表创建器
-# 参见：dashboard/analysis/industrial/utils/chart_creator_unified.py
-
+def _set_state(key: str, value):
+    """设置工业分析状态"""
+    st.session_state[f'{STATE_NAMESPACE_INDUSTRIAL}.{key}'] = value
 
 
 def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, df_weights: pd.DataFrame):
@@ -179,398 +93,617 @@ def _render_macro_operations_analysis(st_obj, df: pd.DataFrame, df_weights: pd.D
     内部函数：执行分行业工业增加值同比增速分析的核心逻辑
     """
     if df is not None and df_weights is not None:
-        # 预初始化状态以避免第一次点击时刷新
-        initialize_monitoring_states()
-
         # Store the data in state
-        set_monitoring_state('uploaded_data', df)
-        set_monitoring_state('weights_data', df_weights)
-        set_monitoring_state('file_name', 'shared_data')
+        _set_state(STATE_KEY_MACRO_DATA, df)
+        _set_state(STATE_KEY_WEIGHTS_DATA, df_weights)
+        _set_state(STATE_KEY_FILE_NAME, 'shared_data')
 
-        # First chart - Overall industrial value-added data from "总体工业增加值同比增速" sheet
-        try:
-            # Get the uploaded file from unified state management with proper namespace
-            from dashboard.analysis.industrial.industrial_analysis import get_industrial_state
-            uploaded_file = get_industrial_state('macro.uploaded_file')
-            if uploaded_file is not None:
-                # Load overall industrial data
-                df_overall = load_overall_industrial_data(uploaded_file)
-
-                if df_overall is not None and not df_overall.empty:
-                    # Extract the four variables from the overall industrial data
-                    # Assuming the four variables are in columns 1-4 (after the date column)
-                    overall_vars = [col for col in df_overall.columns if pd.notna(col)][:4]
-
-                    if overall_vars:
-                        # Create variable name mapping for display
-                        var_name_mapping = {}
-                        for var in overall_vars:
-                            if var == "规模以上工业增加值:当月同比":
-                                var_name_mapping[var] = "工业总体"
-                            elif "制造业" in var and "当月同比" in var:
-                                var_name_mapping[var] = "制造业"
-                            elif "采矿业" in var and "当月同比" in var:
-                                var_name_mapping[var] = "采矿业"
-                            elif ("电力" in var or "热力" in var or "燃气" in var or "水生产" in var or "供应业" in var) and "当月同比" in var:
-                                var_name_mapping[var] = "水电燃气供应业"
-                            else:
-                                # Fallback to original name if no mapping found
-                                var_name_mapping[var] = var
-
-
-                        # 添加第1个图的标题
-                        st_obj.markdown("#### 工业增加值总体")
-
-                        # 定义图表创建函数 - 使用统一的图表创建器
-                        def create_chart1(df, variables, time_range, custom_start_date, custom_end_date, var_mapping=None):
-                            return create_time_series_chart(
-                                df=df,
-                                variables=variables,
-                                title="",
-                                time_range=time_range,
-                                custom_start_date=custom_start_date,
-                                custom_end_date=custom_end_date,
-                                var_name_mapping=var_mapping or {},
-                                y_axis_title="同比增速(%)",
-                                height=350,
-                                bottom_margin=80
-                            )
-
-                        # 使用统一Fragment组件
-                        current_time_range_1, custom_start_1, custom_end_1 = create_chart_with_time_selector_fragment(
-                            st_obj=st_obj,
-                            chart_id="macro_chart1",
-                            state_namespace="monitoring.industrial.macro",
-                            chart_title=None,
-                            chart_creator_func=create_chart1,
-                            chart_data=df_overall,
-                            chart_variables=overall_vars,
-                            get_state_func=get_monitoring_state,
-                            set_state_func=set_monitoring_state,
-                            additional_chart_kwargs={'var_mapping': var_name_mapping}
-                        )
-
-                        # Data download functionality for first chart
-                        # Validate that all variables exist in the dataframe
-                        valid_vars = [var for var in overall_vars if var in df_overall.columns]
-                        if len(valid_vars) != len(overall_vars):
-                            pass  # Some variables are missing
-
-                        if valid_vars:
-                            filtered_df1 = filter_data_by_time_range(df_overall[valid_vars], current_time_range_1, custom_start_1, custom_end_1)
-
-                            if not filtered_df1.empty:
-                                create_excel_download_button(
-                                    st_obj=st_obj,
-                                    data=filtered_df1,
-                                    file_name=f"总体工业增加值_{current_time_range_1}.xlsx",
-                                    button_key="download_chart1",
-                                    column_ratio=(1, 4)
-                                )
-                else:
-                    st_obj.warning("无法加载总体工业增加值同比增速数据，请检查文件是否包含'总体工业增加值同比增速'工作表")
-            else:
-                st_obj.warning("未找到上传的文件，无法加载总体工业增加值数据")
-        except (KeyError, ValueError) as e:
-            logger.warning(f"数据格式错误，无法加载总体工业增加值数据: {e}")
-            st_obj.error(f"数据格式错误: {e}")
-        except pd.errors.EmptyDataError:
-            logger.warning("Excel文件中'总体工业增加值同比增速'工作表为空")
-            st_obj.error("数据文件为空，请检查Excel文件内容")
-        except Exception as e:
-            logger.error(f"加载总体工业增加值数据时发生未预期错误: {e}", exc_info=True)
-            st_obj.error(f"加载数据失败: {e}")
-
-        # Define target columns for weighted analysis
-        # 根据用户说明：分行业工业增加值数据在第二列到最后一列
+        # 定义目标列范围（第二列到最后一列）
         column_names = df.columns.tolist()
-
-        # 使用第二列到最后一列作为目标列（索引从1开始）
+        target_columns = []
         if len(column_names) > 1:
-            target_columns = column_names[1:]  # 从第二列开始到最后一列
-            target_columns = [col for col in target_columns if pd.notna(col)]  # 过滤掉空值
+            target_columns = column_names[1:]
+            target_columns = [col for col in target_columns if pd.notna(col)]
 
-        if len(column_names) > 1 and target_columns:
-            # Check if weighted groups are already calculated and cached
-            cached_weighted_df = get_monitoring_state('cached_weighted_df')
-            cached_data_hash = get_monitoring_state('cached_data_hash')
+        # 计算拉动率（必须在显示图表之前完成）
+        if target_columns:
+            debug_log("开始计算拉动率", "INFO")
+            try:
+                # 获取总体增速数据并合并
+                uploaded_file = _get_state(STATE_KEY_UPLOADED_FILE)
 
-            # Create a simple hash of the input data to detect changes
-            # 注意：2025-10-30修改为拉动率显示，增加版本号以清理旧缓存
-            import hashlib
-            current_data_str = f"v4_contrib_fixed_{df.shape}_{df_weights.shape}_{len(target_columns)}"
-            current_data_hash = hashlib.md5(current_data_str.encode()).hexdigest()
+                if uploaded_file is not None:
+                    df_overall = load_overall_industrial_data(uploaded_file)
+                    if df_overall is not None and len(df_overall.columns) > 0:
+                        # 自动检测总体增速列名（兼容新旧格式）
+                        from dashboard.analysis.industrial.utils.contribution_calculator import _find_column_by_keywords
+                        total_growth_column = _find_column_by_keywords(df_overall, ['工业增加值', '当月同比'])
 
-            # Only recalculate if data has changed or cache is empty
-            if cached_weighted_df is None or cached_data_hash != current_data_hash:
-                # Calculate weighted groups - 使用优化版本
-                with st_obj.spinner("正在计算加权分组数据..."):
-                    weighted_df = calculate_weighted_groups_optimized(df, df_weights, target_columns)
+                        if total_growth_column is None:
+                            # 回退到旧格式
+                            if TOTAL_INDUSTRIAL_GROWTH_COLUMN in df_overall.columns:
+                                total_growth_column = TOTAL_INDUSTRIAL_GROWTH_COLUMN
+                            else:
+                                debug_log("无法找到总体增速列", "WARNING")
+                                total_growth_column = None
 
-                # Cache the results
-                set_monitoring_state('cached_weighted_df', weighted_df)
-                set_monitoring_state('cached_data_hash', current_data_hash)
+                        if total_growth_column:
+                            debug_log(f"检测到总体增速列: {total_growth_column}", "INFO")
 
-                # 计算拉动率
-                debug_log("开始计算拉动率", "INFO")
-                try:
-                    # 获取总体增速数据并合并
-                    from dashboard.analysis.industrial.industrial_analysis import get_industrial_state
-                    uploaded_file = get_industrial_state('macro.uploaded_file')
-
-                    if uploaded_file is not None:
-                        df_overall = load_overall_industrial_data(uploaded_file)
-                        if df_overall is not None and '规模以上工业增加值:当月同比' in df_overall.columns:
                             # 合并总体增速到分行业数据
-                            total_growth_series = df_overall['规模以上工业增加值:当月同比']
+                            total_growth_series = df_overall[total_growth_column]
                             df_with_total = pd.concat([total_growth_series, df], axis=1)
                             df_with_total = df_with_total.dropna(how='all')
 
                             # 过滤2012年及以后
                             df_macro_filtered = filter_data_from_2012(df_with_total)
+                            df_overall_filtered = filter_data_from_2012(df_overall)
 
-                            # 计算拉动率
+                            # 计算拉动率（传入总体增速数据用于三大产业拉动率计算）
+                            # calculate_all_contributions会自动检测列名
                             contribution_results = calculate_all_contributions(
-                                df_macro_filtered, df_weights
+                                df_macro_filtered, df_weights, df_overall_growth=df_overall_filtered
                             )
 
-                            # 缓存拉动率结果
-                            set_monitoring_state('cached_contribution_export', contribution_results['export_groups'])
-                            set_monitoring_state('cached_contribution_stream', contribution_results['stream_groups'])
-                            set_monitoring_state('cached_contribution_individual', contribution_results['individual'])
-                            set_monitoring_state('cached_total_growth', contribution_results['total_growth'])
+                            # 保存拉动率结果到状态
+                            _set_state(STATE_KEY_CONTRIBUTION_EXPORT, contribution_results['export_groups'])
+                            _set_state(STATE_KEY_CONTRIBUTION_STREAM, contribution_results['stream_groups'])
+                            _set_state(STATE_KEY_CONTRIBUTION_INDUSTRY, contribution_results['industry_groups'])
+                            _set_state(STATE_KEY_CONTRIBUTION_INDIVIDUAL, contribution_results['individual'])
+                            _set_state(STATE_KEY_TOTAL_GROWTH, contribution_results['total_growth'])
+                            _set_state(STATE_KEY_VALIDATION_RESULT, contribution_results['validation'])
 
                             debug_log(
                                 f"拉动率计算完成，验证结果: {contribution_results['validation']['passed']}",
                                 "INFO"
                             )
                         else:
-                            debug_log("总体增速数据加载失败", "WARNING")
-                            set_monitoring_state('cached_contribution_export', None)
-                            set_monitoring_state('cached_contribution_stream', None)
+                            debug_log("总体增速列未找到", "WARNING")
+                            _set_state(STATE_KEY_CONTRIBUTION_EXPORT, None)
+                            _set_state(STATE_KEY_CONTRIBUTION_STREAM, None)
+                            _set_state(STATE_KEY_CONTRIBUTION_INDUSTRY, None)
                     else:
-                        debug_log("未找到上传文件，无法加载总体增速", "WARNING")
-                        set_monitoring_state('cached_contribution_export', None)
-                        set_monitoring_state('cached_contribution_stream', None)
-
-                except Exception as e:
-                    debug_log(f"拉动率计算失败: {e}", "ERROR")
-                    import traceback
-                    debug_log(f"错误详情: {traceback.format_exc()}", "ERROR")
-                    # 即使拉动率计算失败，也不影响其他功能
-                    set_monitoring_state('cached_contribution_export', None)
-                    set_monitoring_state('cached_contribution_stream', None)
-            else:
-                # Use cached results
-                weighted_df = cached_weighted_df
-
-            if not weighted_df.empty:
-                # 添加横线分隔符
-                st_obj.markdown("---")
-
-                # 添加第2个图的标题
-                st_obj.markdown("#### 分出口依赖行业拉动率")
-
-                # Second chart - Export dependency groups (contribution mode only)
-                export_vars = [col for col in weighted_df.columns if col.startswith('出口依赖_')]
-                if export_vars:
-                    # 直接使用拉动率数据
-                    contribution_export = get_monitoring_state('cached_contribution_export')
-                    if contribution_export is not None:
-                        chart2_data = contribution_export
-                        chart2_vars = [col for col in contribution_export.columns if col.startswith('出口依赖_')]
-                        y_axis_title_2 = "%"
-                    else:
-                        st_obj.warning("拉动率数据未计算，无法显示图表")
-                        chart2_data = None
-                        chart2_vars = []
-
-                    if chart2_data is not None and chart2_vars:
-                        # 定义图表创建函数 - 使用统一的图表创建器
-                        def create_chart2(df, variables, time_range, custom_start_date, custom_end_date):
-                            return create_time_series_chart(
-                                df=df,
-                                variables=variables,
-                                title="",
-                                time_range=time_range,
-                                custom_start_date=custom_start_date,
-                                custom_end_date=custom_end_date,
-                                y_axis_title=y_axis_title_2,
-                                height=350,
-                                bottom_margin=80
-                            )
-
-                        # 使用统一Fragment组件
-                        current_time_range_2, custom_start_2, custom_end_2 = create_chart_with_time_selector_fragment(
-                            st_obj=st_obj,
-                            chart_id="macro_chart2",
-                            state_namespace="monitoring.industrial.macro",
-                            chart_title=None,
-                            chart_creator_func=create_chart2,
-                            chart_data=chart2_data,
-                            chart_variables=chart2_vars,
-                            get_state_func=get_monitoring_state,
-                            set_state_func=set_monitoring_state
-                        )
-
-                        # 数据下载功能 - 使用统一下载工具
-                        filtered_df2 = filter_data_by_time_range(chart2_data[chart2_vars], current_time_range_2, custom_start_2, custom_end_2)
-                        if not filtered_df2.empty:
-                            export_groups, _ = create_grouping_mappings(df_weights)
-                            annotation_df = prepare_grouping_annotation_data(df_weights, export_groups, '出口依赖')
-                            create_download_with_annotation(
-                                st_obj=st_obj,
-                                data=filtered_df2,
-                                file_name=f"出口依赖分组_拉动率_{current_time_range_2}",
-                                annotation_data=annotation_df,
-                                button_key="download_chart2"
-                            )
-
-                # 添加横线分隔符
-                st_obj.markdown("---")
-
-                # 添加第3个图的标题
-                st_obj.markdown("#### 分上中下游行业拉动率")
-
-                # Third chart - Upstream/downstream groups (contribution mode only)
-                stream_vars = [col for col in weighted_df.columns if col.startswith('上中下游_')]
-
-                # 按照指定顺序排序图例：上游XX、中游XX、下游XX
-                def get_sort_key(col):
-                    # 提取列名中的行业类型
-                    industry_type = col.replace('上中下游_', '')
-
-                    # 按照上游、中游、下游的顺序排序
-                    if industry_type.startswith('上游'):
-                        return (0, industry_type)  # 上游排在最前
-                    elif industry_type.startswith('中游'):
-                        return (1, industry_type)  # 中游排在中间
-                    elif industry_type.startswith('下游'):
-                        return (2, industry_type)  # 下游排在最后
-                    else:
-                        return (3, industry_type)  # 未知类型排在最后
-
-                stream_vars = sorted(stream_vars, key=get_sort_key)
-                if stream_vars:
-                    # 直接使用拉动率数据
-                    contribution_stream = get_monitoring_state('cached_contribution_stream')
-                    if contribution_stream is not None:
-                        chart3_data = contribution_stream
-                        chart3_vars = [col for col in contribution_stream.columns if col.startswith('上中下游_')]
-                        chart3_vars = sorted(chart3_vars, key=get_sort_key)
-                        y_axis_title_3 = "%"
-                    else:
-                        st_obj.warning("拉动率数据未计算，无法显示图表")
-                        chart3_data = None
-                        chart3_vars = []
-
-                    if chart3_data is not None and chart3_vars:
-                        # 定义图表创建函数 - 使用统一的图表创建器
-                        def create_chart3(df, variables, time_range, custom_start_date, custom_end_date):
-                            return create_time_series_chart(
-                                df=df,
-                                variables=variables,
-                                title="",
-                                time_range=time_range,
-                                custom_start_date=custom_start_date,
-                                custom_end_date=custom_end_date,
-                                y_axis_title=y_axis_title_3,
-                                height=350,
-                                bottom_margin=80
-                            )
-
-                        # 使用统一Fragment组件
-                        current_time_range_3, custom_start_3, custom_end_3 = create_chart_with_time_selector_fragment(
-                            st_obj=st_obj,
-                            chart_id="macro_chart3",
-                            state_namespace="monitoring.industrial.macro",
-                            chart_title=None,
-                            chart_creator_func=create_chart3,
-                            chart_data=chart3_data,
-                            chart_variables=chart3_vars,
-                            get_state_func=get_monitoring_state,
-                            set_state_func=set_monitoring_state
-                        )
-
-                        # 数据下载功能 - 使用统一下载工具
-                        filtered_df3 = filter_data_by_time_range(chart3_data[chart3_vars], current_time_range_3, custom_start_3, custom_end_3)
-                        if not filtered_df3.empty:
-                            _, stream_groups = create_grouping_mappings(df_weights)
-                            annotation_df = prepare_grouping_annotation_data(df_weights, stream_groups, '上中下游')
-                            create_download_with_annotation(
-                                st_obj=st_obj,
-                                data=filtered_df3,
-                                file_name=f"上中下游分组_拉动率_{current_time_range_3}",
-                                annotation_data=annotation_df,
-                                button_key="download_chart3"
-                            )
-            else:
-                # 使用简化的验证逻辑，提供简洁的错误信息
-                is_valid, error_message, debug_info = validate_data_format(df, df_weights, target_columns)
-
-                st_obj.error(f"加权分组计算失败: {error_message}")
-
-                # 显示简洁的诊断信息
-                import os
-                DEBUG_MODE = os.getenv('INDUSTRIAL_DEBUG_MODE') == 'true'
-
-                if DEBUG_MODE:
-                    # 调试模式：显示详细信息
-                    with st_obj.expander("详细诊断信息（调试模式）"):
-                        st_obj.json(debug_info)
+                        debug_log("总体增速数据加载失败或为空", "WARNING")
+                        _set_state(STATE_KEY_CONTRIBUTION_EXPORT, None)
+                        _set_state(STATE_KEY_CONTRIBUTION_STREAM, None)
+                        _set_state(STATE_KEY_CONTRIBUTION_INDUSTRY, None)
                 else:
-                    # 正常模式：只显示关键信息
-                    with st_obj.expander("快速诊断"):
-                        if 'matched_indicators_count' in debug_info:
-                            st_obj.info(f"匹配的指标数: {debug_info['matched_indicators_count']}")
-                            if debug_info['matched_indicators_count'] > 0 and 'matched_indicators' in debug_info:
-                                st_obj.text(f"示例: {debug_info['matched_indicators']}")
+                    debug_log("未找到上传文件，无法加载总体增速", "WARNING")
+                    _set_state(STATE_KEY_CONTRIBUTION_EXPORT, None)
+                    _set_state(STATE_KEY_CONTRIBUTION_STREAM, None)
+                    _set_state(STATE_KEY_CONTRIBUTION_INDUSTRY, None)
 
-                        if 'available_columns_count' in debug_info:
-                            st_obj.info(f"可用目标列数: {debug_info['available_columns_count']}")
+            except Exception as e:
+                debug_log(f"拉动率计算失败: {e}", "ERROR")
+                import traceback
+                debug_log(f"错误详情: {traceback.format_exc()}", "ERROR")
+                # 即使拉动率计算失败，也不影响其他功能
+                _set_state(STATE_KEY_CONTRIBUTION_EXPORT, None)
+                _set_state(STATE_KEY_CONTRIBUTION_STREAM, None)
+                _set_state(STATE_KEY_CONTRIBUTION_INDUSTRY, None)
 
-                        st_obj.markdown("**数据格式要求：**")
-                        st_obj.markdown("""
-                        - 权重数据需包含：`指标名称`、`出口依赖`、`上中下游`、权重列
-                        - 指标名称需与宏观数据列名完全匹配
-                        - 设置环境变量 `INDUSTRIAL_DEBUG_MODE=true` 查看详细诊断
-                        """)
+        # 添加标题
+        st_obj.subheader("工业行业(产业)拉动率分析")
+
+        # First chart - Three major industries contribution rate (拉动率)
+        contribution_industry = _get_state(STATE_KEY_CONTRIBUTION_INDUSTRY)
+        if contribution_industry is not None and not contribution_industry.empty:
+            chart1_data = contribution_industry
+            chart1_vars = [col for col in contribution_industry.columns if col.startswith('三大产业_')]
+
+            if chart1_vars:
+                # 创建变量名映射，去掉"三大产业_"前缀
+                var_name_mapping_1 = {var: var.replace('三大产业_', '') for var in chart1_vars}
+
+                # 定义图表创建函数 - 使用统一的图表创建器
+                def create_chart1(df, variables, time_range, custom_start_date, custom_end_date, var_mapping=None):
+                    return create_time_series_chart(
+                        df=df,
+                        variables=variables,
+                        title="工业增加值同比增速拉动率:三大产业",
+                        time_range=time_range,
+                        custom_start_date=custom_start_date,
+                        custom_end_date=custom_end_date,
+                        var_name_mapping=var_mapping or {},
+                        y_axis_title="拉动率(%)",
+                        height=350,
+                        bottom_margin=80
+                    )
+
+                # 使用统一Fragment组件
+                current_time_range_1, custom_start_1, custom_end_1 = create_chart_with_time_selector_fragment(
+                    st_obj=st_obj,
+                    chart_id="macro_chart1",
+                    state_namespace="monitoring.industrial.macro",
+                    chart_title=None,
+                    chart_creator_func=create_chart1,
+                    chart_data=chart1_data,
+                    chart_variables=chart1_vars,
+                    get_state_func=_get_state,
+                    set_state_func=_set_state,
+                    additional_chart_kwargs={'var_mapping': var_name_mapping_1},
+                    variable_selector_config={
+                        'options': chart1_vars,
+                        'name_mapping': var_name_mapping_1
+                    }
+                )
+
+                # 数据下载功能 - 使用统一下载工具
+                # 下载全部数据，不进行时间过滤
+                download_df1 = chart1_data[chart1_vars].copy()
+
+                # 重命名列，去掉前缀
+                download_df1_renamed = download_df1.rename(columns=var_name_mapping_1)
+
+                # 添加总体增速列作为第一列
+                total_growth = _get_state(STATE_KEY_TOTAL_GROWTH)
+                if total_growth is not None:
+                    # 对齐索引并插入到第一列
+                    total_growth_aligned = total_growth.reindex(download_df1_renamed.index)
+                    download_df1_renamed.insert(0, '规模以上工业增加值:当月同比', total_growth_aligned)
+
+                # 格式化索引为年-月-日格式
+                download_df1_renamed.index = download_df1_renamed.index.strftime('%Y-%m-%d')
+
+                # 获取权重数据用于分组注释
+                df_weights = _get_state(STATE_KEY_WEIGHTS_DATA)
+                if df_weights is not None:
+                    # 创建三大产业分组映射
+                    from dashboard.analysis.industrial.utils.weighted_calculation import build_weights_mapping, categorize_indicators
+                    column_names = df.columns.tolist()
+                    if len(column_names) > 1:
+                        target_columns = [col for col in column_names[1:] if pd.notna(col)]
+                        weights_mapping = build_weights_mapping(df_weights, target_columns)
+                        _, _, industry_groups = categorize_indicators(weights_mapping)
+                        annotation_df = prepare_grouping_annotation_data(df_weights, industry_groups, '三大产业')
+                        create_download_with_annotation(
+                            st_obj=st_obj,
+                            data=download_df1_renamed,
+                            file_name=f"三大产业分组_拉动率_全部",
+                            annotation_data=annotation_df,
+                            button_key="download_chart1"
+                        )
+                else:
+                    # 如果没有权重数据，提供简单下载
+                    create_excel_download_button(
+                        st_obj=st_obj,
+                        data=download_df1_renamed,
+                        file_name=f"三大产业_拉动率_全部.xlsx",
+                        button_key="download_chart1",
+                        column_ratio=(1, 4)
+                    )
         else:
-            st_obj.error("未找到目标列范围，请检查Excel文件格式。")
+            st_obj.warning("三大产业拉动率数据未计算，请检查数据文件")
+
+        # 添加横线分隔符
+        st_obj.markdown("---")
+
+        # Second chart - Export dependency groups (contribution mode only)
+        contribution_export = _get_state(STATE_KEY_CONTRIBUTION_EXPORT)
+        if contribution_export is not None and not contribution_export.empty:
+            chart2_data = contribution_export
+            chart2_vars = [col for col in contribution_export.columns if col.startswith('出口依赖_')]
+
+            if chart2_vars:
+                # 创建变量名映射，去掉"出口依赖_"前缀
+                var_name_mapping_2 = {var: var.replace('出口依赖_', '') for var in chart2_vars}
+
+                # 定义图表创建函数 - 使用统一的图表创建器
+                def create_chart2(df, variables, time_range, custom_start_date, custom_end_date):
+                    return create_time_series_chart(
+                        df=df,
+                        variables=variables,
+                        title="工业增加值同比增速拉动率:分出口依赖行业",
+                        time_range=time_range,
+                        custom_start_date=custom_start_date,
+                        custom_end_date=custom_end_date,
+                        y_axis_title="拉动率(%)",
+                        height=350,
+                        bottom_margin=80
+                    )
+
+                # 使用统一Fragment组件
+                current_time_range_2, custom_start_2, custom_end_2 = create_chart_with_time_selector_fragment(
+                    st_obj=st_obj,
+                    chart_id="macro_chart2",
+                    state_namespace="monitoring.industrial.macro",
+                    chart_title=None,
+                    chart_creator_func=create_chart2,
+                    chart_data=chart2_data,
+                    chart_variables=chart2_vars,
+                    get_state_func=_get_state,
+                    set_state_func=_set_state,
+                    variable_selector_config={
+                        'options': chart2_vars,
+                        'name_mapping': var_name_mapping_2
+                    }
+                )
+
+                # 数据下载功能 - 使用统一下载工具
+                # 下载全部数据，不进行时间过滤
+                download_df2 = chart2_data[chart2_vars].copy()
+
+                # 添加总体增速列作为第一列
+                total_growth = _get_state(STATE_KEY_TOTAL_GROWTH)
+                if total_growth is not None:
+                    # 对齐索引并插入到第一列
+                    total_growth_aligned = total_growth.reindex(download_df2.index)
+                    download_df2.insert(0, '规模以上工业增加值:当月同比', total_growth_aligned)
+
+                # 格式化索引为年-月-日格式
+                download_df2.index = download_df2.index.strftime('%Y-%m-%d')
+
+                export_groups, _ = create_grouping_mappings(df_weights)
+                annotation_df = prepare_grouping_annotation_data(df_weights, export_groups, '出口依赖')
+                create_download_with_annotation(
+                    st_obj=st_obj,
+                    data=download_df2,
+                    file_name=f"出口依赖分组_拉动率_全部",
+                    annotation_data=annotation_df,
+                    button_key="download_chart2"
+                )
+        else:
+            st_obj.warning("出口依赖拉动率数据未计算")
+
+        # 添加横线分隔符
+        st_obj.markdown("---")
+
+        # Third chart - Upstream/downstream groups (contribution mode only)
+        contribution_stream = _get_state(STATE_KEY_CONTRIBUTION_STREAM)
+        if contribution_stream is not None and not contribution_stream.empty:
+            chart3_vars = [col for col in contribution_stream.columns if col.startswith('上中下游_')]
+
+            # 按照指定顺序排序图例：上游XX、中游XX、下游XX
+            def get_sort_key(col):
+                # 提取列名中的行业类型
+                industry_type = col.replace('上中下游_', '')
+
+                # 按照上游、中游、下游的顺序排序
+                if industry_type.startswith('上游'):
+                    return (0, industry_type)  # 上游排在最前
+                elif industry_type.startswith('中游'):
+                    return (1, industry_type)  # 中游排在中间
+                elif industry_type.startswith('下游'):
+                    return (2, industry_type)  # 下游排在最后
+                else:
+                    return (3, industry_type)  # 未知类型排在最后
+
+            chart3_vars = sorted(chart3_vars, key=get_sort_key)
+
+            if chart3_vars:
+                chart3_data = contribution_stream
+
+                # 创建变量名映射，去掉"上中下游_"前缀
+                var_name_mapping_3 = {var: var.replace('上中下游_', '') for var in chart3_vars}
+
+                # 定义图表创建函数 - 使用统一的图表创建器
+                def create_chart3(df, variables, time_range, custom_start_date, custom_end_date):
+                    return create_time_series_chart(
+                        df=df,
+                        variables=variables,
+                        title="工业增加值同比增速拉动率:分上中下游行业",
+                        time_range=time_range,
+                        custom_start_date=custom_start_date,
+                        custom_end_date=custom_end_date,
+                        y_axis_title="拉动率(%)",
+                        height=350,
+                        bottom_margin=80
+                    )
+
+                # 使用统一Fragment组件
+                current_time_range_3, custom_start_3, custom_end_3 = create_chart_with_time_selector_fragment(
+                    st_obj=st_obj,
+                    chart_id="macro_chart3",
+                    state_namespace="monitoring.industrial.macro",
+                    chart_title=None,
+                    chart_creator_func=create_chart3,
+                    chart_data=chart3_data,
+                    chart_variables=chart3_vars,
+                    get_state_func=_get_state,
+                    set_state_func=_set_state,
+                    variable_selector_config={
+                        'options': chart3_vars,
+                        'name_mapping': var_name_mapping_3
+                    }
+                )
+
+                # 数据下载功能 - 使用统一下载工具
+                # 下载全部数据，不进行时间过滤
+                download_df3 = chart3_data[chart3_vars].copy()
+
+                # 添加总体增速列作为第一列
+                total_growth = _get_state(STATE_KEY_TOTAL_GROWTH)
+                if total_growth is not None:
+                    # 对齐索引并插入到第一列
+                    total_growth_aligned = total_growth.reindex(download_df3.index)
+                    download_df3.insert(0, '规模以上工业增加值:当月同比', total_growth_aligned)
+
+                # 格式化索引为年-月-日格式
+                download_df3.index = download_df3.index.strftime('%Y-%m-%d')
+
+                _, stream_groups = create_grouping_mappings(df_weights)
+                annotation_df = prepare_grouping_annotation_data(df_weights, stream_groups, '上中下游')
+                create_download_with_annotation(
+                    st_obj=st_obj,
+                    data=download_df3,
+                    file_name=f"上中下游分组_拉动率_全部",
+                    annotation_data=annotation_df,
+                    button_key="download_chart3"
+                )
+        else:
+            st_obj.warning("上中下游拉动率数据未计算")
+
+        # 添加横线分隔符
+        st_obj.markdown("---")
+
+        # 获取个体行业拉动率数据
+        contribution_individual = _get_state(STATE_KEY_CONTRIBUTION_INDIVIDUAL)
+
+        if contribution_individual is not None and not contribution_individual.empty:
+            # 获取权重数据
+            df_weights = _get_state(STATE_KEY_WEIGHTS_DATA)
+
+            # 获取所有指标列表
+            all_indicators = list(contribution_individual.columns)
+
+            # 按三大产业分组排序指标
+            weights_mapping = build_weights_mapping(df_weights, all_indicators)
+            _, _, industry_groups = categorize_indicators(weights_mapping)
+
+            # 按顺序：采矿业、制造业、电力热力燃气及水生产和供应业
+            industry_order = ['采矿业', '制造业', '电力、热力、燃气及水生产和供应业']
+            sorted_indicators = []
+            for industry in industry_order:
+                if industry in industry_groups:
+                    sorted_indicators.extend(industry_groups[industry])
+
+            # 如果有指标未分类，添加到末尾
+            for indicator in all_indicators:
+                if indicator not in sorted_indicators:
+                    sorted_indicators.append(indicator)
+
+            # 创建指标名称简化函数
+            def simplify_indicator_name(name):
+                """简化指标名称：去掉'规模以上工业增加值:'前缀和':当月同比'后缀"""
+                simplified = name
+                if simplified.startswith('规模以上工业增加值:'):
+                    simplified = simplified.replace('规模以上工业增加值:', '', 1)
+                if simplified.endswith(':当月同比'):
+                    simplified = simplified.replace(':当月同比', '')
+                return simplified
+
+            # ==================== 月度变化分析 ====================
+            # 检查数据是否足够（至少需要2个月）
+            if len(contribution_individual.index) >= 2:
+                # 获取最新月份和上个月的数据（兼容升序/降序排列）
+                sorted_index = contribution_individual.index.sort_values(ascending=False)
+                latest_month = sorted_index[0]  # 最新月份
+                previous_month = sorted_index[1]  # 上个月
+
+                # 显示动态标题
+                st_obj.subheader(f"行业拉动率月度变化分析（{previous_month.strftime('%Y-%m')} -> {latest_month.strftime('%Y-%m')}）")
+
+                # 最新月份和上个月的拉动率
+                latest_contribution = contribution_individual.loc[latest_month]
+                previous_contribution = contribution_individual.loc[previous_month]
+
+                # 计算变化（最新月 - 上月）
+                change_contribution = latest_contribution - previous_contribution
+
+                # 生成统计表：按出口依赖类型和上中下游类型统计正负变化
+                export_groups, stream_groups, _ = categorize_indicators(weights_mapping)
+
+                # 统计出口依赖类型
+                export_stats = []
+                for category, indicators in export_groups.items():
+                    positive_count = sum(1 for ind in indicators if ind in change_contribution.index and change_contribution[ind] > 0)
+                    negative_count = sum(1 for ind in indicators if ind in change_contribution.index and change_contribution[ind] < 0)
+                    export_stats.append({
+                        '类型': category,
+                        '上拉行业数': positive_count,
+                        '下拉行业数': negative_count
+                    })
+
+                # 统计上中下游类型
+                stream_stats = []
+                for category, indicators in stream_groups.items():
+                    positive_count = sum(1 for ind in indicators if ind in change_contribution.index and change_contribution[ind] > 0)
+                    negative_count = sum(1 for ind in indicators if ind in change_contribution.index and change_contribution[ind] < 0)
+                    stream_stats.append({
+                        '类型': category,
+                        '上拉行业数': positive_count,
+                        '下拉行业数': negative_count
+                    })
+
+                # 创建DataFrame并显示
+                if export_stats:
+                    st_obj.markdown("**按出口依赖类型统计**")
+                    export_stats_df = pd.DataFrame(export_stats)
+                    st_obj.dataframe(export_stats_df, use_container_width=True, hide_index=True)
+
+                if stream_stats:
+                    st_obj.markdown("**按上中下游类型统计**")
+                    stream_stats_df = pd.DataFrame(stream_stats)
+                    st_obj.dataframe(stream_stats_df, use_container_width=True, hide_index=True)
+
+                # 添加间距
+                st_obj.markdown("")
+
+                # 按变化值从大到小排序（横向图从上到下显示）
+                change_contribution_sorted = change_contribution.sort_values(ascending=True)
+
+                # 简化指标名称
+                simplified_names = [simplify_indicator_name(name) for name in change_contribution_sorted.index]
+
+                # 创建柱状图数据（横向）
+                y_data = simplified_names  # Y轴为指标名称
+                x_data = change_contribution_sorted.values.tolist()  # X轴为变化值
+
+                # 设置柱子颜色：正值为红色，负值为绿色
+                colors = ['red' if val > 0 else 'green' for val in x_data]
+
+                # 创建横向柱状图
+                fig_change = go.Figure()
+                fig_change.add_trace(go.Bar(
+                    y=y_data,  # Y轴为指标名称
+                    x=x_data,  # X轴为变化值
+                    orientation='h',  # 横向柱状图
+                    marker_color=colors,
+                    name='拉动率变化',
+                    hovertemplate='%{y}<br>变化: %{x:.4f}百分点<extra></extra>'
+                ))
+
+                # 更新布局
+                fig_change.update_layout(
+                    title=f"行业动率月度变化（{previous_month.strftime('%Y-%m')} -> {latest_month.strftime('%Y-%m')}）",
+                    xaxis_title="拉动率变化(%)",
+                    yaxis_title="",  # 不显示Y轴标题
+                    height=max(500, len(y_data) * 20),  # 根据指标数量动态调整高度
+                    hovermode='y',
+                    margin={'l': 250, 'r': 50, 't': 80, 'b': 50},  # 增加左边距以显示完整指标名
+                    yaxis={
+                        'tickfont': {'size': 10}
+                    },
+                    showlegend=False
+                )
+
+                # 添加零线（横向图用vline）
+                fig_change.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
+
+                # 显示图表
+                st_obj.plotly_chart(fig_change, use_container_width=True)
+
+                # 准备下载数据
+                download_change_df = pd.DataFrame({
+                    '指标名称': change_contribution_sorted.index,
+                    f'{previous_month.strftime("%Y-%m")}拉动率': previous_contribution[change_contribution_sorted.index].values,
+                    f'{latest_month.strftime("%Y-%m")}拉动率': latest_contribution[change_contribution_sorted.index].values,
+                    '变化值': change_contribution_sorted.values
+                })
+
+                # 设置索引，转换为Excel友好格式
+                download_change_df.set_index('指标名称', inplace=True)
+
+                # 使用统一的Excel下载函数
+                create_excel_download_button(
+                    st_obj=st_obj,
+                    data=download_change_df,
+                    file_name=f"行业拉动率月度变化_{latest_month.strftime('%Y%m')}",
+                    sheet_name="月度变化",
+                    button_label="下载数据",
+                    button_key="download_monthly_change",
+                    column_ratio=(1, 3),
+                    type="primary"
+                )
+            else:
+                st_obj.info("数据不足，至少需要两个月的数据才能计算月度变化")
+
+            # 添加横线分隔符
+            st_obj.markdown("---")
+
+            # ==================== 工业指标拉动率分析 ====================
+            st_obj.subheader("行业拉动率历史分析")
+
+            # 创建两列布局
+            col1, col2 = st_obj.columns([3, 1])
+
+            with col1:
+                # 多选框：选择指标
+                selected_indicators = st_obj.multiselect(
+                    "选择工业指标",
+                    options=sorted_indicators,
+                    default=sorted_indicators[:3] if len(sorted_indicators) >= 3 else sorted_indicators,
+                    key="indicator_selector",
+                    format_func=simplify_indicator_name  # 使用简化名称显示
+                )
+
+            with col2:
+                # 单选下拉菜单：选择显示模式
+                display_mode = st_obj.selectbox(
+                    "显示模式",
+                    options=["拉动率", "拉动率排名"],
+                    key="display_mode"
+                )
+
+            # 根据选择绘制图表
+            if selected_indicators:
+                if display_mode == "拉动率":
+                    # 绘制拉动率时间序列图
+                    chart_data = contribution_individual[selected_indicators]
+
+                    # 创建变量名映射（简化显示）
+                    var_name_mapping = {ind: simplify_indicator_name(ind) for ind in selected_indicators}
+
+                    fig = create_time_series_chart(
+                        df=chart_data,
+                        variables=selected_indicators,
+                        title="行业拉动率历史分析",
+                        time_range="全部",
+                        y_axis_title="拉动率(%)",
+                        height=500,
+                        bottom_margin=150,
+                        var_name_mapping=var_name_mapping  # 使用简化名称
+                    )
+                    st_obj.plotly_chart(fig, use_container_width=True)
+
+                else:  # 拉动率排名
+                    # 计算排名（按绝对值排名：ascending=False表示绝对值从大到小排序，绝对值最大排名1）
+                    rank_df = contribution_individual.abs().rank(axis=1, method='min', ascending=False)
+                    chart_data = rank_df[selected_indicators]
+
+                    # 创建变量名映射（简化显示）
+                    var_name_mapping = {ind: simplify_indicator_name(ind) for ind in selected_indicators}
+
+                    fig = create_time_series_chart(
+                        df=chart_data,
+                        variables=selected_indicators,
+                        title="工业指标拉动率排名时间序列",
+                        time_range="全部",
+                        y_axis_title="排名（1=拉动率绝对值最大）",
+                        height=500,
+                        bottom_margin=150,
+                        var_name_mapping=var_name_mapping  # 使用简化名称
+                    )
+
+                    # 排名图需要倒置Y轴（1在上，41在下）
+                    fig.update_yaxes(autorange='reversed')
+                    st_obj.plotly_chart(fig, use_container_width=True)
+            else:
+                st_obj.info("请至少选择一个工业指标")
+
+            # 添加下载按钮（下载所有指标的拉动率和排名，不受多选框筛选限制）
+            # 准备拉动率数据（所有指标，主sheet，保留索引）
+            download_df_contribution = contribution_individual.copy()
+            download_df_contribution.index = download_df_contribution.index.strftime('%Y-%m-%d')
+            download_df_contribution.index.name = '日期'  # 设置索引名，保存时会作为列名
+
+            # 准备拉动率排名数据（按绝对值排名，所有指标，额外sheet，需要reset_index将日期转为列）
+            rank_df = contribution_individual.abs().rank(axis=1, method='min', ascending=False)
+            download_df_rank = rank_df.copy()
+            download_df_rank.index = download_df_rank.index.strftime('%Y-%m-%d')
+            download_df_rank.index.name = '日期'
+
+            # 将排名数据的索引转为普通列（因为additional_sheets使用index=False）
+            download_df_rank_with_date = download_df_rank.reset_index()
+
+            # 使用统一的Excel下载函数（包含两个sheet）
+            create_excel_download_button(
+                st_obj=st_obj,
+                data=download_df_contribution,
+                file_name=f"工业指标拉动率_全部指标",
+                sheet_name="拉动率",
+                additional_sheets={"拉动率排名": download_df_rank_with_date},
+                button_label="下载数据",
+                button_key="download_selected_contributions",
+                column_ratio=(1, 3),
+                type="primary"
+            )
+
+        else:
+            st_obj.info("拉动率数据未计算，请确保已上传数据文件")
+
     else:
         st_obj.error("数据加载失败，无法进行分行业工业增加值同比增速分析。")
 
 
-def render_macro_operations_tab(st_obj):
-    """
-    分行业工业增加值同比增速分析标签页
-
-    Args:
-        st_obj: Streamlit对象
-    """
-    # File upload in sidebar
-    with st_obj.sidebar:
-        st_obj.markdown("#### [DATA] 数据文件上传")
-        uploaded_file = st_obj.file_uploader(
-            "上传监测分析Excel模板文件",
-            type=['xlsx', 'xls'],
-            key="macro_operations_file_uploader",
-            help="请上传包含'分行业工业增加值同比增速'工作表的Excel文件"
-        )
-
-    if uploaded_file is not None:
-        # Load and process the data
-        with st_obj.spinner("正在处理数据..."):
-            df = load_template_data(uploaded_file)
-            df_weights = load_weights_data(uploaded_file)
-
-        if df is not None and df_weights is not None:
-            _render_macro_operations_analysis(st_obj, df, df_weights)
-        else:
-            if df is None:
-                st_obj.error("分行业工业增加值同比增速数据加载失败，请检查文件格式。")
-            if df_weights is None:
-                st_obj.error("权重数据加载失败，请检查文件是否包含'工业增加值分行业指标权重'工作表。")
-    else:
-        st_obj.info("请在左侧上传Excel数据文件以开始分行业工业增加值同比增速分析。")
 

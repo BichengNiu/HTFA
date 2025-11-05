@@ -17,7 +17,7 @@ class ComponentRegistry:
         # 预定义组件映射
         self.component_map = {
             # 数据输入组件
-            'shared_data_input': 'dashboard.ui.components.data_input.staging',
+            'shared_data_input': 'dashboard.core.ui.components.data_input.staging',
 
             # 时间序列分析组件（已迁移到explore/ui目录）
             'stationarity_analysis': 'dashboard.explore.ui.stationarity',
@@ -30,15 +30,11 @@ class ComponentRegistry:
         # 组件依赖关系
         self.component_dependencies = {
             'shared_data_input': set(),  # 独立组件
-            'time_column_ui': set(),  # 核心组件，无依赖
-            'missing_data_ui': {'time_column_ui'},
-            'staging_ui': {'time_column_ui', 'missing_data_ui'},
-            'variable_calculations_ui': set(),  # 独立组件
-            'pivot_table_ui': {'variable_calculations_ui'},
             'stationarity_analysis': set(),  # 独立分析组件
             'correlation_analysis': set(),  # 独立分析组件
             'lead_lag_analysis': set(),  # 独立分析组件
             'dtw_analysis': set(),  # 独立分析组件
+            'unified_correlation_analysis': set(),  # 独立分析组件
         }
         
         logger.info("[ComponentRegistry] UI组件注册表初始化完成")
@@ -71,34 +67,6 @@ class ComponentRegistry:
             'shared_data_input'
         }
     
-    def is_component_registered(self, component_name: str) -> bool:
-        """检查组件是否已注册"""
-        return component_name in self.component_map
-    
-    def unregister_component(self, component_name: str) -> bool:
-        """注销组件"""
-        if component_name in self.component_map:
-            del self.component_map[component_name]
-            if component_name in self.component_dependencies:
-                del self.component_dependencies[component_name]
-            
-            # 移除其他组件对此组件的依赖
-            for deps in self.component_dependencies.values():
-                deps.discard(component_name)
-            
-            logger.info(f"[ComponentRegistry] 注销组件: {component_name}")
-            return True
-        return False
-    
-    def get_registry_stats(self) -> Dict[str, Any]:
-        """获取注册表统计信息"""
-        return {
-            'total_components': len(self.component_map),
-            'components_with_dependencies': len([c for c in self.component_dependencies.values() if c]),
-            'critical_components': len(self.get_critical_components()),
-            'component_names': list(self.component_map.keys())
-        }
-
 # 全局组件注册表实例
 import streamlit as st
 

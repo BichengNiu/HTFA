@@ -90,8 +90,8 @@ def create_line_trace(
     series: pd.Series,
     display_name: str,
     color: str,
-    line_width: float = 1.5,
-    marker_size: int = 3
+    line_width: float = 2.5,
+    marker_size: int = 6
 ) -> go.Scatter:
     """
     创建线图trace
@@ -216,13 +216,14 @@ def create_time_series_chart(
                 x=series.index,
                 y=series.values.tolist(),
                 showlegend=True,
-                line=dict(color=color, width=1.5),
+                line=dict(color=color, width=2.5),
                 connectgaps=True,
                 mode='lines+markers',
-                marker=dict(size=3),
+                marker=dict(size=6),
                 name=display_name,
                 xperiod="M1",  # 周期为1个月
-                xperiodalignment="middle"  # 数据点居中对齐
+                xperiodalignment="middle",  # 数据点居中对齐
+                hovertemplate='%{fullData.name}: %{y:.2f}<extra></extra>'
             )
             fig.add_trace(trace)
         except Exception as e:
@@ -340,7 +341,7 @@ def create_mixed_chart(
             connectgaps=False,
             xperiod="M1",  # 周期为1个月
             xperiodalignment="middle",  # 数据点居中对齐
-            hovertemplate=f'<b>{display_name}</b><br>时间: %{{x|%Y年%m月}}<br>数值: %{{y:.2f}}%<extra></extra>'
+            hovertemplate='%{fullData.name}: %{y:.2f}<extra></extra>'
         ))
         color_index += 1
 
@@ -369,7 +370,7 @@ def create_mixed_chart(
             opacity=opacity,
             xperiod="M1",  # 周期为1个月
             xperiodalignment="middle",  # 柱子居中对齐
-            hovertemplate=f'<b>{display_name}</b><br>时间: %{{x|%Y年%m月}}<br>数值: %{{y:.2f}}%<extra></extra>'
+            hovertemplate='%{fullData.name}: %{y:.2f}<extra></extra>'
         ))
         color_index += 1
 

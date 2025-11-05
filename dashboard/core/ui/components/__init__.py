@@ -4,13 +4,10 @@ UI基础组件模块
 """
 
 # 延迟导入避免循环导入
-from dashboard.core.ui.components.base import UIComponent, BaseWelcomePage
+from dashboard.core.ui.components.base import UIComponent
 from dashboard.core.ui.components.welcome import WelcomeComponent
-from dashboard.core.ui.components.navigation import NavigationComponent
 from dashboard.core.ui.components.layout import LayoutComponent
 from dashboard.core.ui.components.cards import ModuleCard, FeatureCard
-# sidebar组件使用延迟导入
-# from dashboard.core.ui.components.sidebar import SidebarComponent
 
 # 导入数据输入组件
 from dashboard.core.ui.components.data_input import (
@@ -33,13 +30,10 @@ from dashboard.core.ui.components.registry import (
 
 __all__ = [
     'UIComponent',
-    'BaseWelcomePage',
     'WelcomeComponent',
-    'NavigationComponent',
     'LayoutComponent',
     'ModuleCard',
     'FeatureCard',
-    # 'SidebarComponent',  # 使用延迟导入
     # 组件注册功能
     'ComponentRegistry',
     'get_component_registry',

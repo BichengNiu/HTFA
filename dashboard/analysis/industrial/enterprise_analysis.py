@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 # 导入统一的工具函数
 from dashboard.analysis.industrial.utils import (
     convert_cumulative_to_yoy,
+    convert_margin_to_yoy_diff,
     filter_data_by_time_range,
     load_profit_breakdown_data,
     load_enterprise_profit_data,
@@ -435,10 +436,10 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
 
         # 定义需要的四个指标
         required_indicators = [
-            '规模以上工业企业:利润总额:累计同比',
-            '规模以上工业增加值:累计同比',
+            '中国:利润总额:规模以上工业企业:累计同比',
+            '中国:工业增加值:规模以上工业企业:累计同比',
             'PPI:累计同比',
-            '规模以上工业企业:营业收入利润率:累计值年同比'
+            '规模以上工业企业:营业收入利润率:累计同比'
         ]
 
         # 检查哪些指标存在于数据中
@@ -457,8 +458,8 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
                 keywords_to_match = ['工业增加值', '累计同比']
             elif '利润总额' in indicator and '累计同比' in indicator:
                 keywords_to_match = ['利润总额', '累计同比']
-            elif '营业收入利润率' in indicator and '累计值年同比' in indicator:
-                keywords_to_match = ['营业收入利润率', '累计值年同比']
+            elif '营业收入利润率' in indicator and '累计同比' in indicator:
+                keywords_to_match = ['营业收入利润率', '累计同比']
             elif 'PPI' in indicator and '累计同比' in indicator:
                 keywords_to_match = ['PPI', '累计同比']
 
@@ -506,21 +507,21 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
         def get_legend_name(indicator):
             """将完整的指标名称转换为简化的图例名称"""
             legend_mapping = {
-                '规模以上工业企业:利润总额:累计同比': '利润总额累计同比',
+                '中国:利润总额:规模以上工业企业:累计同比': '利润总额累计同比',
                 'PPI:累计同比': 'PPI累计同比',
-                '规模以上工业增加值:累计同比': '工业增加值累计同比',
-                '规模以上工业企业:营业收入利润率:累计值年同比': '营业收入利润率累计同比'
+                '中国:工业增加值:规模以上工业企业:累计同比': '工业增加值累计同比',
+                '规模以上工业企业:营业收入利润率:累计同比': '营业收入利润率累计同比'
             }
             return legend_mapping.get(indicator, indicator)
 
         # 定义哪些指标用条形图（堆积），哪些用线图
         bar_indicators = [
-            '规模以上工业增加值:累计同比',
+            '中国:工业增加值:规模以上工业企业:累计同比',
             'PPI:累计同比',
-            '规模以上工业企业:营业收入利润率:累计值年同比'
+            '规模以上工业企业:营业收入利润率:累计同比'
         ]
         line_indicators = [
-            '规模以上工业企业:利润总额:累计同比'
+            '中国:利润总额:规模以上工业企业:累计同比'
         ]
 
         # 先添加线图指标
@@ -867,22 +868,38 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
             profit_margin_col = col
             break
 
+    # 处理日期列并设置为索引
+    date_col = df_profit.columns[0]
+    df_profit[date_col] = pd.to_datetime(df_profit[date_col], errors='coerce')
+    df_profit_with_index = df_profit.set_index(date_col)
+
     if profit_margin_col:
-        # Remove processing info text as requested
+        # 计算年同比：(当期值/去年同期值 - 1) × 100
+        # convert_cumulative_to_yoy会自动将1月2月设为NaN
+        yoy_data = convert_cumulative_to_yoy(df_profit_with_index[profit_margin_col])
 
-        # 转换为年同比
-        yoy_data = convert_cumulative_to_yoy(df_profit[profit_margin_col])
+        # 创建新的列名（将"累计值"替换为"累计同比"）
+        yoy_col_name = profit_margin_col.replace('累计值', '累计同比')
 
-        # 创建新的列名
-        yoy_col_name = profit_margin_col.replace('累计值', '累计值年同比')
-        df_profit[yoy_col_name] = yoy_data
+        # 添加年同比数据
+        df_profit_with_index[yoy_col_name] = yoy_data
+
+    # 过滤掉所有1月和2月的数据（因为累计值在这两个月不具有可比性）
+    jan_feb_mask = df_profit_with_index.index.month.isin([1, 2])
+    df_profit = df_profit_with_index[~jan_feb_mask]
+
+    # 调试日志：打印过滤前后的数据月份信息
+    logger.info(f"过滤前数据行数: {len(df_profit_with_index)}, 过滤后数据行数: {len(df_profit)}")
+    logger.info(f"过滤后数据月份分布: {df_profit.index.month.value_counts().sort_index().to_dict()}")
+    if len(df_profit) > 0:
+        logger.info(f"过滤后数据日期范围: {df_profit.index.min()} 到 {df_profit.index.max()}")
 
     # Remove section title as requested
 
     # 图表1：利润总额拆解（使用统一Fragment组件 - P1-4优化）
     time_range, custom_start, custom_end = _create_enterprise_chart_fragment(
         st_obj=st_obj,
-        chart_title="#### 利润总额拆解",
+        chart_title="#### 工业企业利润拆解",
         state_key='enterprise_time_range_chart1',
         chart_func=create_enterprise_indicators_chart,
         chart_data=df_profit,
@@ -891,90 +908,17 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
         initialize_states=True  # 第1个图表需要预初始化
     )
 
-    # 添加第一个图表的数据下载功能 - 使用统一下载工具
-    download_df1 = filter_data_by_time_range(df_profit, time_range, custom_start, custom_end)
-
-    if not download_df1.empty:
+    # 添加第一个图表的数据下载功能 - 下载所有时间的完整数据
+    if not df_profit.empty:
         create_excel_download_button(
             st_obj=st_obj,
-            data=download_df1,
-            file_name=f"企业经营指标_{time_range}.xlsx",
+            data=df_profit,
+            file_name="企业经营指标_全部数据.xlsx",
             sheet_name='企业经营指标',
             button_key="industrial_enterprise_operations_download_data_button",
             column_ratio=(1, 3)
         )
 
-    # 添加第二个和第三个图表：分组利润总额累计同比
-    if df_weights is not None:
-        # 读取分上中下游利润拆解数据
-        df_profit_breakdown = load_profit_breakdown_data(uploaded_file)
-
-        if df_profit_breakdown is not None:
-            # 计算分组利润总额累计同比
-            df_grouped_profit = calculate_grouped_profit_yoy(df_profit_breakdown, df_weights)
-
-            if not df_grouped_profit.empty:
-                # 添加一些间距
-                st_obj.markdown("---")
-
-                # 图表2：上中下游分组（使用统一Fragment组件 - P1-4优化）
-                time_range_2, custom_start_2, custom_end_2 = _create_enterprise_chart_fragment(
-                    st_obj=st_obj,
-                    chart_title="#### 上中下游分组利润总额累计同比",
-                    state_key='enterprise_time_range_chart2',
-                    chart_func=create_upstream_downstream_profit_chart,
-                    chart_data=df_grouped_profit,
-                    radio_key_base="industrial_enterprise_operations_chart2_fragment",
-                    chart_key="enterprise_operations_chart_2_fragment"
-                )
-
-                # 添加第二个图表的独立数据下载功能 - 使用统一下载工具
-                download_df2 = filter_data_by_time_range(df_grouped_profit, time_range_2, custom_start_2, custom_end_2)
-
-                if not download_df2.empty:
-                    # 筛选上中下游相关列
-                    upstream_downstream_cols = ['工业企业累计利润总额累计同比'] + [col for col in download_df2.columns if '上中下游_' in col and '利润累计同比' in col]
-                    download_df2_filtered = download_df2[upstream_downstream_cols]
-
-                    create_excel_download_button(
-                        st_obj=st_obj,
-                        data=download_df2_filtered,
-                        file_name=f"上中下游分组利润累计同比_{time_range_2}.xlsx",
-                        sheet_name='上中下游分组利润累计同比',
-                        button_key="industrial_enterprise_operations_download_upstream_downstream_button",
-                        column_ratio=(1, 3)
-                    )
-
-                # 添加一些间距
-                st_obj.markdown("---")
-
-                # 图表3：出口依赖分组（使用统一Fragment组件 - P1-4优化）
-                time_range_3, custom_start_3, custom_end_3 = _create_enterprise_chart_fragment(
-                    st_obj=st_obj,
-                    chart_title="#### 出口依赖分组利润总额累计同比",
-                    state_key='enterprise_time_range_chart3',
-                    chart_func=create_export_dependency_profit_chart,
-                    chart_data=df_grouped_profit,
-                    radio_key_base="industrial_enterprise_operations_chart3_fragment",
-                    chart_key="enterprise_operations_chart_3_fragment"
-                )
-
-                # 添加第三个图表的独立数据下载功能 - 使用统一下载工具
-                download_df3 = filter_data_by_time_range(df_grouped_profit, time_range_3, custom_start_3, custom_end_3)
-
-                if not download_df3.empty:
-                    # 筛选出口依赖相关列
-                    export_dependency_cols = ['工业企业累计利润总额累计同比'] + [col for col in download_df3.columns if '出口依赖_' in col and '利润累计同比' in col]
-                    download_df3_filtered = download_df3[export_dependency_cols]
-
-                    create_excel_download_button(
-                        st_obj=st_obj,
-                        data=download_df3_filtered,
-                        file_name=f"出口依赖分组利润累计同比_{time_range_3}.xlsx",
-                        sheet_name='出口依赖分组利润累计同比',
-                        button_key="industrial_enterprise_operations_download_export_dependency_button",
-                        column_ratio=(1, 3)
-                    )
 
 
 def render_enterprise_operations_tab(st_obj):

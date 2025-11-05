@@ -112,16 +112,18 @@ def build_weights_mapping(
         target_columns: 目标列列表
 
     Returns:
-        权重映射字典 {指标名: {出口依赖, 上中下游, weights_row}}
+        权重映射字典 {指标名: {出口依赖, 上中下游, 三大产业, weights_row}}
     """
     weights_mapping = {}
 
     for _, row in df_weights.iterrows():
         indicator_name = row['指标名称']
         if pd.notna(indicator_name) and indicator_name in target_columns:
+            industry_col = row.iloc[1] if len(row) > 1 else None
             weights_mapping[indicator_name] = {
                 '出口依赖': row['出口依赖'],
                 '上中下游': row['上中下游'],
+                '三大产业': industry_col,
                 'weights_row': row
             }
 
@@ -130,24 +132,27 @@ def build_weights_mapping(
 
 def categorize_indicators(
     weights_mapping: Dict[str, Dict]
-) -> Tuple[Dict[str, List[str]], Dict[str, List[str]]]:
+) -> Tuple[Dict[str, List[str]], Dict[str, List[str]], Dict[str, List[str]]]:
     """
-    按出口依赖和上中下游对指标进行分类
+    按出口依赖、上中下游和三大产业对指标进行分类
 
     Args:
         weights_mapping: 权重映射字典
 
     Returns:
-        (export_groups, stream_groups) 元组
+        (export_groups, stream_groups, industry_groups) 元组
         - export_groups: {出口依赖类型: [指标列表]}
         - stream_groups: {上中下游类型: [指标列表]}
+        - industry_groups: {三大产业类型: [指标列表]}
     """
     export_groups = {}
     stream_groups = {}
+    industry_groups = {}
 
     for indicator, info in weights_mapping.items():
         export_dep = info['出口依赖']
         stream_type = info['上中下游']
+        industry_type = info['三大产业']
 
         # 分类到出口依赖
         if pd.notna(export_dep):
@@ -161,7 +166,13 @@ def categorize_indicators(
                 stream_groups[stream_type] = []
             stream_groups[stream_type].append(indicator)
 
-    return export_groups, stream_groups
+        # 分类到三大产业
+        if pd.notna(industry_type):
+            if industry_type not in industry_groups:
+                industry_groups[industry_type] = []
+            industry_groups[industry_type].append(indicator)
+
+    return export_groups, stream_groups, industry_groups
 
 
 def prepare_weights_series_mapping(
@@ -265,10 +276,10 @@ def calculate_weighted_groups_optimized(
             logger.warning("未找到匹配的权重映射")
             return pd.DataFrame()
 
-        # 第2步：按出口依赖和上中下游分类
-        export_groups, stream_groups = categorize_indicators(weights_mapping)
+        # 第2步：按出口依赖、上中下游和三大产业分类
+        export_groups, stream_groups, industry_groups = categorize_indicators(weights_mapping)
 
-        if not export_groups and not stream_groups:
+        if not export_groups and not stream_groups and not industry_groups:
             logger.warning("未找到有效的分组")
             return pd.DataFrame()
 

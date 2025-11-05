@@ -11,10 +11,7 @@ from abc import abstractmethod
 import logging
 
 from dashboard.core.ui.components.base import UIComponent
-from dashboard.core.ui.utils.state_helpers import (
-    get_exploration_state,
-    set_exploration_state
-)
+# 直接使用 st.session_state 管理状态
 import streamlit as st
 
 logger = logging.getLogger(__name__)

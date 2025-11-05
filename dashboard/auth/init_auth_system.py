@@ -58,7 +58,7 @@ def init_auth_system():
         # 验证权限系统
         print(f"[OK] 权限系统初始化完成")
         print("  可用权限模块:")
-        from dashboard.auth.models import PERMISSION_MODULE_MAP
+        from dashboard.auth.permissions import PERMISSION_MODULE_MAP
         for module, permissions in PERMISSION_MODULE_MAP.items():
             print(f"    - {module}: {permissions}")
         

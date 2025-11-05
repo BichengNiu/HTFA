@@ -105,3 +105,28 @@ DEFAULT_MAX_LAGS = 12
 
 # 默认DTW窗口大小
 DEFAULT_DTW_WINDOW = 10
+
+# ==================== UI相关常量 ====================
+
+# 标签页索引映射
+TAB_INDEX_MAPPING = {
+    0: "stationarity",      # 平稳性分析
+    1: "time_lag_corr"      # 相关性分析（包含DTW和领先滞后）
+}
+
+# 状态键名映射
+STATE_KEYS = {
+    "active_tab": "data_exploration_active_tab",
+    "tab_flags": {
+        "stationarity": "currently_in_stationarity_tab",
+        "time_lag_corr": "currently_in_time_lag_corr_tab",
+        "dtw": "currently_in_dtw_tab",
+        "lead_lag": "currently_in_lead_lag_tab"
+    },
+    "timestamps": {
+        "stationarity": "stationarity_tab_set_time",
+        "time_lag_corr": "time_lag_tab_set_time",
+        "dtw": "dtw_tab_set_time",
+        "lead_lag": "lead_lag_tab_set_time"
+    }
+}

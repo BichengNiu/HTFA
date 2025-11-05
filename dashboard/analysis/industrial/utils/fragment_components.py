@@ -75,7 +75,8 @@ def create_chart_with_time_selector_fragment(
     chart_variables: List[str],
     get_state_func: Callable[[str, Any], Any],
     set_state_func: Callable[[str, Any], None],
-    additional_chart_kwargs: Optional[Dict[str, Any]] = None
+    additional_chart_kwargs: Optional[Dict[str, Any]] = None,
+    variable_selector_config: Optional[Dict[str, Any]] = None
 ) -> Tuple[str, Optional[str], Optional[str]]:
     """
     创建带时间选择器的图表Fragment
@@ -105,45 +106,93 @@ def create_chart_with_time_selector_fragment(
         if chart_title:
             st_obj.markdown(chart_title)
 
-        # 获取当前时间范围状态
-        state_key = f'{state_namespace}.time_range_{chart_id}'
-        current_time_range = get_state_func(state_key, "3年")
+        # 创建两行布局（如果需要变量选择器）
+        if variable_selector_config:
+            # 第一行：左侧时间选择器，右侧线条选择器标题和复选框在同一行
+            col_time, col_vars = st_obj.columns([1, 1])
 
-        # 渲染时间范围选择器
-        time_range, custom_start, custom_end = render_time_range_selector(
-            st_obj,
-            key_prefix=f"{chart_id}_fragment",
-            default_value=current_time_range
-        )
+            # 左列：时间选择器
+            with col_time:
+                # 获取当前时间范围状态
+                state_key = f'{state_namespace}.time_range_{chart_id}'
+                current_time_range = get_state_func(state_key, "3年")
 
-        # 更新状态（仅在值改变时）
-        if time_range != current_time_range:
-            set_state_func(state_key, time_range)
-
-        # 准备图表创建函数的参数
-        chart_kwargs = {
-            'df': chart_data,
-            'variables': chart_variables,
-            'time_range': time_range,
-            'custom_start_date': custom_start,
-            'custom_end_date': custom_end
-        }
-
-        # 添加额外参数
-        if additional_chart_kwargs:
-            chart_kwargs.update(additional_chart_kwargs)
-
-        # 创建并显示图表
-        try:
-            fig = chart_creator_func(**chart_kwargs)
-            if fig:
-                st_obj.plotly_chart(
-                    fig,
-                    use_container_width=True,
-                    key=f"{chart_id}_chart_fragment"
+                # 渲染时间范围选择器
+                time_range, custom_start, custom_end = render_time_range_selector(
+                    st_obj,
+                    key_prefix=f"{chart_id}_fragment",
+                    default_value=current_time_range
                 )
-        except Exception as e:
-            st_obj.error(f"创建图表时出错: {e}")
+
+                # 更新状态（仅在值改变时）
+                if time_range != current_time_range:
+                    set_state_func(state_key, time_range)
+
+            # 右列：变量复选框
+            selected_variables = []
+            with col_vars:
+                var_options = variable_selector_config['options']
+                var_mapping = variable_selector_config.get('name_mapping', {})
+
+                # 创建水平排列的复选框
+                var_cols = st_obj.columns(len(var_options))
+
+                # 显示复选框
+                for idx, var in enumerate(var_options):
+                    with var_cols[idx]:
+                        if st_obj.checkbox(
+                            var_mapping.get(var, var),
+                            value=True,
+                            key=f"{chart_id}_var_checkbox_{idx}"
+                        ):
+                            selected_variables.append(var)
+        else:
+            # 没有变量选择器，只显示时间选择器
+            # 获取当前时间范围状态
+            state_key = f'{state_namespace}.time_range_{chart_id}'
+            current_time_range = get_state_func(state_key, "3年")
+
+            # 渲染时间范围选择器
+            time_range, custom_start, custom_end = render_time_range_selector(
+                st_obj,
+                key_prefix=f"{chart_id}_fragment",
+                default_value=current_time_range
+            )
+
+            # 更新状态（仅在值改变时）
+            if time_range != current_time_range:
+                set_state_func(state_key, time_range)
+
+            selected_variables = chart_variables
+
+        # 检查是否有选中的变量
+        if not selected_variables:
+            st_obj.warning("至少选择一个指标")
+        else:
+            # 准备图表创建函数的参数（使用选中的变量）
+            chart_kwargs = {
+                'df': chart_data,
+                'variables': selected_variables,
+                'time_range': time_range,
+                'custom_start_date': custom_start,
+                'custom_end_date': custom_end
+            }
+
+            # 添加额外参数
+            if additional_chart_kwargs:
+                chart_kwargs.update(additional_chart_kwargs)
+
+            # 创建并显示图表
+            try:
+                fig = chart_creator_func(**chart_kwargs)
+                if fig:
+                    st_obj.plotly_chart(
+                        fig,
+                        use_container_width=True,
+                        key=f"{chart_id}_chart_fragment"
+                    )
+            except Exception as e:
+                st_obj.error(f"创建图表时出错: {e}")
 
         return time_range, custom_start, custom_end
 

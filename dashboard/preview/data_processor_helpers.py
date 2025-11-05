@@ -434,10 +434,13 @@ def process_single_excel_file(
     try:
         # 优先使用Streamlit上传文件的getvalue()方法
         if hasattr(file_input, 'getvalue'):
+            logger.info(f"[DEBUG] 使用getvalue()方法读取文件")
             file_buffer = io.BytesIO(file_input.getvalue())
             file_name_for_display = getattr(file_input, 'name', 'uploaded_file.xlsx')
+            logger.info(f"[DEBUG] 文件名: {file_name_for_display}, buffer大小: {len(file_buffer.getvalue())} bytes")
         # 否则尝试使用read()方法(普通文件对象)
         elif hasattr(file_input, 'read'):
+            logger.info(f"[DEBUG] 使用read()方法读取文件")
             content = file_input.read()
             if isinstance(content, bytes):
                 file_buffer = io.BytesIO(content)
@@ -445,10 +448,15 @@ def process_single_excel_file(
                 file_buffer = io.BytesIO(content.encode())
             file_input.seek(0)  # 重置文件指针
             file_name_for_display = getattr(file_input, 'name', 'uploaded_file.xlsx')
+            logger.info(f"[DEBUG] 文件名: {file_name_for_display}, buffer大小: {len(file_buffer.getvalue())} bytes")
         else:
+            logger.error(f"[DEBUG] 不支持的文件类型: {type(file_input)}")
             warnings.warn(f"Unsupported file input type: {type(file_input)}")
             return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
     except Exception as e:
+        logger.error(f"[DEBUG] 文件读取失败: {e}")
+        import traceback
+        logger.error(f"[DEBUG] {traceback.format_exc()}")
         warnings.warn(f"Failed to read file: {e}")
         return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
     source_name_base = file_name_for_display.rsplit('.', 1)[0] if '.' in file_name_for_display else file_name_for_display

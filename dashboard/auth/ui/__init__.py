@@ -7,9 +7,7 @@ Auth UI 模块
 # 导出中间件
 from dashboard.auth.ui.middleware import (
     AuthMiddleware,
-    get_auth_middleware,
-    require_auth,
-    require_permission
+    get_auth_middleware
 )
 
 # 导出页面渲染函数
@@ -31,8 +29,6 @@ __all__ = [
     # 中间件
     'AuthMiddleware',
     'get_auth_middleware',
-    'require_auth',
-    'require_permission',
 
     # 页面
     'render_login_page',

@@ -207,8 +207,8 @@ class UserManagementPage:
                 )
                 
                 # 权限修改（多选框）
-                from dashboard.auth.models import PERMISSION_MODULE_MAP
-                
+                from dashboard.auth.permissions import PERMISSION_MODULE_MAP
+
                 # 获取所有可用模块权限
                 available_modules = list(PERMISSION_MODULE_MAP.keys())
                 current_accessible_modules = self.permission_manager.get_accessible_modules(selected_user)

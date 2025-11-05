@@ -3,9 +3,9 @@
 定义用户、会话等数据结构
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import uuid
 import json
 
@@ -40,6 +40,23 @@ class User:
         self.locked_until = None
         self.failed_login_attempts = 0
 
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        将用户对象转换为字典（用于序列化）
+        注意: datetime对象将被转换为ISO格式字符串
+        """
+        data = asdict(self)
+        # 将datetime对象转换为字符串
+        if self.created_at:
+            data['created_at'] = self.created_at.isoformat()
+        if self.last_login:
+            data['last_login'] = self.last_login.isoformat()
+        if self.locked_until:
+            data['locked_until'] = self.locked_until.isoformat()
+        # 移除密码哈希，不应暴露给前端
+        data.pop('password_hash', None)
+        return data
+
 
 @dataclass
 class UserSession:
@@ -60,14 +77,3 @@ class UserSession:
         now = datetime.now()
         self.expires_at = now + timedelta(hours=hours)
         self.last_accessed = now
-
-
-
-# 权限模块映射
-PERMISSION_MODULE_MAP = {
-    "数据预览": ["data_preview"],
-    "监测分析": ["monitoring_analysis"], 
-    "模型分析": ["model_analysis"],
-    "数据探索": ["data_exploration"],
-    "用户管理": ["user_management"]
-}

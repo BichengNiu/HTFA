@@ -17,7 +17,8 @@ def calculate_summary(
     df: pd.DataFrame,
     frequency: str,
     indicator_unit_map: Dict[str, str] = None,
-    indicator_type_map: Dict[str, str] = None
+    indicator_type_map: Dict[str, str] = None,
+    indicator_industry_map: Dict[str, str] = None
 ) -> pd.DataFrame:
     """通用摘要计算函数
 
@@ -28,6 +29,7 @@ def calculate_summary(
         frequency: 数据频率 ('weekly'/'monthly'/'daily'/'ten_day'/'yearly')
         indicator_unit_map: 指标单位映射字典
         indicator_type_map: 指标类型映射字典
+        indicator_industry_map: 指标行业映射字典
 
     Returns:
         摘要DataFrame
@@ -46,6 +48,8 @@ def calculate_summary(
         indicator_unit_map = {}
     if indicator_type_map is None:
         indicator_type_map = {}
+    if indicator_industry_map is None:
+        indicator_industry_map = {}
 
     summary_data = []
 
@@ -66,6 +70,7 @@ def calculate_summary(
         # 3. 计算增长率(传入单位和类型信息)
         indicator_unit = indicator_unit_map.get(indicator, '')
         indicator_type = indicator_type_map.get(indicator, '')
+        indicator_industry = indicator_industry_map.get(indicator, '未分类')
         growth_rates = _calculate_growth_rates(
             current_value, reference_values, frequency, indicator_unit, indicator_type
         )
@@ -73,6 +78,7 @@ def calculate_summary(
         # 4. 构建行数据
         row_data = {
             config['indicator_name_column']: indicator,
+            '行业': indicator_industry,  # 添加行业列
             '单位': indicator_unit,  # 添加单位列,用于显示时格式化判断
             '类型': indicator_type,  # 添加类型列,用于显示时格式化判断
             '最新值': current_value,
@@ -86,17 +92,19 @@ def calculate_summary(
 
         summary_data.append(row_data)
 
-    # 构建DataFrame并排序列(添加单位和类型到列顺序中)
+    # 构建DataFrame并排序列(添加单位、行业和类型到列顺序中)
     summary_df = pd.DataFrame(summary_data)
-    # 确保单位和类型列在指标名称后面
+    # 确保单位、行业和类型列在指标名称后面，顺序为：单位 -> 行业 -> 类型
     column_order_with_meta = []
     for col in config['column_order']:
         if col in summary_df.columns:
             column_order_with_meta.append(col)
-            # 在指标名称列后面插入单位和类型
+            # 在指标名称列后面插入单位、行业和类型
             if col == config['indicator_name_column']:
                 if '单位' in summary_df.columns:
                     column_order_with_meta.append('单位')
+                if '行业' in summary_df.columns:
+                    column_order_with_meta.append('行业')
                 if '类型' in summary_df.columns:
                     column_order_with_meta.append('类型')
 

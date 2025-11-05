@@ -221,6 +221,8 @@ def _prepare_periodic_data_generic(series, current_year, previous_year, x_range,
         # 重新对齐数据
         current_period = current_period.reindex(valid_weeks)
         previous_period = previous_period.reindex(valid_weeks)
+        # 重新对齐历史统计数据
+        historical_stats = historical_stats.reindex(valid_weeks)
     else:
         # 其他频率：使用实际数据的日期
         for p in x_range:
@@ -304,31 +306,57 @@ def _prepare_daily_data(series, current_year, previous_year, x_range):
 
 
 def _add_historical_range(fig, plot_data):
-    """添加历史区间,保持与原始代码完全一致"""
+    """添加历史区间，NaN处自动断开，分段绘制连续区域"""
     hist_max = plot_data.get('hist_max')
     hist_min = plot_data.get('hist_min')
 
     if hist_max is None or hist_min is None:
         return
 
+    # 检查是否有任何有效值
     valid_mask = ~(pd.isna(hist_max) | pd.isna(hist_min))
     if not any(valid_mask):
         return
 
-    x_vals = [x for i, x in enumerate(plot_data['x']) if valid_mask[i]]
-    y_max = [y for i, y in enumerate(hist_max) if valid_mask[i]]
-    y_min = [y for i, y in enumerate(hist_min) if valid_mask[i]]
+    # 确保x_vals是列表
+    x_vals = list(plot_data['x'])
+    hist_max_list = list(hist_max)
+    hist_min_list = list(hist_min)
 
-    fig.add_trace(go.Scatter(
-        x=x_vals + x_vals[::-1],
-        y=y_max + y_min[::-1],
-        fill='toself',
-        fillcolor=COLORS['historical_range'],
-        line=dict(color='rgba(255,255,255,0)'),
-        hoverinfo='skip',
-        showlegend=True,
-        name='历史区间'
-    ))
+    # 找到连续的非NaN区段
+    segments = []
+    start_idx = None
+
+    for i, is_valid in enumerate(valid_mask):
+        if is_valid:
+            if start_idx is None:
+                start_idx = i
+        else:
+            if start_idx is not None:
+                segments.append((start_idx, i))
+                start_idx = None
+
+    # 处理最后一个区段
+    if start_idx is not None:
+        segments.append((start_idx, len(valid_mask)))
+
+    # 为每个连续区段绘制填充区域
+    for idx, (start, end) in enumerate(segments):
+        segment_x = [x_vals[i] for i in range(start, end)]
+        segment_y_max = [hist_max_list[i] for i in range(start, end)]
+        segment_y_min = [hist_min_list[i] for i in range(start, end)]
+
+        fig.add_trace(go.Scatter(
+            x=segment_x + segment_x[::-1],
+            y=segment_y_max + segment_y_min[::-1],
+            fill='toself',
+            fillcolor=COLORS['historical_range'],
+            line=dict(color='rgba(255,255,255,0)'),
+            hoverinfo='skip',
+            showlegend=(idx == 0),  # 只在第一个区段显示图例
+            legendgroup='historical_range',  # 统一图例组
+            name='历史区间'
+        ))
 
 
 def _add_historical_mean(fig, plot_data):

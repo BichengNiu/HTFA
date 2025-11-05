@@ -6,7 +6,7 @@ import logging
 
 from dashboard.preview.data_loader import load_and_process_data
 from dashboard.preview.tabs import display_time_series_tab, display_overview_tab
-from dashboard.core.ui.utils.state_helpers import get_all_preview_data, get_preview_state, set_preview_state, clear_preview_data
+from dashboard.core.ui.utils.state_helpers import get_preview_state, set_preview_state
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +27,18 @@ def should_reprocess_file(uploaded_file) -> bool:
 
     current_name = uploaded_file.name
 
-    # 优化：一次性获取所有必要的状态数据（1次查询 vs 原来的6次）
-    # 传入当前文件名作为缓存键，文件变化时缓存失效
-    preview_data = get_all_preview_data(cache_key=current_name)
-    cached_name = preview_data.get('data_loaded_files')
+    # 获取缓存的文件名
+    cached_name = get_preview_state('data_loaded_files')
 
     # 第一层：文件名检查（最快）
     if current_name != cached_name:
         logger.info(f"[Cache] 文件名变化: {cached_name} -> {current_name}")
         return True
 
-    # 第二层：检查是否有任意数据（使用已获取的数据，无需额外查询）
+    # 第二层：检查是否有任意数据
     has_data = any(
-        preview_data.get(key) is not None and not preview_data.get(key).empty
+        get_preview_state(key) is not None and not get_preview_state(key).empty
         for key in ['weekly_df', 'monthly_df', 'daily_df', 'ten_day_df', 'yearly_df']
-        if isinstance(preview_data.get(key), pd.DataFrame)
     )
 
     if not has_data:
@@ -64,11 +61,6 @@ def _render_data_status_panel(st_module):
     st_module.markdown("---")
     st_module.markdown("**数据状态：**")
 
-    # 批量获取所有预览数据（减少多次状态查询）
-    # 使用已加载文件名作为缓存键
-    loaded_file = get_preview_state('data_loaded_files')
-    preview_data = get_all_preview_data(cache_key=loaded_file)
-
     from dashboard.preview.frequency_utils import get_all_frequency_names
     from dashboard.preview.config import UNIFIED_FREQUENCY_CONFIGS
 
@@ -78,7 +70,7 @@ def _render_data_status_panel(st_module):
         config = UNIFIED_FREQUENCY_CONFIGS[freq_name]
 
         # 获取DataFrame并统计指标
-        df = preview_data.get(config['df_key'], pd.DataFrame())
+        df = get_preview_state(config['df_key'], pd.DataFrame())
         indicator_count = len(df.columns) if not df.empty else 0
 
         # 显示指标数量
@@ -86,7 +78,7 @@ def _render_data_status_panel(st_module):
             st_module.markdown(f"{config['display_name']}指标：{indicator_count} 个")
 
         # 同时统计行业数量
-        industry_count = len(preview_data.get(config['industries_key'], []))
+        industry_count = len(get_preview_state(config['industries_key'], []))
         max_industries = max(max_industries, industry_count)
 
     # 显示行业数量
@@ -276,8 +268,10 @@ def process_uploaded_data(uploaded_file, extract_industry_name_func, st_module, 
 
             # 2. 保存DataFrame到状态（使用辅助方法）
             for freq, df in loaded_data.get_all_dataframes().items():
+                logger.info(f"[DEBUG] 保存{freq}数据: shape={df.shape if df is not None else 'None'}, empty={df.empty if df is not None else 'N/A'}")
                 set_preview_state(f'{freq}_df', df)
             set_preview_state('data_loaded_files', uploaded_file_name)
+            logger.info(f"[DEBUG] 数据已保存到session_state")
 
             # 3. 保存映射到状态（使用辅助方法）
             all_maps = loaded_data.get_all_maps()
@@ -307,6 +301,7 @@ def process_uploaded_data(uploaded_file, extract_industry_name_func, st_module, 
 
         except Exception as e:
             st_module.error(f"处理工业数据文件时出错: {e}")
+            from dashboard.core.ui.utils.state_helpers import clear_preview_data
             clear_preview_data()
 
 
@@ -329,22 +324,32 @@ def render_data_tabs(st_module, logger):
 
     # 一次性获取所有预览数据（使用缓存）
     loaded_file = get_preview_state('data_loaded_files')
-    preview_data = get_all_preview_data(cache_key=loaded_file)
+    logger.info(f"[DEBUG] render_data_tabs - loaded_file: {loaded_file}")
 
-    # 提取各频率数据（使用配置生成，避免硬编码）
-    loaded_files = preview_data.get('data_loaded_files')
+    # 提取各频率数据（直接从session_state获取）
     freq_dataframes = {
-        freq_name: preview_data.get(UNIFIED_FREQUENCY_CONFIGS[freq_name]['df_key'], pd.DataFrame())
+        freq_name: get_preview_state(UNIFIED_FREQUENCY_CONFIGS[freq_name]['df_key'])
         for freq_name in get_all_frequency_names(use_english=True)
     }
 
+    # 打印每个频率的数据状态
+    for freq_name, df in freq_dataframes.items():
+        df_key = UNIFIED_FREQUENCY_CONFIGS[freq_name]['df_key']
+        logger.info(f"[DEBUG] {freq_name} ({df_key}): shape={df.shape if df is not None else 'None'}, empty={df.empty if df is not None else 'N/A'}")
+
+    # 确保None值转换为空DataFrame
+    freq_dataframes = {
+        k: (v if v is not None else pd.DataFrame())
+        for k, v in freq_dataframes.items()
+    }
+
     # 检查是否有任何有效数据
-    data_is_ready = loaded_files is not None and any(
+    data_is_ready = loaded_file is not None and any(
         df is not None and not df.empty
         for df in freq_dataframes.values()
     )
 
-    logger.debug(f"[RENDER] 开始渲染tabs - 数据状态: {data_is_ready}")
+    logger.info(f"[DEBUG] render_data_tabs - data_is_ready: {data_is_ready}")
 
     # 构建Tab标题列表（配置驱动）
     tab_titles = ["数据概览"] + [
@@ -385,11 +390,9 @@ def display_industrial_tabs(extract_industry_name_func):
 
     # === 主区域：数据处理和显示 ===
 
-    # 优化：批量获取状态，避免多次单独查询（使用缓存）
-    current_file = uploaded_industrial_file.name if uploaded_industrial_file else None
-    preview_data = get_all_preview_data(cache_key=current_file)
-    loaded_files = preview_data.get('data_loaded_files')
-    cached_time = preview_data.get('data_processing_time')
+    # 获取状态数据
+    loaded_files = get_preview_state('data_loaded_files')
+    cached_time = get_preview_state('data_processing_time')
 
     # 检测文件是否被删除（用户点击了叉号）
     # 使用会话标志避免首次加载时的误判

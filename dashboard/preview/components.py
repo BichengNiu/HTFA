@@ -227,6 +227,34 @@ def display_summary_table(
         st.error(f"格式化/高亮摘要表时出错,列名可能不匹配: {e}")
         st.dataframe(summary_sorted, hide_index=True)
 
+    # 添加下载按钮（放在表格左下角）
+    from datetime import datetime
+    import io
+
+    # 创建Excel文件
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        summary_sorted.to_excel(writer, sheet_name='数据摘要', index=False)
+
+        # 设置列宽自适应
+        worksheet = writer.sheets['数据摘要']
+        for column in worksheet.columns:
+            max_length = max(len(str(cell.value)) for cell in column if cell.value)
+            worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
+
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    col_left, col_right = st.columns([1, 3])
+    with col_left:
+        st.download_button(
+            label="下载数据摘要",
+            data=buffer.getvalue(),
+            file_name=f"{download_prefix}_{timestamp}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="primary",
+            use_container_width=True
+        )
+
 
 def _sort_summary_table(
     summary_table: pd.DataFrame,

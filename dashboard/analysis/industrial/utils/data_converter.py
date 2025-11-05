@@ -66,7 +66,47 @@ def convert_cumulative_to_yoy(data_series: pd.Series, periods: int = 12) -> pd.S
         return pd.Series()
 
 
-# 已删除convert_cumulative_to_yoy_cached函数
-# 原因：定义了缓存版本但从未使用（违反YAGNI原则）
-# 如果将来需要缓存，可以直接在convert_cumulative_to_yoy函数上添加@st.cache_data装饰器
-# 或从git历史中恢复此函数
+def convert_margin_to_yoy_diff(data_series: pd.Series, periods: int = 12) -> pd.Series:
+    """
+    将利润率累计值转换为年同比差值（百分点变化）
+
+    对于比率指标（如利润率），年同比应该用差值法计算百分点变化，
+    而不是增长率法计算百分比变化。
+
+    示例：
+    - 去年利润率：5%，今年利润率：6%
+    - 差值法（正确）：6% - 5% = 1个百分点
+    - 增长率法（错误）：(6-5)/5*100 = 20%（会误导读者）
+
+    Args:
+        data_series: 利润率累计值序列，索引应为DatetimeIndex（单位：%）
+        periods: 年同比的期数，默认12个月
+
+    Returns:
+        年同比差值序列（单位：百分点）
+
+    Example:
+        >>> profit_margin = pd.Series([5.0, 5.5, 6.0],
+        ...     index=pd.date_range('2023-01', periods=3, freq='M'))
+        >>> yoy_diff = convert_margin_to_yoy_diff(profit_margin)
+    """
+    try:
+        data_series = pd.to_numeric(data_series, errors='coerce')
+        data_series = data_series.sort_index()
+
+        prev_dates = data_series.index - pd.DateOffset(months=periods)
+        tolerance = pd.Timedelta(days=30)
+        prev_values = data_series.reindex(prev_dates, method='nearest', tolerance=tolerance)
+        prev_values.index = data_series.index
+
+        # 差值法：当期 - 去年同期（单位：百分点）
+        yoy_diff = data_series - prev_values
+
+        # 将1月和2月的值设为NaN
+        jan_feb_mask = (yoy_diff.index.month == 1) | (yoy_diff.index.month == 2)
+        yoy_diff.loc[jan_feb_mask] = float('nan')
+
+        return yoy_diff
+
+    except Exception:
+        return pd.Series()

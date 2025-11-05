@@ -5,7 +5,7 @@
 """
 
 import streamlit as st
-from typing import Optional, Dict, Any, Callable
+from typing import Optional, Dict, Any
 import logging
 from datetime import datetime
 
@@ -35,45 +35,33 @@ class AuthMiddleware:
             (是否已认证, 用户对象)
         """
         try:
-            # [新增] 首先尝试从持久化存储恢复认证状态
+            # 首先尝试从持久化存储恢复认证状态
             self._try_restore_from_persistent_storage()
 
             # 从session state获取会话ID
-            session_id = st.session_state.get('user_session_id')
+            session_id = st.session_state.get('auth.user_session_id')
             if not session_id:
-                # [新增] 如果session state中没有，最后尝试从持久化存储直接获取
-                session_id = self._get_session_id_from_persistent_storage()
-                if session_id:
-                    # 恢复到session state
-                    st.session_state['user_session_id'] = session_id
-                    self.logger.info(f"[AUTH_FIX] 从持久化存储恢复会话ID: {session_id[:8]}...")
-                else:
-                    self.logger.debug("[AUTH_FIX] 未找到有效的会话ID")
-                    return False, None
+                self.logger.debug("未找到有效的会话ID")
+                return False, None
 
             # 验证会话
             is_valid, user = self.auth_manager.validate_session(session_id)
 
             if is_valid and user:
                 # 更新用户信息到session state
-                st.session_state['current_user'] = user
-                st.session_state['last_activity'] = datetime.now()
-
-                # [新增] 如果从持久化存储恢复成功，更新持久化存储的活动时间
-                self._update_persistent_storage_activity()
-
-                # 存储认证信息到session_state
                 st.session_state['auth.current_user'] = user
                 st.session_state['auth.user_session_id'] = session_id
+                st.session_state['auth.last_activity'] = datetime.now()
 
                 # 设置用户可访问模块
                 accessible_modules = self.permission_manager.get_accessible_modules(user)
                 st.session_state['auth.user_accessible_modules'] = set(accessible_modules)
 
+                # 更新持久化存储的活动时间
+                self._update_persistent_storage_activity()
+
                 return True, user
             else:
-                # 清除无效会话
-                self._clear_user_session()
                 return False, None
 
         except Exception as e:
@@ -108,24 +96,21 @@ class AuthMiddleware:
                     session = login_data['session']
                     remember_me = login_data.get('remember_me', False)
 
-                    st.session_state['user_session_id'] = session.session_id
-                    st.session_state['current_user'] = user
-                    st.session_state['last_activity'] = datetime.now()
-                    st.session_state['login_remember_flag'] = remember_me
-
-                    # [新增] 保存到持久化存储
-                    try:
-                        self._save_auth_state_to_persistent_storage(session.session_id, user, remember_me)
-                    except Exception as e:
-                        self.logger.warning(f"[AUTH_FIX] 保存到持久化存储失败，但不影响登录: {e}")
-
                     # 存储到session_state
                     st.session_state['auth.current_user'] = user
                     st.session_state['auth.user_session_id'] = session.session_id
+                    st.session_state['auth.last_activity'] = datetime.now()
+                    st.session_state['auth.remember_me'] = remember_me
 
                     # 设置用户可访问模块
                     accessible_modules = self.permission_manager.get_accessible_modules(user)
                     st.session_state['auth.user_accessible_modules'] = set(accessible_modules)
+
+                    # 保存到持久化存储
+                    try:
+                        self._save_auth_state_to_persistent_storage(session.session_id, user, remember_me)
+                    except Exception as e:
+                        self.logger.warning(f"保存到持久化存储失败，但不影响登录: {e}")
 
                     # 刷新页面以进入主应用
                     st.rerun()
@@ -197,7 +182,7 @@ class AuthMiddleware:
         """
         try:
             # 获取会话ID
-            session_id = st.session_state.get('user_session_id')
+            session_id = st.session_state.get('auth.user_session_id')
 
             # 从服务器端删除会话
             if session_id:
@@ -215,31 +200,25 @@ class AuthMiddleware:
 
     def _clear_user_session(self):
         """清除用户会话信息（包括持久化存储）"""
-        # 清除session state中的用户信息
-        session_keys = [
-            'user_session_id',
-            'current_user',
-            'last_activity',
-            'login_remember_flag'
-        ]
-
-        for key in session_keys:
-            if key in st.session_state:
-                del st.session_state[key]
-
-        # [新增] 清除持久化存储
-        try:
-            auth_mgr = get_auth_storage_manager()
-            auth_mgr.clear_auth_state()
-            self.logger.debug("[AUTH_FIX] 已清除持久化存储中的认证状态")
-        except Exception as e:
-            self.logger.warning(f"[AUTH_FIX] 清除持久化存储失败: {e}")
-
         # 清除session_state中的认证状态
-        auth_keys = ['auth.current_user', 'auth.user_session_id', 'auth.user_accessible_modules']
+        auth_keys = [
+            'auth.current_user',
+            'auth.user_session_id',
+            'auth.user_accessible_modules',
+            'auth.last_activity',
+            'auth.remember_me'
+        ]
         for key in auth_keys:
             if key in st.session_state:
                 del st.session_state[key]
+
+        # 清除持久化存储
+        try:
+            auth_mgr = get_auth_storage_manager()
+            auth_mgr.clear_auth_state()
+            self.logger.debug("已清除持久化存储中的认证状态")
+        except Exception as e:
+            self.logger.warning(f"清除持久化存储失败: {e}")
 
     def _try_restore_from_persistent_storage(self) -> bool:
         """
@@ -250,56 +229,31 @@ class AuthMiddleware:
         """
         try:
             # 如果session state中已有认证信息，跳过恢复
-            if st.session_state.get('user_session_id') and st.session_state.get('current_user'):
+            if st.session_state.get('auth.user_session_id') and st.session_state.get('auth.current_user'):
                 return True
 
             # 尝试从持久化存储恢复
             auth_mgr = get_auth_storage_manager()
             restored_auth = auth_mgr.restore_auth_state_to_session()
             if restored_auth:
-                self.logger.info(f"[AUTH_FIX] 认证状态恢复成功: 用户 {restored_auth['user_info'].get('username', 'unknown')} "
+                self.logger.info(f"认证状态恢复成功: 用户 {restored_auth['user_info'].get('username', 'unknown')} "
                                f"(来源: {restored_auth.get('restored_from', 'unknown')})")
                 return True
             else:
-                self.logger.debug("[AUTH_FIX] 未找到可恢复的认证状态")
+                self.logger.debug("未找到可恢复的认证状态")
                 return False
 
         except Exception as e:
-            self.logger.error(f"[AUTH_FIX] 从持久化存储恢复认证状态失败: {e}")
+            self.logger.error(f"从持久化存储恢复认证状态失败: {e}")
             return False
-
-    def _get_session_id_from_persistent_storage(self) -> Optional[str]:
-        """
-        直接从持久化存储获取会话ID
-
-        Returns:
-            会话ID或None
-        """
-        try:
-            # 尝试从文件存储获取会话ID
-            auth_mgr = get_auth_storage_manager()
-            if hasattr(auth_mgr, 'file_storage'):
-                for storage_type in ["local", "session"]:
-                    session_id = auth_mgr.file_storage.get_item(
-                        auth_mgr.AUTH_KEYS['session_id'],
-                        storage_type=storage_type
-                    )
-                    if session_id:
-                        self.logger.debug(f"[AUTH_FIX] 从持久化存储({storage_type})获取到会话ID")
-                        return session_id
-
-            return None
-
-        except Exception as e:
-            self.logger.error(f"[AUTH_FIX] 从持久化存储获取会话ID失败: {e}")
-            return None
 
     def _update_persistent_storage_activity(self):
         """更新持久化存储中的活动时间"""
         try:
+            from dashboard.auth.ui.utils.storage import AuthStorageManager
             # 获取当前的记住登录设置
-            remember_me = st.session_state.get('login_remember_flag', False)
-            storage_type = "local" if remember_me else "session"
+            remember_me = st.session_state.get('auth.remember_me', False)
+            storage_type = AuthStorageManager.get_storage_type(remember_me)
 
             # 更新活动时间
             current_time = int(datetime.now().timestamp() * 1000)
@@ -311,10 +265,10 @@ class AuthMiddleware:
                     storage_type=storage_type
                 )
 
-            self.logger.debug(f"[AUTH_FIX] 已更新持久化存储活动时间({storage_type})")
+            self.logger.debug(f"已更新持久化存储活动时间({storage_type})")
 
         except Exception as e:
-            self.logger.warning(f"[AUTH_FIX] 更新持久化存储活动时间失败: {e}")
+            self.logger.warning(f"更新持久化存储活动时间失败: {e}")
 
     def _save_auth_state_to_persistent_storage(self, session_id: str, user: User, remember_me: bool = False) -> bool:
         """
@@ -330,26 +284,20 @@ class AuthMiddleware:
         """
         try:
             # 将用户对象转换为字典
-            user_info = {
-                'id': getattr(user, 'id', 0),
-                'username': getattr(user, 'username', ''),
-                'email': getattr(user, 'email', ''),
-                'is_active': getattr(user, 'is_active', True),
-                'permissions': getattr(user, 'permissions', [])
-            }
+            user_info = user.to_dict()
 
             # 保存到持久化存储
             auth_mgr = get_auth_storage_manager()
             success = auth_mgr.save_auth_state(session_id, user_info, remember_me)
             if success:
-                self.logger.info(f"[AUTH_FIX] 认证状态已保存到持久化存储: 用户 {user.username}, 记住登录: {remember_me}")
+                self.logger.info(f"认证状态已保存到持久化存储: 用户 {user.username}, 记住登录: {remember_me}")
             else:
-                self.logger.warning(f"[AUTH_FIX] 保存认证状态到持久化存储失败")
+                self.logger.warning(f"保存认证状态到持久化存储失败")
 
             return success
 
         except Exception as e:
-            self.logger.error(f"[AUTH_FIX] 保存认证状态到持久化存储异常: {e}")
+            self.logger.error(f"保存认证状态到持久化存储异常: {e}")
             return False
 
     def get_current_user(self) -> Optional[User]:
@@ -359,7 +307,7 @@ class AuthMiddleware:
         Returns:
             用户对象或None
         """
-        return st.session_state.get('current_user')
+        return st.session_state.get('auth.current_user')
 
     def is_authenticated(self) -> bool:
         """
@@ -371,83 +319,9 @@ class AuthMiddleware:
         is_auth, _ = self.check_authentication()
         return is_auth
 
-    def render_user_info(self):
-        """渲染用户信息组件（用于侧边栏等）"""
-        user = self.get_current_user()
-        if user:
-            with st.sidebar:
-                st.markdown("---")
-                st.markdown("### 用户信息")
-                st.write(f"**用户名：** {user.username}")
-
-                # 显示用户权限信息（转换为中文模块名称）
-                if user.permissions:
-                    from dashboard.auth.models import PERMISSION_MODULE_MAP
-                    # 将权限代码转换为中文模块名称
-                    accessible_modules = []
-                    for module_name, required_perms in PERMISSION_MODULE_MAP.items():
-                        if any(perm in user.permissions for perm in required_perms):
-                            accessible_modules.append(module_name)
-
-                    if accessible_modules:
-                        st.write(f"**权限：** {'、'.join(accessible_modules)}")
-                    else:
-                        st.write("**权限：** 无匹配模块")
-                else:
-                    st.write("**权限：** 无")
-
-                # 登出按钮
-                if st.button("退出登录", key="logout_button"):
-                    if self.logout():
-                        st.success("已成功退出登录")
-                        st.rerun()
-                    else:
-                        st.error("退出登录失败")
-
-
-def require_auth(show_login: bool = True):
-    """
-    认证装饰器函数
-
-    Args:
-        show_login: 是否显示登录页面
-    """
-    def decorator(func: Callable):
-        def wrapper(*args, **kwargs):
-            auth_middleware = AuthMiddleware()
-            user = auth_middleware.require_authentication(show_login)
-            if user:
-                # 将用户对象传递给函数
-                return func(current_user=user, *args, **kwargs)
-            return None
-        return wrapper
-    return decorator
-
-
-def require_permission(module_name: str):
-    """
-    权限检查装饰器
-
-    Args:
-        module_name: 需要的模块权限
-    """
-    def decorator(func: Callable):
-        def wrapper(*args, **kwargs):
-            auth_middleware = AuthMiddleware()
-            user = auth_middleware.require_authentication()
-            if user and auth_middleware.require_permission(user, module_name):
-                return func(current_user=user, *args, **kwargs)
-            return None
-        return wrapper
-    return decorator
-
-
-# 全局中间件实例
-_auth_middleware = None
 
 def get_auth_middleware() -> AuthMiddleware:
-    """获取全局认证中间件实例"""
-    global _auth_middleware
-    if _auth_middleware is None:
-        _auth_middleware = AuthMiddleware()
-    return _auth_middleware
+    """获取认证中间件实例"""
+    if '_auth_middleware' not in st.session_state:
+        st.session_state['_auth_middleware'] = AuthMiddleware()
+    return st.session_state['_auth_middleware']

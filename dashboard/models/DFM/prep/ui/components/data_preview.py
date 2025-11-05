@@ -96,13 +96,7 @@ class DataPreviewComponent(DFMComponent):
             预览结果字典或None
         """
         try:
-            # 使用性能监控
-            if hasattr(self, 'performance_monitor') and self.performance_monitor:
-                with self.performance_monitor.monitor_operation(self.get_component_id(), "render"):
-                    return self._render_with_monitoring(st_obj)
-            else:
-                return self._render_with_monitoring(st_obj)
-
+            return self._render_with_monitoring(st_obj)
         except Exception as e:
             self.handle_service_error(e)
             return None

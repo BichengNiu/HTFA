@@ -25,10 +25,10 @@ class ModuleCard(UIComponent):
     def render(self, st_obj, **kwargs) -> None:
         """渲染模块卡片"""
         container_height = kwargs.get('height', '200px')
-        
-        # 使用模板管理器渲染模块卡片
-        from dashboard.core.ui.constants import TemplateManager
-        card_html = TemplateManager.render_template(
+
+        # 使用模板函数渲染模块卡片
+        from dashboard.core.ui.constants import render_template
+        card_html = render_template(
             'module_card',
             height=container_height,
             icon=self.icon,
@@ -153,114 +153,6 @@ class FeatureCard(UIComponent):
             st_obj.caption("即将推出")
         elif self.status == "beta":
             st_obj.caption("测试版本")
-    
-    def get_state_keys(self) -> List[str]:
-        """获取组件相关的状态键"""
-        return []
-
-class StatCard(UIComponent):
-    """统计卡片组件 - 使用统一状态管理"""
-
-    def __init__(self, title: str, value: str, icon: str,
-                 trend: Optional[str] = None, color: str = "blue"):
-        # 调用父类初始化，集成统一状态管理
-        super().__init__()
-
-        self.title = title
-        self.value = value
-        self.icon = icon
-        self.trend = trend
-        self.color = color
-    
-    def render(self, st_obj, **kwargs) -> None:
-        """渲染统计卡片"""
-        # 颜色映射
-        color_map = {
-            "blue": {"bg": "#e3f2fd", "text": "#1976d2"},
-            "green": {"bg": "#e8f5e8", "text": "#388e3c"},
-            "red": {"bg": "#ffebee", "text": "#d32f2f"},
-            "orange": {"bg": "#fff3e0", "text": "#f57c00"},
-            "purple": {"bg": "#f3e5f5", "text": "#7b1fa2"}
-        }
-        
-        colors = color_map.get(self.color, color_map["blue"])
-        
-        # 趋势指示器
-        trend_html = ""
-        if self.trend:
-            trend_color = "#4caf50" if "↑" in self.trend else "#f44336" if "↓" in self.trend else "#666"
-            trend_html = f"""
-            <div style="
-                font-size: 0.8em;
-                color: {trend_color};
-                margin-top: 0.5rem;
-                font-weight: 500;
-            ">{self.trend}</div>
-            """
-        
-        card_html = f"""
-        <div style="
-            background: {colors['bg']};
-            border-radius: 8px;
-            padding: 1.5rem;
-            margin: 0.5rem 0;
-            text-align: center;
-            border-left: 4px solid {colors['text']};
-        ">
-            <div style="font-size: 2em; margin-bottom: 0.5rem;">{self.icon}</div>
-            <h3 style="margin: 0; color: {colors['text']}; font-size: 2em; font-weight: bold;">{self.value}</h3>
-            <p style="margin: 0.5rem 0 0 0; color: {colors['text']}; font-weight: 500;">{self.title}</p>
-            {trend_html}
-        </div>
-        """
-        
-        st_obj.markdown(card_html, unsafe_allow_html=True)
-    
-    def get_state_keys(self) -> List[str]:
-        """获取组件相关的状态键"""
-        return []
-
-class InfoCard(UIComponent):
-    """信息卡片组件 - 使用统一状态管理"""
-
-    def __init__(self, title: str, content: str, card_type: str = "info"):
-        # 调用父类初始化，集成统一状态管理
-        super().__init__()
-
-        self.title = title
-        self.content = content
-        self.card_type = card_type  # info, warning, success, error
-    
-    def render(self, st_obj, **kwargs) -> None:
-        """渲染信息卡片"""
-        # 类型样式映射
-        type_styles = {
-            "info": {"bg": "#e3f2fd", "border": "#2196f3", "icon": "ℹ️"},
-            "warning": {"bg": "#fff3e0", "border": "#ff9800", "icon": "⚠️"},
-            "success": {"bg": "#e8f5e8", "border": "#4caf50", "icon": "✅"},
-            "error": {"bg": "#ffebee", "border": "#f44336", "icon": "❌"}
-        }
-        
-        style = type_styles.get(self.card_type, type_styles["info"])
-        
-        card_html = f"""
-        <div style="
-            background: {style['bg']};
-            border: 1px solid {style['border']};
-            border-radius: 6px;
-            padding: 1rem;
-            margin: 1rem 0;
-            border-left: 4px solid {style['border']};
-        ">
-            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
-                <span style="font-size: 1.2em; margin-right: 0.5rem;">{style['icon']}</span>
-                <h4 style="margin: 0; color: {style['border']};">{self.title}</h4>
-            </div>
-            <p style="margin: 0; color: #333; line-height: 1.5;">{self.content}</p>
-        </div>
-        """
-        
-        st_obj.markdown(card_html, unsafe_allow_html=True)
     
     def get_state_keys(self) -> List[str]:
         """获取组件相关的状态键"""

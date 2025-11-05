@@ -1,59 +1,41 @@
 """
 认证系统配置模块
-
-通过环境变量控制调试模式和认证行为
+提供统一的安全和认证配置
 """
-import os
+from dataclasses import dataclass
 
 
+@dataclass
 class AuthConfig:
-    """认证系统配置类"""
+    """认证系统统一配置类"""
 
-    # 调试模式开关 - 从环境变量读取，默认为true
-    # 设置环境变量 HTFA_DEBUG_MODE=false 启用完整认证
-    DEBUG_MODE = os.getenv('HTFA_DEBUG_MODE', 'true').lower() == 'true'
+    # 调试模式 - 设为True时跳过认证
+    debug_mode: bool = True  # 默认开启调试模式
 
-    # 调试模式下的默认权限（所有模块）
-    DEBUG_DEFAULT_PERMISSIONS = [
-        'data_preview',
-        'monitoring_analysis',
-        'model_analysis',
-        'data_exploration',
-        'user_management'
-    ]
+    # 密码策略
+    min_password_length: int = 8
+    max_password_length: int = 128
+    require_letter: bool = True
+    require_digit: bool = True
+    require_special_char: bool = True
 
-    # 调试模式下可访问的所有模块
-    DEBUG_ACCESSIBLE_MODULES = [
-        '数据预览',
-        '监测分析',
-        '模型分析',
-        '数据探索',
-        '用户管理'
-    ]
+    # 用户名策略
+    min_username_length: int = 3
+    max_username_length: int = 20
+
+    # 登录安全
+    max_login_attempts: int = 5
+    lockout_duration_minutes: int = 30
 
     # 会话配置
-    SESSION_DURATION_HOURS = 8  # 默认会话时长
-    REMEMBER_ME_DURATION_HOURS = 24  # 记住登录时长
-
-    # 账户安全配置
-    MAX_FAILED_LOGIN_ATTEMPTS = 5  # 最大登录失败次数
-    ACCOUNT_LOCK_DURATION_MINUTES = 30  # 账户锁定时长
+    session_duration_hours: int = 8
+    remember_me_duration_hours: int = 24
 
     @classmethod
     def is_debug_mode(cls) -> bool:
         """检查是否处于调试模式"""
-        return cls.DEBUG_MODE
-
-    @classmethod
-    def get_mode_name(cls) -> str:
-        """获取当前模式名称"""
-        return "调试模式" if cls.DEBUG_MODE else "正常模式"
-
-    @classmethod
-    def reload(cls):
-        """重新加载配置（从环境变量读取）"""
-        cls.DEBUG_MODE = os.getenv('HTFA_DEBUG_MODE', 'true').lower() == 'true'
+        return DEFAULT_CONFIG.debug_mode
 
 
-# 全局配置实例
-auth_config = AuthConfig()
+# 全局默认配置实例
+DEFAULT_CONFIG = AuthConfig()

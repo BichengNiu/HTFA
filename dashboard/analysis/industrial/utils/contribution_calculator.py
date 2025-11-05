@@ -100,18 +100,25 @@ def calculate_group_contributions(
     df_macro: pd.DataFrame,
     weights_mapping: Dict[str, Dict],
     groups: Dict[str, List[str]],
-    prefix: str = ""
+    prefix: str = "",
+    df_overall_growth: Optional[pd.DataFrame] = None,
+    industry_to_column_map: Optional[Dict[str, str]] = None
 ) -> pd.DataFrame:
     """
     计算分组对总体工业增加值的拉动率
 
     分组拉动率 = Σ(组内各行业拉动率)
 
+    注意：对于三大产业分组，如果提供了df_overall_growth和industry_to_column_map，
+    将优先使用"总体增速 × 总权重"的方式计算拉动率，以避免细分行业数据不一致性导致的误差。
+
     Args:
         df_macro: 宏观数据（各行业增速），已过滤2012年及以后
         weights_mapping: 权重映射
         groups: 分组字典 {组名: [指标列表]}
         prefix: 列名前缀
+        df_overall_growth: 总体增速数据（可选），用于三大产业拉动率计算
+        industry_to_column_map: 产业名称到总体增速列名的映射（可选）
 
     Returns:
         DataFrame，列为各分组拉动率，索引为时间
@@ -124,6 +131,14 @@ def calculate_group_contributions(
 
     group_contribution_df = pd.DataFrame(index=df_macro.index)
 
+    # 标记是否是三大产业分组
+    is_three_industries = (prefix == "三大产业_")
+    use_overall_growth = (
+        is_three_industries
+        and df_overall_growth is not None
+        and industry_to_column_map is not None
+    )
+
     for group_name, indicators in groups.items():
         valid_indicators = [
             ind for ind in indicators
@@ -134,15 +149,56 @@ def calculate_group_contributions(
             debug_log(f"警告: 分组 {group_name} 没有有效指标", "WARNING")
             continue
 
-        group_contribution = individual_contributions[valid_indicators].sum(axis=1)
+        # 对于三大产业，优先使用总体增速计算
+        if use_overall_growth and group_name in industry_to_column_map:
+            overall_col = industry_to_column_map[group_name]
+
+            if overall_col in df_overall_growth.columns:
+                # 计算该产业的总权重
+                total_weight_series = pd.Series(0.0, index=df_macro.index)
+
+                for indicator in valid_indicators:
+                    if indicator in weights_mapping:
+                        weights_row = weights_mapping[indicator]['weights_row']
+                        weight_series = pd.Series(index=df_macro.index, dtype=float)
+
+                        for timestamp in df_macro.index:
+                            year = timestamp.year
+                            from .weight_calculator import get_weight_for_year
+                            weight = get_weight_for_year(weights_row, year)
+                            weight_series.loc[timestamp] = weight
+
+                        total_weight_series += weight_series
+
+                # 对齐索引
+                overall_growth_series = df_overall_growth[overall_col].reindex(df_macro.index)
+
+                # 拉动率 = 总体增速 × 总权重
+                group_contribution = overall_growth_series * total_weight_series
+
+                debug_log(
+                    f"分组 {group_name} 使用总体增速计算拉动率（{len(valid_indicators)} 个指标）",
+                    "INFO"
+                )
+            else:
+                # 如果总体增速列不存在，回退到细分行业加权和
+                group_contribution = individual_contributions[valid_indicators].sum(axis=1)
+                debug_log(
+                    f"警告: 分组 {group_name} 总体增速列 '{overall_col}' 不存在，使用细分行业加权和",
+                    "WARNING"
+                )
+        else:
+            # 其他分组使用细分行业加权和
+            group_contribution = individual_contributions[valid_indicators].sum(axis=1)
 
         column_name = f"{prefix}{group_name}"
         group_contribution_df[column_name] = group_contribution
 
-        debug_log(
-            f"分组 {group_name} 拉动率计算完成，包含 {len(valid_indicators)} 个指标",
-            "DEBUG"
-        )
+        if not use_overall_growth or group_name not in industry_to_column_map:
+            debug_log(
+                f"分组 {group_name} 拉动率计算完成，包含 {len(valid_indicators)} 个指标",
+                "DEBUG"
+            )
 
     return group_contribution_df
 
@@ -200,10 +256,28 @@ def validate_contributions(
     return validation_passed, contribution_sum, difference
 
 
+def _find_column_by_keywords(df: pd.DataFrame, keywords: List[str]) -> Optional[str]:
+    """
+    根据关键词列表查找列名（兼容新旧格式）
+
+    Args:
+        df: DataFrame
+        keywords: 关键词列表，按优先级排序
+
+    Returns:
+        找到的列名，如果未找到返回None
+    """
+    for col in df.columns:
+        if all(keyword in col for keyword in keywords):
+            return col
+    return None
+
+
 def calculate_all_contributions(
     df_macro: pd.DataFrame,
     df_weights: pd.DataFrame,
-    total_growth_column: str = "规模以上工业增加值:当月同比"
+    total_growth_column: Optional[str] = None,
+    df_overall_growth: Optional[pd.DataFrame] = None
 ) -> Dict[str, pd.DataFrame]:
     """
     统一计算所有拉动率（分组+单个行业）
@@ -211,12 +285,14 @@ def calculate_all_contributions(
     Args:
         df_macro: 宏观数据（各行业增速），已过滤2012年及以后
         df_weights: 权重数据
-        total_growth_column: 总体增速列名
+        total_growth_column: 总体增速列名（可选，自动检测）
+        df_overall_growth: 总体增速数据（可选），包含三大产业的总体增速，用于提高三大产业拉动率准确性
 
     Returns:
         {
             'export_groups': 出口依赖分组拉动率,
             'stream_groups': 上中下游分组拉动率,
+            'industry_groups': 三大产业分组拉动率,
             'individual': 单个行业拉动率,
             'total_growth': 总体增速Series,
             'validation': 验证结果
@@ -225,6 +301,19 @@ def calculate_all_contributions(
     from .weighted_calculation import build_weights_mapping, categorize_indicators
 
     debug_log("开始统一拉动率计算流程", "INFO")
+
+    # 自动检测总体增速列名（兼容新旧格式）
+    if total_growth_column is None:
+        total_growth_column = _find_column_by_keywords(df_macro, ['工业增加值', '当月同比'])
+        if total_growth_column is None:
+            # 尝试旧格式
+            if '规模以上工业增加值:当月同比' in df_macro.columns:
+                total_growth_column = '规模以上工业增加值:当月同比'
+            else:
+                raise ValueError(
+                    f"无法自动检测总体增速列。可用列: {list(df_macro.columns)}"
+                )
+        debug_log(f"自动检测到总体增速列: {total_growth_column}", "INFO")
 
     if total_growth_column not in df_macro.columns:
         raise ValueError(
@@ -238,7 +327,7 @@ def calculate_all_contributions(
 
     weights_mapping = build_weights_mapping(df_weights, target_columns)
 
-    export_groups, stream_groups = categorize_indicators(weights_mapping)
+    export_groups, stream_groups, industry_groups = categorize_indicators(weights_mapping)
 
     export_contribution = calculate_group_contributions(
         df_macro, weights_mapping, export_groups, '出口依赖_'
@@ -246,6 +335,34 @@ def calculate_all_contributions(
 
     stream_contribution = calculate_group_contributions(
         df_macro, weights_mapping, stream_groups, '上中下游_'
+    )
+
+    # 三大产业分组拉动率：如果提供了总体增速数据，使用总体增速计算
+    # 兼容新旧两种格式的列名映射
+    industry_to_column_map = {}
+
+    # 采矿业列名检测
+    mining_col = _find_column_by_keywords(df_macro, ['采矿业', '当月同比'])
+    if mining_col:
+        industry_to_column_map['采矿业'] = mining_col
+
+    # 制造业列名检测
+    manufacturing_col = _find_column_by_keywords(df_macro, ['制造业', '当月同比'])
+    if manufacturing_col:
+        industry_to_column_map['制造业'] = manufacturing_col
+
+    # 电力、燃气及水列名检测（兼容新旧两种表述）
+    utilities_col = (_find_column_by_keywords(df_macro, ['电力', '当月同比']) or
+                     _find_column_by_keywords(df_macro, ['燃气', '当月同比']))
+    if utilities_col:
+        industry_to_column_map['电力、热力、燃气及水生产和供应业'] = utilities_col
+
+    debug_log(f"三大产业列名映射: {industry_to_column_map}", "INFO")
+
+    industry_contribution = calculate_group_contributions(
+        df_macro, weights_mapping, industry_groups, '三大产业_',
+        df_overall_growth=df_overall_growth,
+        industry_to_column_map=industry_to_column_map
     )
 
     individual_contribution = calculate_individual_contributions(
@@ -259,6 +376,7 @@ def calculate_all_contributions(
     result = {
         'export_groups': export_contribution,
         'stream_groups': stream_contribution,
+        'industry_groups': industry_contribution,
         'individual': individual_contribution,
         'total_growth': total_growth,
         'validation': {
@@ -272,6 +390,7 @@ def calculate_all_contributions(
         f"拉动率计算完成: "
         f"出口依赖 {len(export_contribution.columns)} 组, "
         f"上中下游 {len(stream_contribution.columns)} 组, "
+        f"三大产业 {len(industry_contribution.columns)} 组, "
         f"单个行业 {len(individual_contribution.columns)} 个",
         "INFO"
     )

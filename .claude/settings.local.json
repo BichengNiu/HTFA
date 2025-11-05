@@ -14,7 +14,16 @@
       "Bash(dir:*)",
       "Bash(test:*)",
       "Bash(powershell -Command \"(Get-ChildItem -Path ''E:\\同步文件夹\\HTFA\\dashboard\\core'' -Filter *.py -Recurse | Get-Content | Measure-Object -Line).Lines\")",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(del:*)",
+      "Bash(rm:*)",
+      "Bash(iconv:*)",
+      "Bash(if exist temp_check_data.py del /f /q temp_check_data.py)",
+      "Bash(if exist temp_check_data2.py del /f /q temp_check_data2.py)",
+      "Bash(if exist test_profit_margin.py del /f /q test_profit_margin.py)",
+      "Bash(if exist test_profit_margin2.py del /f /q test_profit_margin2.py)",
+      "Bash(if exist temp_data_output.txt del /f /q temp_data_output.txt)",
+      "Bash(if exist profit_margin_comparison.txt del /f /q profit_margin_comparison.txt)"
     ],
     "deny": [],
     "ask": []

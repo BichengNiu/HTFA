@@ -8,44 +8,37 @@ import streamlit as st
 import time
 from typing import List, Dict, Any, Optional, Tuple
 from dashboard.core.ui.utils.debug_helpers import debug_button_click, debug_navigation
-
-# 全局按钮key跟踪器，防止同一渲染周期内的重复key
-_current_render_button_keys = set()
-_last_render_time = 0
-
-
-def reset_button_key_tracking():
-    """重置按钮key跟踪器，用于新的渲染周期开始时"""
-    global _current_render_button_keys, _last_render_time
-    _current_render_button_keys.clear()
-    _last_render_time = time.time()
+from dashboard.core import (
+    get_current_main_module,
+    get_current_sub_module,
+    set_current_main_module,
+    set_current_sub_module,
+    is_transitioning,
+    set_transitioning
+)
 
 
 def render_main_module_selector(
     module_options: List[str],
     current_module: str,
-    nav_manager: Any,
     key_prefix: str = "main_module"
 ) -> Dict[str, Any]:
     """
     渲染主模块选择器
-    
+
     Args:
         module_options: 模块选项列表
         current_module: 当前选中的模块
-        nav_manager: 导航管理器
         key_prefix: 按钮key前缀
-        
+
     Returns:
         Dict[str, Any]: 选择结果
     """
     if not validate_module_options(module_options):
         return {'selected_module': current_module, 'has_change': False, 'success': False}
-    
+
     # 获取模块分布
     col1_modules, col2_modules = get_module_distribution(module_options)
-    
-    # 移除按钮状态管理 - 所有按钮使用默认样式
 
     # 创建两列布局
     col1, col2 = st.columns(2)
@@ -72,17 +65,17 @@ def render_main_module_selector(
                 debug_button_click(f"主模块-第二列-{module}", f"从 {current_module} 切换到 {module}")
                 selected_module = module
                 has_change = True
-    
+
     # 处理模块选择
     if has_change:
-        result = handle_module_selection(selected_module, current_module, nav_manager, 'main')
+        result = handle_module_selection(selected_module, current_module, 'main')
     else:
         result = {
             'selected_module': current_module,
             'has_change': False,
             'success': True
         }
-    
+
     return result
 
 
@@ -90,29 +83,25 @@ def render_sub_module_selector(
     sub_module_options: List[str],
     current_sub_module: Optional[str],
     main_module: str,
-    nav_manager: Any,
     key_prefix: str = "sub_module"
 ) -> Dict[str, Any]:
     """
     渲染子模块选择器
-    
+
     Args:
         sub_module_options: 子模块选项列表
         current_sub_module: 当前选中的子模块
         main_module: 主模块名称
-        nav_manager: 导航管理器
         key_prefix: 按钮key前缀
-        
+
     Returns:
         Dict[str, Any]: 选择结果
     """
     if not validate_module_options(sub_module_options):
         return {'selected_sub_module': current_sub_module, 'has_change': False, 'success': False}
-    
+
     # 获取模块分布
     col1_modules, col2_modules = get_module_distribution(sub_module_options)
-    
-    # 移除按钮状态管理 - 所有按钮使用默认样式
 
     # 创建两列布局
     col1, col2 = st.columns(2)
@@ -139,17 +128,17 @@ def render_sub_module_selector(
                 debug_button_click(f"子模块-第二列-{sub_module}", f"在{main_module}中选择{sub_module}")
                 selected_sub_module = sub_module
                 has_change = True
-    
+
     # 处理子模块选择
     if has_change:
-        result = handle_module_selection(selected_sub_module, current_sub_module, nav_manager, 'sub')
+        result = handle_module_selection(selected_sub_module, current_sub_module, 'sub')
     else:
         result = {
             'selected_sub_module': current_sub_module,
             'has_change': False,
             'success': True
         }
-    
+
     return result
 
 
@@ -217,61 +206,28 @@ def create_module_button(
     Returns:
         bool: 按钮是否被点击
     """
-    global _current_render_button_keys, _last_render_time
-    
-    # 检查是否是新的渲染周期，如果是则清除key缓存
-    current_time = time.time()
-    if current_time - _last_render_time > 0.1:  # 100ms阈值，认为是新的渲染周期
-        _current_render_button_keys.clear()
-        _last_render_time = current_time
-    
     if key is None or not key or not isinstance(key, str):
-        # 只有在key无效时才生成默认key
         key = f"module_btn_{module_name.replace(' ', '_')}"
 
-    # 检查是否存在重复key，如果存在则添加时间戳后缀
-    original_key = key
-    counter = 1
-    while key in _current_render_button_keys:
-        key = f"{original_key}_{counter}"
-        counter += 1
-        if counter > 10:  # 防止无限循环
-            key = f"{original_key}_{int(current_time * 1000) % 10000}"
-            break
-    
-    # 记录使用的key
-    _current_render_button_keys.add(key)
-
-    # 添加调试输出（受环境变量控制）
     from dashboard.core.ui.utils.debug_helpers import debug_log
-    if key != original_key:
-        debug_log(f"创建按钮: {module_name}, 原始key: {original_key}, 修正key: {key}", "DEBUG")
-    else:
-        debug_log(f"创建按钮: {module_name}, key: {key}", "DEBUG")
+    debug_log(f"创建按钮: {module_name}, key: {key}", "DEBUG")
 
-    try:
-        button_clicked = st.button(
-            module_name,
-            type=button_type,
-            key=key,
-            use_container_width=True
-        )
+    button_clicked = st.button(
+        module_name,
+        type=button_type,
+        key=key,
+        use_container_width=True
+    )
 
-        # 添加点击调试输出
-        if button_clicked:
-            debug_log(f"按钮被点击: {module_name}, key: {key}", "DEBUG")
+    if button_clicked:
+        debug_log(f"按钮被点击: {module_name}, key: {key}", "DEBUG")
 
-        return button_clicked
-
-    except Exception as e:
-        # 直接抛出错误，不使用fallback
-        raise RuntimeError(f"按钮创建失败: {module_name}, key: {key}, 错误: {e}")
+    return button_clicked
 
 
 def handle_module_selection(
     selected_module: str,
     current_module: Optional[str],
-    nav_manager: Any,
     module_type: str = 'main'
 ) -> Dict[str, Any]:
     """
@@ -280,7 +236,6 @@ def handle_module_selection(
     Args:
         selected_module: 选中的模块
         current_module: 当前模块
-        nav_manager: 导航管理器
         module_type: 模块类型 ('main' 或 'sub')
 
     Returns:
@@ -298,66 +253,59 @@ def handle_module_selection(
             'has_change': False,
             'success': True
         }
-    
+
     # 执行导航状态更新
     success = True
-    if nav_manager:
+    try:
+        # 设置导航过渡状态，标记用户正在进行导航操作
+        set_transitioning(True)
+
+        # 记录导航时间戳，用于循环渲染检测
+        current_time = time.time()
+        st.session_state["dashboard.last_navigation_time"] = current_time
+        debug_navigation("导航时间戳", f"设置导航时间戳: {current_time}")
+
+        if module_type == 'main':
+            debug_log(f"调用 set_current_main_module({selected_module})", "DEBUG")
+            success = set_current_main_module(selected_module)
+            debug_log(f"主模块设置结果: {success}", "DEBUG")
+            debug_navigation(
+                "主模块选择",
+                f"设置主模块: {current_module} -> {selected_module}, 成功: {success}"
+            )
+            # 验证设置结果
+            actual_main = get_current_main_module()
+            debug_log(f"验证主模块设置: 期望={selected_module}, 实际={actual_main}", "DEBUG")
+        else:
+            debug_log(f"调用 set_current_sub_module({selected_module})", "DEBUG")
+            success = set_current_sub_module(selected_module)
+            debug_log(f"子模块设置结果: {success}", "DEBUG")
+            debug_navigation(
+                "子模块选择",
+                f"设置子模块: {current_module} -> {selected_module}, 成功: {success}"
+            )
+            # 验证设置结果
+            actual_sub = get_current_sub_module()
+            debug_log(f"验证子模块设置: 期望={selected_module}, 实际={actual_sub}", "DEBUG")
+
+        # 清除导航过渡状态
+        set_transitioning(False)
+
+    except Exception as e:
+        debug_navigation("模块选择失败", f"设置{module_type}模块失败: {e}")
+        success = False
+        # 确保在出错时也清除过渡状态
         try:
-            # 设置导航过渡状态，标记用户正在进行导航操作
-            if hasattr(nav_manager, 'set_transitioning'):
-                nav_manager.set_transitioning(True)
+            set_transitioning(False)
+        except:
+            pass
 
-            # 记录导航时间戳，用于循环渲染检测
-            current_time = time.time()
-            st.session_state["dashboard.last_navigation_time"] = current_time
-            debug_navigation("导航时间戳", f"设置导航时间戳: {current_time}")
-
-            if module_type == 'main':
-                debug_log(f"调用 nav_manager.set_current_main_module({selected_module})", "DEBUG")
-                success = nav_manager.set_current_main_module(selected_module)
-                debug_log(f"主模块设置结果: {success}", "DEBUG")
-                debug_navigation(
-                    "主模块选择",
-                    f"设置主模块: {current_module} -> {selected_module}, 成功: {success}"
-                )
-                # 验证设置结果
-                actual_main = nav_manager.get_current_main_module()
-                debug_log(f"验证主模块设置: 期望={selected_module}, 实际={actual_main}", "DEBUG")
-            else:
-                debug_log(f"调用 nav_manager.set_current_sub_module({selected_module})", "DEBUG")
-                success = nav_manager.set_current_sub_module(selected_module)
-                debug_log(f"子模块设置结果: {success}", "DEBUG")
-                debug_navigation(
-                    "子模块选择",
-                    f"设置子模块: {current_module} -> {selected_module}, 成功: {success}"
-                )
-                # 验证设置结果
-                actual_sub = nav_manager.get_current_sub_module()
-                debug_log(f"验证子模块设置: 期望={selected_module}, 实际={actual_sub}", "DEBUG")
-
-            # 清除导航过渡状态
-            if hasattr(nav_manager, 'set_transitioning'):
-                nav_manager.set_transitioning(False)
-
-        except Exception as e:
-            debug_navigation("模块选择失败", f"设置{module_type}模块失败: {e}")
-            success = False
-            # 确保在出错时也清除过渡状态
-            if nav_manager and hasattr(nav_manager, 'set_transitioning'):
-                try:
-                    nav_manager.set_transitioning(False)
-                except:
-                    pass
-    
     result_key = 'selected_module' if module_type == 'main' else 'selected_sub_module'
     return {
         result_key: selected_module,
         'has_change': True,
         'success': success
     }
-
-
-# 移除按钮状态管理函数 - 不再需要
 
 
 def validate_module_options(module_options: Optional[List[str]]) -> bool:
@@ -384,44 +332,6 @@ def validate_module_options(module_options: Optional[List[str]]) -> bool:
     return True
 
 
-def create_module_selector_container(
-    title: str,
-    module_options: List[str],
-    current_module: Optional[str],
-    nav_manager: Any,
-    module_type: str = 'main',
-    key_prefix: str = None
-) -> Dict[str, Any]:
-    """
-    创建完整的模块选择器容器
-    
-    Args:
-        title: 选择器标题
-        module_options: 模块选项列表
-        current_module: 当前选中的模块
-        nav_manager: 导航管理器
-        module_type: 模块类型 ('main' 或 'sub')
-        key_prefix: 按钮key前缀
-        
-    Returns:
-        Dict[str, Any]: 选择结果
-    """
-    # 显示标题
-    st.subheader(title)
-    
-    # 根据模块类型选择渲染函数
-    if module_type == 'main':
-        return render_main_module_selector(
-            module_options, current_module, nav_manager, key_prefix or 'main_selector'
-        )
-    else:
-        # 对于子模块，需要额外的主模块参数
-        main_module = nav_manager.get_current_main_module() if nav_manager else '未知'
-        return render_sub_module_selector(
-            module_options, current_module, main_module, nav_manager, key_prefix or 'sub_selector'
-        )
-
-
 __all__ = [
     'render_main_module_selector',
     'render_sub_module_selector',
@@ -429,6 +339,4 @@ __all__ = [
     'create_module_button',
     'handle_module_selection',
     'validate_module_options',
-    'create_module_selector_container',
-    'reset_button_key_tracking'
 ]

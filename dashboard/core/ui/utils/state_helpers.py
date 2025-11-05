@@ -1,20 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-状态管理辅助函数模块
-提供命名空间封装，直接使用st.session_state进行状态管理
+状态管理辅助函数模块（简化版）
+提供命名空间常量和基本辅助函数，直接使用st.session_state
 """
 
 import streamlit as st
 from typing import Any, Optional
-from functools import lru_cache
 import logging
-from dashboard.core.backend.utils import safe_operation
 
-# 设置日志
 logger = logging.getLogger(__name__)
 
 
-# === 统一命名空间定义 ===
+# === 命名空间定义 ===
 
 class StateNamespace:
     """状态管理命名空间常量"""
@@ -27,393 +24,147 @@ class StateNamespace:
     CORE = "core"
 
 
-# === 统一状态管理接口 ===
+# === 基础状态管理接口 ===
 
 def get_state(namespace: str, key: str, default: Any = None) -> Any:
-    """
-    统一状态获取接口
-
-    Args:
-        namespace: 命名空间
-        key: 状态键
-        default: 默认值
-
-    Returns:
-        状态值
-    """
+    """统一状态获取接口"""
     full_key = f"{namespace}.{key}"
     return st.session_state.get(full_key, default)
 
 
-@safe_operation(default_return=False, log_error=True)
 def set_state(namespace: str, key: str, value: Any) -> bool:
-    """
-    统一状态设置接口
-
-    Args:
-        namespace: 命名空间
-        key: 状态键
-        value: 状态值
-
-    Returns:
-        设置是否成功
-    """
-    full_key = f"{namespace}.{key}"
-    st.session_state[full_key] = value
-    return True
+    """统一状态设置接口"""
+    try:
+        full_key = f"{namespace}.{key}"
+        st.session_state[full_key] = value
+        return True
+    except Exception as e:
+        logger.error(f"设置状态失败: {e}")
+        return False
 
 
-@safe_operation(default_return=False, log_error=True)
 def clear_state_by_prefix(prefix: str) -> bool:
-    """
-    根据前缀清理状态
-
-    Args:
-        prefix: 状态键前缀
-
-    Returns:
-        清理是否成功
-    """
-    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
-    for k in keys_to_delete:
-        del st.session_state[k]
-    logger.info(f"清理状态: 删除了{len(keys_to_delete)}个键（前缀: {prefix}）")
-    return True
+    """根据前缀清理状态"""
+    try:
+        keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
+        for k in keys_to_delete:
+            del st.session_state[k]
+        logger.info(f"清理状态: 删除了{len(keys_to_delete)}个键（前缀: {prefix}）")
+        return True
+    except Exception as e:
+        logger.error(f"清理状态失败: {e}")
+        return False
 
 
-# === Dashboard专用状态管理函数 ===
-
-def get_dashboard_state(key: str, default: Any = None) -> Any:
-    """
-    获取dashboard状态值
-
-    Args:
-        key: 状态键名
-        default: 默认值
-
-    Returns:
-        Any: 状态值
-    """
-    full_key = f"dashboard.{key}"
-    return st.session_state.get(full_key, default)
-
-
-@safe_operation(default_return=False, log_error=True)
-def set_dashboard_state(key: str, value: Any) -> bool:
-    """
-    设置dashboard状态值
-
-    Args:
-        key: 状态键名
-        value: 状态值
-
-    Returns:
-        bool: 设置是否成功
-    """
-    full_key = f"dashboard.{key}"
-    st.session_state[full_key] = value
-    return True
-
+# === 保留少量常用辅助函数以提供便利性 ===
 
 def get_staged_data() -> dict:
-    """
-    获取暂存数据
+    """获取暂存数据 - 常用操作，保留便利性"""
+    return st.session_state.get("dashboard.staged_data", {})
 
-    Returns:
-        dict: 暂存数据字典
-    """
-    return get_dashboard_state('staged_data', {})
-
-
-def get_staged_data_options() -> list:
-    """
-    获取暂存数据选项列表
-
-    Returns:
-        list: 数据集名称列表
-    """
-    staged_data = get_staged_data()
-    return [''] + list(staged_data.keys())
-
-
-@safe_operation(default_return=False, log_error=True)
-def clear_analysis_states(analysis_type: str) -> bool:
-    """
-    清理特定分析类型的状态
-
-    Args:
-        analysis_type: 分析类型 (stationarity, correlation, lead_lag)
-
-    Returns:
-        bool: 清理是否成功
-    """
-    prefix = f"analysis.{analysis_type}."
-    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
-    for k in keys_to_delete:
-        del st.session_state[k]
-    return True
-
-
-@safe_operation(default_return=False, log_error=True)
-def set_analysis_data(analysis_type: str, dataset_name: str, dataset_df: Any) -> bool:
-    """
-    设置分析数据
-
-    Args:
-        analysis_type: 分析类型
-        dataset_name: 数据集名称
-        dataset_df: 数据集DataFrame
-
-    Returns:
-        bool: 设置是否成功
-    """
-    key = f"analysis.{analysis_type}.{dataset_name}.data"
-    st.session_state[key] = dataset_df
-    return True
-
-
-def clear_analysis_data(analysis_type: str) -> bool:
-    """
-    清理分析数据
-
-    Args:
-        analysis_type: 分析类型
-
-    Returns:
-        bool: 清理是否成功
-    """
-    return clear_analysis_states(analysis_type)
-
-
-# === 通用状态管理函数 ===
-
-def get_tools_state(module_name: str, key: str, default: Any = None) -> Any:
-    """获取工具模块状态值（通用版本）"""
-    full_key = f"tools.{module_name}.{key}"
-    return st.session_state.get(full_key, default)
-
-@safe_operation(default_return=False, log_error=True)
-def set_tools_state(module_name: str, key: str, value: Any) -> bool:
-    """设置工具模块状态值（通用版本）"""
-    full_key = f"tools.{module_name}.{key}"
-    st.session_state[full_key] = value
-    return True
-
-# === 特定模块的状态管理函数 ===
-
-def get_property_state(key: str, default: Any = None) -> Any:
-    """获取explore模块状态值"""
-    return get_tools_state('explore', key, default)
-
-def set_property_state(key: str, value: Any) -> bool:
-    """设置explore模块状态值"""
-    return set_tools_state('explore', key, value)
-
-def get_exploration_state(module_name: str, key: str, default: Any = None) -> Any:
-    """获取数据探索模块状态"""
-    state_key = f'exploration.{module_name}.{key}'
-    return get_tools_state('property', state_key, default)
-
-def set_exploration_state(module_name: str, key: str, value: Any) -> bool:
-    """设置数据探索模块状态"""
-    state_key = f'exploration.{module_name}.{key}'
-    return set_tools_state('property', state_key, value)
-
-# === 特定功能的状态管理函数 ===
-
-def get_dtw_state(key: str, default: Any = None) -> Any:
-    """获取DTW分析状态"""
-    return get_tools_state('property', f'dtw.{key}', default)
-
-def set_dtw_state(key: str, value: Any) -> bool:
-    """设置DTW分析状态"""
-    return set_tools_state('property', f'dtw.{key}', value)
-
-# === 数据输入组件状态管理函数 ===
-
-def get_data_input_state(component_name: str, key: str, default: Any = None) -> Any:
-    """获取数据输入组件状态"""
-    return get_tools_state('data_input', f'{component_name}.{key}', default)
-
-def set_data_input_state(component_name: str, key: str, value: Any) -> bool:
-    """设置数据输入组件状态"""
-    return set_tools_state('data_input', f'{component_name}.{key}', value)
-
-def get_upload_state(key: str, default: Any = None) -> Any:
-    """获取数据上传状态"""
-    return get_data_input_state('upload', key, default)
-
-def set_upload_state(key: str, value: Any) -> bool:
-    """设置数据上传状态"""
-    return set_data_input_state('upload', key, value)
-
-def get_validation_state(key: str, default: Any = None) -> Any:
-    """获取数据验证状态"""
-    return get_data_input_state('validation', key, default)
-
-def set_validation_state(key: str, value: Any) -> bool:
-    """设置数据验证状态"""
-    return set_data_input_state('validation', key, value)
-
-def get_staging_state(key: str, default: Any = None) -> Any:
-    """获取数据暂存状态"""
-    return get_data_input_state('staging', key, default)
-
-def set_staging_state(key: str, value: Any) -> bool:
-    """设置数据暂存状态"""
-    return set_data_input_state('staging', key, value)
 
 def get_preview_state(key: str, default: Any = None) -> Any:
-    """获取数据预览状态"""
-    return get_data_input_state('preview', key, default)
+    """获取预览模块状态 - preview命名空间"""
+    full_key = f"preview.{key}"
+    return st.session_state.get(full_key, default)
+
 
 def set_preview_state(key: str, value: Any) -> bool:
-    """设置数据预览状态"""
-    return set_data_input_state('preview', key, value)
+    """设置预览模块状态 - preview命名空间"""
+    try:
+        full_key = f"preview.{key}"
+        st.session_state[full_key] = value
+        return True
+    except Exception as e:
+        logger.error(f"设置预览状态失败: {e}")
+        return False
+
 
 def get_all_preview_data(cache_key: Optional[str] = None) -> dict:
     """
-    批量获取所有预览数据
+    获取所有预览数据
 
     Args:
-        cache_key: 缓存键（通常是文件名，用于缓存失效判断）
+        cache_key: 缓存键(通常是文件名)，用于验证数据来源
 
     Returns:
-        dict: 包含所有预览数据的字典
-            - weekly_df, monthly_df, daily_df, ten_day_df, yearly_df: 各频率的DataFrame
-            - weekly_industries, monthly_industries等: 各频率的行业列表
-            - clean_industry_map: 行业映射
-            - source_map: 来源映射
-            - indicator_industry_map: 指标到行业的映射
-            - indicator_type_map: 指标到类型的映射
-            - indicator_unit_map: 指标到单位的映射
-            - data_loaded_files: 已加载的文件名
+        dict: 包含所有频率数据的字典，如{'日度': df, '周度': df, ...}
     """
-    return {
-        'weekly_df': get_preview_state('weekly_df'),
-        'monthly_df': get_preview_state('monthly_df'),
-        'daily_df': get_preview_state('daily_df'),
-        'ten_day_df': get_preview_state('ten_day_df'),
-        'yearly_df': get_preview_state('yearly_df'),
-        'weekly_industries': get_preview_state('weekly_industries', []),
-        'monthly_industries': get_preview_state('monthly_industries', []),
-        'daily_industries': get_preview_state('daily_industries', []),
-        'ten_day_industries': get_preview_state('ten_day_industries', []),
-        'yearly_industries': get_preview_state('yearly_industries', []),
-        'clean_industry_map': get_preview_state('clean_industry_map', {}),
-        'source_map': get_preview_state('source_map', {}),
-        'indicator_industry_map': get_preview_state('indicator_industry_map', {}),
-        'indicator_type_map': get_preview_state('indicator_type_map', {}),
-        'indicator_unit_map': get_preview_state('indicator_unit_map', {}),
-        'data_loaded_files': get_preview_state('data_loaded_files'),
-    }
+    # 如果指定了cache_key，验证当前加载的文件是否匹配
+    if cache_key:
+        loaded_file = get_preview_state('data_loaded_files')
+        if loaded_file != cache_key:
+            return {}
 
-@safe_operation(default_return=False, log_error=True)
+    # 收集所有频率的数据
+    all_data = {}
+    frequencies = ['daily', 'weekly', 'ten_day', 'monthly', 'yearly']
+    freq_names = ['日度', '周度', '旬度', '月度', '年度']
+
+    for freq_key, freq_name in zip(frequencies, freq_names):
+        df = get_preview_state(f'{freq_key}_df')
+        if df is not None and not df.empty:
+            all_data[freq_name] = df
+
+    return all_data
+
+
 def clear_preview_data() -> bool:
     """
-    清空所有预览数据状态
+    清理所有预览模块的数据
 
     Returns:
-        bool: 清理是否成功
+        bool: 是否成功清理
     """
-    prefix = 'tools.data_input.preview.'
-    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(prefix)]
-    for k in keys_to_delete:
-        del st.session_state[k]
-    logger.info(f"清空预览数据: 删除了{len(keys_to_delete)}个状态键")
-    return True
+    return clear_state_by_prefix("preview.")
 
-# === 导航状态缓存管理 ===
 
-def get_cached_navigation_state():
-    """获取导航状态"""
-    return {
-        'main_module': st.session_state.get("navigation.main_module"),
-        'sub_module': st.session_state.get("navigation.sub_module")
-    }
+def get_exploration_state(key: str, default: Any = None) -> Any:
+    """获取探索模块状态 - exploration命名空间"""
+    full_key = f"exploration.{key}"
+    return st.session_state.get(full_key, default)
 
-def is_in_data_exploration():
-    """检查是否在数据探索模块中（缓存版本）"""
-    nav_state = get_cached_navigation_state()
-    return nav_state['main_module'] == "数据探索"
 
-def get_current_navigation_info():
-    """获取当前导航信息（缓存版本）"""
-    nav_state = get_cached_navigation_state()
-    return nav_state['main_module'], nav_state['sub_module']
-
-# === 缓存管理 ===
-# 注：直接使用st.session_state，无需缓存清理
-
-# === 健康检查 ===
-
-def check_state_manager_health() -> bool:
-    """检查状态管理器健康状态"""
+def set_exploration_state(key: str, value: Any) -> bool:
+    """设置探索模块状态 - exploration命名空间"""
     try:
-        # 尝试简单的状态操作
-        test_key = "tools.test._health_check_test"
-        test_value = "test"
-
-        # 设置测试值
-        st.session_state[test_key] = test_value
-
-        # 读取测试值
-        retrieved_value = st.session_state.get(test_key)
-        if retrieved_value != test_value:
-            return False
-
-        # 清理测试值
-        del st.session_state[test_key]
-
-        logger.info("状态管理器健康检查通过")
+        full_key = f"exploration.{key}"
+        st.session_state[full_key] = value
         return True
-
     except Exception as e:
-        logger.error(f"状态管理器健康检查失败: {e}")
+        logger.error(f"设置探索状态失败: {e}")
         return False
 
-def detect_current_module():
-    """检测当前活跃的分析模块"""
-    return st.session_state.get("navigation.current_module", None)
 
-# === 模块信息 ===
+# === 按钮状态管理（从button_state_manager迁移）===
 
-__version__ = "1.0.0"
-__author__ = "UI优化团队"
-__description__ = "状态管理辅助函数模块"
+def clear_button_state_cache() -> None:
+    """清除UI缓存 - 简化版本"""
+    cache_prefix = "ui.cache"
+    keys_to_delete = [k for k in st.session_state.keys() if str(k).startswith(cache_prefix)]
+    for k in keys_to_delete:
+        del st.session_state[k]
 
-# 导出的公共接口
+
+# === 导出的公共接口 ===
+
 __all__ = [
-    # 统一接口
+    # 命名空间
     'StateNamespace',
+    # 基础接口
     'get_state',
     'set_state',
     'clear_state_by_prefix',
-    # 专用函数（向后兼容）
-    'get_tools_state',
-    'set_tools_state',
-    'get_property_state',
-    'set_property_state',
-    'get_exploration_state',
-    'set_exploration_state',
-    'get_dtw_state',
-    'set_dtw_state',
-    'get_cached_navigation_state',
-    'is_in_data_exploration',
-    'get_current_navigation_info',
-    'check_state_manager_health',
-    'detect_current_module',
-    # 数据输入组件状态管理函数
-    'get_data_input_state',
-    'set_data_input_state',
-    'get_upload_state',
-    'set_upload_state',
-    'get_validation_state',
-    'set_validation_state',
-    'get_staging_state',
-    'set_staging_state',
+    # 常用辅助函数
+    'get_staged_data',
+    # Preview模块专用
     'get_preview_state',
     'set_preview_state',
     'get_all_preview_data',
-    'clear_preview_data'
+    'clear_preview_data',
+    # Exploration模块专用
+    'get_exploration_state',
+    'set_exploration_state',
+    # 按钮状态管理
+    'clear_button_state_cache',
 ]

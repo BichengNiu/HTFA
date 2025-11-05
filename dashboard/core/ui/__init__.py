@@ -9,7 +9,6 @@ __author__ = "HFTA Development Team"
 
 # 导入核心组件
 from dashboard.core.ui.components.welcome import WelcomeComponent
-from dashboard.core.ui.components.navigation import NavigationComponent
 from dashboard.core.ui.components.layout import LayoutComponent
 from dashboard.core.ui.components.cards import ModuleCard, FeatureCard
 from dashboard.core.ui.utils.tab_detector import TabStateDetector
@@ -58,7 +57,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 __all__ = [
     'WelcomeComponent',
-    'NavigationComponent',
     'LayoutComponent',
     'ModuleCard',
     'FeatureCard',

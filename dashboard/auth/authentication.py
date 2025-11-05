@@ -10,15 +10,16 @@ import logging
 
 from dashboard.auth.database import AuthDatabase
 from dashboard.auth.models import User, UserSession
-from dashboard.auth.security import SecurityUtils, SecurityConfig
+from dashboard.auth.security import SecurityUtils
+from dashboard.auth.config import AuthConfig, DEFAULT_CONFIG
 
 
 class AuthManager:
     """认证管理器"""
 
-    def __init__(self, db_path: str = None, config: SecurityConfig = None):
+    def __init__(self, db_path: str = None, config: AuthConfig = None):
         """初始化认证管理器"""
-        self.config = config or SecurityConfig()
+        self.config = config or DEFAULT_CONFIG
         self.db = AuthDatabase(db_path)
         self.security = SecurityUtils(self.config)
         self.logger = logging.getLogger(__name__)
@@ -62,7 +63,6 @@ class AuthManager:
 
         self.db.update_user(user)
         self.audit_logger.info(f"登录尝试 - 用户: {user.username}, 状态: 成功")
-        self.logger.info(f"用户 {user.username} 登录成功")
 
         return True, user, ""
 

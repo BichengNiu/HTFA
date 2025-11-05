@@ -103,9 +103,9 @@ class WelcomeComponent(UIComponent):
         icon = sub_config.get('icon', '[DATA]')
         description = sub_config.get('description', '暂无描述')
         
-        # 使用模板管理器渲染子模块卡片
-        from dashboard.core.ui.constants import TemplateManager
-        card_html = TemplateManager.render_template(
+        # 使用模板函数渲染子模块卡片
+        from dashboard.core.ui.constants import render_template
+        card_html = render_template(
             'sub_module_card',
             icon=icon,
             title=sub_module,
@@ -124,9 +124,9 @@ class WelcomeComponent(UIComponent):
         icon = function_config['icon']
         description = function_config['description']
         
-        # 使用模板管理器渲染功能卡片
-        from dashboard.core.ui.constants import TemplateManager
-        card_html = TemplateManager.render_template(
+        # 使用模板函数渲染功能卡片
+        from dashboard.core.ui.constants import render_template
+        card_html = render_template(
             'function_card',
             icon=icon,
             title=name,

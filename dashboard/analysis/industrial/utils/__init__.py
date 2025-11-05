@@ -15,7 +15,7 @@ This module contains shared utility functions to eliminate code duplication:
 
 from dashboard.analysis.industrial.utils.time_filter import filter_data_by_time_range
 from dashboard.analysis.industrial.utils.weight_calculator import get_weight_for_year, filter_data_from_2012
-from dashboard.analysis.industrial.utils.data_converter import convert_cumulative_to_yoy
+from dashboard.analysis.industrial.utils.data_converter import convert_cumulative_to_yoy, convert_margin_to_yoy_diff
 from dashboard.analysis.industrial.utils.data_loader import (
     load_macro_data,
     load_weights_data,
@@ -78,6 +78,7 @@ __all__ = [
     'get_weight_for_year',
     'filter_data_from_2012',
     'convert_cumulative_to_yoy',
+    'convert_margin_to_yoy_diff',
     # 数据加载
     'load_macro_data',
     'load_weights_data',

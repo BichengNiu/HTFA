@@ -22,51 +22,65 @@ from dashboard.analysis.industrial.utils import load_macro_data, load_weights_da
 
 # 导入新的UI组件
 from dashboard.analysis.industrial.ui import (
-    IndustrialFileUploadComponent,
-    IndustrialWelcomeComponent
+    IndustrialFileUploadComponent
+)
+from dashboard.analysis.industrial.constants import (
+    STATE_NAMESPACE_INDUSTRIAL,
+    STATE_KEY_UPLOADED_FILE,
+    STATE_KEY_MACRO_TIME_RANGE_CHART1,
+    STATE_KEY_MACRO_TIME_RANGE_CHART2,
+    STATE_KEY_MACRO_TIME_RANGE_CHART3,
+    STATE_KEY_ENTERPRISE_TIME_RANGE_CHART1,
+    STATE_KEY_ENTERPRISE_TIME_RANGE_CHART2,
+    STATE_KEY_ENTERPRISE_TIME_RANGE_CHART3,
+    DEFAULT_TIME_RANGE
 )
 
 
-def get_industrial_state(key: str, default=None):
-    """获取工业分析模块状态"""
-    try:
-        import streamlit as st
-        full_key = f'industrial.analysis.{key}'
-        return st.session_state.get(full_key, default)
-    except Exception as e:
-        logger.error(f"获取工业分析状态失败: {e}")
-        return default
+def get_industrial_state(key: str, default_value=None):
+    """
+    获取工业分析模块的状态
+
+    Args:
+        key: 状态键
+        default_value: 默认值
+
+    Returns:
+        状态值，如果不存在则返回默认值
+    """
+    full_key = f'{STATE_NAMESPACE_INDUSTRIAL}.{key}'
+    return st.session_state.get(full_key, default_value)
 
 
-def set_industrial_state(key: str, value, is_initialization: bool = False):
-    """设置工业分析模块状态"""
-    try:
-        import streamlit as st
-        full_key = f'industrial.analysis.{key}'
-        st.session_state[full_key] = value
-        return True
-    except Exception as e:
-        logger.error(f"设置工业分析状态失败: {e}")
-        return False
+def set_industrial_state(key: str, value):
+    """
+    设置工业分析模块的状态
+
+    Args:
+        key: 状态键
+        value: 状态值
+    """
+    full_key = f'{STATE_NAMESPACE_INDUSTRIAL}.{key}'
+    st.session_state[full_key] = value
+
 
 def initialize_industrial_states():
-    """预初始化工业分析状态，避免第一次点击时刷新"""
-    try:
-        import streamlit as st
-        # 静默初始化企业经营时间筛选状态
-        enterprise_keys = [
-            'enterprise_time_range_chart1'
-        ]
+    """
+    初始化工业分析模块的时间范围状态
+    """
+    # 初始化宏观分析图表的时间范围状态
+    for key in [STATE_KEY_MACRO_TIME_RANGE_CHART1,
+                STATE_KEY_MACRO_TIME_RANGE_CHART2,
+                STATE_KEY_MACRO_TIME_RANGE_CHART3]:
+        if get_industrial_state(key) is None:
+            set_industrial_state(key, DEFAULT_TIME_RANGE)
 
-        for key in enterprise_keys:
-            full_key = f'industrial.analysis.{key}'
-            # 只有在状态不存在时才初始化
-            if full_key not in st.session_state:
-                st.session_state[full_key] = "3年"
-
-        return True
-    except Exception:
-        return False
+    # 初始化企业分析图表的时间范围状态
+    for key in [STATE_KEY_ENTERPRISE_TIME_RANGE_CHART1,
+                STATE_KEY_ENTERPRISE_TIME_RANGE_CHART2,
+                STATE_KEY_ENTERPRISE_TIME_RANGE_CHART3]:
+        if get_industrial_state(key) is None:
+            set_industrial_state(key, DEFAULT_TIME_RANGE)
 
 
 def render_unified_file_upload(st_obj) -> Optional[object]:
@@ -95,13 +109,13 @@ def load_and_cache_data(uploaded_file) -> Tuple[Optional[pd.DataFrame], Optional
     # 不需要手动缓存，避免双重缓存
     with st.spinner("正在处理数据..."):
         df_macro = load_macro_data(uploaded_file)
-        df_weights = load_weights_data(uploaded_file)
+        df_weights = load_weights_data()  # 从内部CSV文件读取
 
     # 错误提示
     if df_macro is None:
         st.error("分行业工业增加值同比增速数据加载失败，请检查文件是否包含'分行业工业增加值同比增速'工作表")
     if df_weights is None:
-        st.error("权重数据加载失败，请检查文件是否包含'工业增加值分行业指标权重'工作表")
+        st.error("内部权重数据加载失败，请联系管理员检查配置文件")
 
     return df_macro, df_weights
 
@@ -111,10 +125,9 @@ def render_macro_operations_with_data(st_obj, df_macro: Optional[pd.DataFrame], 
     使用共享数据渲染分行业工业增加值同比增速分析
     """
     if df_macro is not None and df_weights is not None:
-        # Store uploaded file using unified state management with proper namespace
+        # Store uploaded file using unified state management
         if uploaded_file is not None:
-            # 使用工业分析命名空间存储上传文件
-            set_industrial_state('macro.uploaded_file', uploaded_file)
+            st.session_state[f'{STATE_NAMESPACE_INDUSTRIAL}.{STATE_KEY_UPLOADED_FILE}'] = uploaded_file
 
         # 调用宏观运行分析，传入数据
         from dashboard.analysis.industrial.macro_analysis import render_macro_operations_analysis_with_data
@@ -139,25 +152,17 @@ def render_industrial_analysis(st_obj):
     Args:
         st_obj: Streamlit对象
     """
-    # 预初始化状态以避免第一次点击时刷新
-    initialize_industrial_states()
-
-    # 1. 统一文件上传
+    # 1. 统一文件上传（在侧边栏显示）
     uploaded_file = render_unified_file_upload(st_obj)
 
     # 2. 加载和缓存数据
     df_macro, df_weights = load_and_cache_data(uploaded_file)
-    
-    # 3. 创建标签页
-    if uploaded_file is not None:
-        tab_macro, tab_enterprise = st_obj.tabs(["工业增加值", "工业企业利润拆解"])
 
-        with tab_macro:
-            render_macro_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)
+    # 3. 始终创建标签页（右侧主区域）
+    tab_macro, tab_enterprise = st_obj.tabs(["工业增加值拉动率分析", "工业企业经营分析"])
 
-        with tab_enterprise:
-            render_enterprise_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)
-    else:
-        # 使用新的UI组件显示欢迎信息
-        welcome_component = IndustrialWelcomeComponent()
-        welcome_component.render(st_obj)
+    with tab_macro:
+        render_macro_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)
+
+    with tab_enterprise:
+        render_enterprise_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)

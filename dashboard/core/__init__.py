@@ -22,6 +22,8 @@ from dashboard.core.backend.navigation import (
     get_current_sub_module,
     set_current_main_module,
     set_current_sub_module,
+    is_transitioning,
+    set_transitioning,
     reset_navigation
 )
 
@@ -53,6 +55,8 @@ __all__ = [
     'get_current_sub_module',
     'set_current_main_module',
     'set_current_sub_module',
+    'is_transitioning',
+    'set_transitioning',
     'reset_navigation',
 
     # Resource Loading
