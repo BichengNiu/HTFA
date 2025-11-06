@@ -56,6 +56,11 @@ def load_macro_data(uploaded_file, sheet_name: str = '分行业工业增加值�
         # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
 
+        # 标准化日期索引为月初（解决图表时间轴错位问题）
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
+            logger.info(f"日期已标准化为月初格式")
+
         # 将0值转换为NaN（新版本数据中0代表缺失值）
         import numpy as np
         numeric_columns = df.select_dtypes(include=[np.number]).columns
@@ -160,6 +165,11 @@ def load_overall_industrial_data(uploaded_file, sheet_name: str = '总体工业�
         # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
 
+        # 标准化日期索引为月初（解决图表时间轴错位问题）
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
+            logger.info(f"日期已标准化为月初格式")
+
         # 将0值转换为NaN（新版本数据中0代表缺失值）
         import numpy as np
         numeric_columns = df.select_dtypes(include=[np.number]).columns
@@ -219,6 +229,11 @@ def load_profit_breakdown_data(uploaded_file, sheet_name: str = '分上中下游
         # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
 
+        # 标准化日期索引为月初（解决图表时间轴错位问题）
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
+            logger.info(f"日期已标准化为月初格式")
+
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df
 
@@ -256,11 +271,17 @@ def load_enterprise_profit_data(uploaded_file, sheet_name: str = '工业企业�
             file_input,
             sheet_name=sheet_name,
             header=0,
-            index_col=0
+            index_col=0,
+            parse_dates=True
         )
 
         # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+
+        # 标准化日期索引为月初（解决图表时间轴错位问题）
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
+            logger.info(f"日期已标准化为月初格式")
 
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df
@@ -313,6 +334,11 @@ def load_industry_profit_data(uploaded_file, sheet_name: Optional[str] = None) -
 
         # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+
+        # 标准化日期索引为月初（解决图表时间轴错位问题）
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
+            logger.info(f"日期已标准化为月初格式")
 
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df

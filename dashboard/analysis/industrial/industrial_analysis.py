@@ -134,7 +134,7 @@ def render_industrial_analysis(st_obj):
     df_macro, df_weights = load_and_cache_data(uploaded_file)
 
     # 3. 始终创建标签页（右侧主区域）
-    tab_macro, tab_enterprise = st_obj.tabs(["工业增加值拉动率分析", "工业企业经营分析"])
+    tab_macro, tab_enterprise = st_obj.tabs(["工业增加值分析", "工业企业经营分析"])
 
     with tab_macro:
         render_macro_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)

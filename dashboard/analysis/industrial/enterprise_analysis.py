@@ -153,7 +153,7 @@ def create_profit_contribution_chart(
 
         # 更新布局
         fig.update_layout(
-            title="",
+            title=dict(text="工业企业利润结构:分上中下游行业", font=dict(size=18)),
             xaxis=xaxis_config,
             yaxis=dict(
                 title=dict(text="%", font=dict(size=16)),
@@ -165,7 +165,7 @@ def create_profit_contribution_chart(
             barmode='relative',  # 相对堆积模式，正确处理正负值
             hovermode='x unified',
             height=600,
-            margin=dict(l=80, r=50, t=30, b=120),
+            margin=dict(l=80, r=50, t=50, b=120),
             showlegend=True,
             legend=dict(
                 orientation="h",
@@ -367,7 +367,7 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
 
         # 更新布局 - 移除所有文字，设置堆积条形图
         fig.update_layout(
-            title="",  # No chart title
+            title=dict(text="工业企业利润拆解", font=dict(size=18)),
             xaxis=xaxis_config,
             yaxis=dict(
                 title=dict(text="%", font=dict(size=16)),
@@ -379,7 +379,7 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
             barmode='relative',  # 设置为相对堆积模式，正确处理正负值堆叠
             hovermode='x unified',
             height=600,
-            margin=dict(l=80, r=50, t=30, b=120),
+            margin=dict(l=80, r=50, t=50, b=120),
             showlegend=True,
             legend=dict(
                 orientation="h",
