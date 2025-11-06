@@ -9,7 +9,7 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple
 
-from dashboard.preview.config import UI_TEXT, COLORS
+from dashboard.preview.modules.industrial.config import UI_TEXT, COLORS
 
 
 def _get_industry_indicators(selected_industry, df, clean_industry_map, source_map):

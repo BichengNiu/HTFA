@@ -9,7 +9,7 @@ import numpy as np
 import plotly.graph_objects as go
 from typing import Optional
 
-from dashboard.preview.config import PLOT_CONFIGS, COLORS
+from dashboard.preview.modules.industrial.config import PLOT_CONFIGS, COLORS
 
 
 def plot_indicator(series, name, frequency, current_year, previous_year=None, unit=None):

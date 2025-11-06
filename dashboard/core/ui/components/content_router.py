@@ -250,22 +250,46 @@ def route_to_content(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def render_data_preview_content(sub_module: Optional[str]) -> Dict[str, Any]:
     """
-    渲染数据预览内容 - 直接显示工业数据预览
+    渲染数据预览内容 - 支持多子模块
 
     Args:
-        sub_module: 子模块名称 (现在被忽略，直接显示工业数据预览)
+        sub_module: 子模块名称 ('工业', '能源', 等)
 
     Returns:
         Dict[str, Any]: 渲染结果
     """
-    # 直接渲染工业数据预览内容，不区分子模块
-    from dashboard.preview.main import display_industrial_tabs
-    from dashboard.preview.data_loader import extract_industry_name
+    from dashboard.preview.modules import PreviewModuleRegistry
 
-    logger.debug("渲染数据预览内容")
-    display_industrial_tabs(extract_industry_name)
+    # 映射中文名到英文标识
+    module_mapping = {
+        '工业': 'industrial',
+        '能源': 'energy'
+    }
 
-    return {'status': 'success', 'content_type': 'data_preview', 'sub_module': None}
+    if not sub_module:
+        st.info("请在左侧选择一个数据预览子模块")
+        return {'status': 'info', 'message': '未选择子模块'}
+
+    module_id = module_mapping.get(sub_module)
+    if not module_id:
+        st.error(f"未知的数据预览子模块: {sub_module}")
+        return {'status': 'error', 'message': f'未知子模块: {sub_module}'}
+
+    try:
+        # 使用注册表创建渲染器
+        renderer = PreviewModuleRegistry.create_renderer(module_id)
+        renderer.render()
+
+        return {
+            'status': 'success',
+            'content_type': 'data_preview',
+            'sub_module': sub_module,
+            'module_id': module_id
+        }
+    except Exception as e:
+        st.error(f"渲染数据预览内容失败: {e}")
+        logger.error(f"渲染数据预览失败: {e}", exc_info=True)
+        return {'status': 'error', 'message': str(e)}
 
 
 def render_monitoring_analysis_content(sub_module: Optional[str]) -> Dict[str, Any]:
@@ -453,10 +477,6 @@ def detect_navigation_level(main_module: str, sub_module: Optional[str]) -> str:
         str: 导航层次 ('MAIN_MODULE_ONLY', 'SUB_MODULE_ONLY', 'FUNCTION_ACTIVE')
     """
     try:
-        # 对于数据预览模块，直接显示内容（无子模块）
-        if main_module == '数据预览':
-            return 'FUNCTION_ACTIVE'
-
         # 对于数据探索模块，直接显示内容（无子模块）
         if main_module == '数据探索':
             return 'FUNCTION_ACTIVE'
@@ -468,6 +488,10 @@ def detect_navigation_level(main_module: str, sub_module: Optional[str]) -> str:
         # 如果没有子模块，说明只选择了主模块
         if not sub_module:
             return 'MAIN_MODULE_ONLY'
+
+        # 对于数据预览模块，如果已选择子模块，直接进入功能层
+        if main_module == '数据预览' and sub_module == '工业':
+            return 'FUNCTION_ACTIVE'
 
         # 对于监测分析模块，如果已选择子模块，直接进入功能层
         if main_module == '监测分析' and sub_module == '工业':
@@ -494,16 +518,21 @@ def render_module_selection_guide(main_module: str, guide_type: str, sub_module:
     """
     # 所有主模块都显示统一的欢迎页面样式
     if guide_type == 'sub_module':
-        # 对于数据预览模块，使用专门的欢迎页面
-        if main_module == '数据预览':
-            from dashboard.preview.ui.pages import DataPreviewWelcomePage
-            welcome_page = DataPreviewWelcomePage()
-        else:
-            # 对于其他模块，使用通用欢迎页面
-            from dashboard.preview.ui.pages import UniversalWelcomePage
-            welcome_page = UniversalWelcomePage(main_module)
+        # 显示简洁的欢迎页（居中显示）
+        st.markdown(f"""
+        <div style="
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 60vh;
+            text-align: center;
+        ">
+            <h1 style="font-size: 3em; margin-bottom: 1rem;">欢迎使用{main_module}</h1>
+            <hr style="width: 50%; border: 1px solid #ccc; margin-top: 1rem;">
+        </div>
+        """, unsafe_allow_html=True)
 
-        welcome_page.render(st)
         return {
             'status': 'success',
             'content_type': f'{main_module}_welcome',

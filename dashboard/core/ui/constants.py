@@ -23,7 +23,7 @@ class UIConstants:
         "数据预览": {
             "icon": "[DATA]",
             "description": "查看和预览各类经济数据，提供工业数据的全面展示和分析",
-            "sub_modules": None
+            "sub_modules": ["工业"]
         },
         "监测分析": {
             "icon": "[CHART]",
@@ -39,6 +39,18 @@ class UIConstants:
             "icon": "[EXPLORE]",
             "description": "深入探索时间序列数据的统计特性和内在规律，包括平稳性分析和相关性分析",
             "sub_modules": []
+        }
+    }
+
+    # 子模块配置
+    SUB_MODULES = {
+        "工业": {
+            "icon": "[INDUSTRY]",
+            "description": "工业数据的预览和分析，支持多频率数据展示（日度、周度、旬度、月度、年度）"
+        },
+        "DFM 模型": {
+            "icon": "[MODEL]",
+            "description": "动态因子模型分析工具，支持数据准备、模型训练、结果分析和新闻分解"
         }
     }
 

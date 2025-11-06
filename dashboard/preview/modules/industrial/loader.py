@@ -521,7 +521,8 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
     Returns:
         LoadedIndustrialData: 包含所有数据和映射的封装对象
     """
-    from dashboard.preview.data_processor_helpers import (
+    import streamlit as st
+    from dashboard.preview.modules.industrial.processor import (
         process_single_excel_file,
         merge_dataframes_by_type
     )
@@ -570,6 +571,7 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
 
     # 检查是否有数据被处理
     total_dfs = sum(len(dfs) for dfs in all_dfs_by_freq.values())
+
     if total_dfs == 0:
         warnings.warn("No files were successfully processed.")
         return LoadedIndustrialData(
@@ -652,8 +654,89 @@ def extract_industry_name(source_string: str) -> str:
         return str(source_string).split('|')[-1] or "未知"
 
 
+# === IndustrialLoader类（继承BaseDataLoader） ===
+
+from dashboard.preview.core.base_loader import BaseDataLoader
+from dashboard.preview.core.base_config import BasePreviewConfig
+from dashboard.preview.domain.models import LoadedPreviewData
+
+
+class IndustrialLoader(BaseDataLoader):
+    """工业数据加载器
+
+    继承BaseDataLoader，封装工业数据加载逻辑
+    """
+
+    def __init__(self, config: BasePreviewConfig):
+        """初始化工业数据加载器
+
+        Args:
+            config: 配置对象
+        """
+        super().__init__(config)
+
+    def load_and_process_data(self, files: List[Any]) -> LoadedPreviewData:
+        """加载并处理数据
+
+        Args:
+            files: 文件对象列表
+
+        Returns:
+            LoadedPreviewData: 标准化的数据对象
+        """
+        # 调用原有的load_and_process_data函数
+        industrial_data = load_and_process_data(files)
+
+        # 转换为LoadedPreviewData
+        return self._convert_to_preview_data(industrial_data)
+
+    def extract_industry_name(self, source: str) -> str:
+        """从数据源提取行业名称
+
+        Args:
+            source: 数据源字符串
+
+        Returns:
+            str: 行业名称
+        """
+        return extract_industry_name(source)
+
+    def get_state_namespace(self) -> str:
+        """获取状态命名空间
+
+        Returns:
+            str: 状态命名空间前缀
+        """
+        return 'preview.industrial'
+
+    def _convert_to_preview_data(self, industrial_data: 'LoadedIndustrialData') -> LoadedPreviewData:
+        """将LoadedIndustrialData转换为LoadedPreviewData
+
+        Args:
+            industrial_data: 工业数据对象
+
+        Returns:
+            LoadedPreviewData: 通用预览数据对象
+        """
+        return LoadedPreviewData(
+            dataframes={
+                'weekly': industrial_data.weekly_df,
+                'monthly': industrial_data.monthly_df,
+                'daily': industrial_data.daily_df,
+                'ten_day': industrial_data.ten_day_df,
+                'yearly': industrial_data.yearly_df
+            },
+            source_map=industrial_data.source_map,
+            indicator_industry_map=industrial_data.indicator_industry_map,
+            indicator_unit_map=industrial_data.indicator_unit_map,
+            indicator_type_map=industrial_data.indicator_type_map,
+            module_name='industrial'
+        )
+
+
 # 导出的公共接口
 __all__ = [
+    'IndustrialLoader',
     'load_and_process_data',
     'normalize_string',
     'extract_industry_name'

@@ -228,7 +228,9 @@ from dashboard.core.ui.utils.state_helpers import get_staged_data
 
 
 MODULE_CONFIG = {
-    "数据预览": None,  # 直接显示工业数据预览功能，不区分子模块
+    "数据预览": {
+        "工业": None  # 工业数据预览子模块
+    },
     "监测分析": {
         "工业": ["工业增加值", "工业企业利润"]
     },

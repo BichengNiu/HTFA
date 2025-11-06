@@ -1,33 +1,80 @@
 # Dashboard Preview 模块初始化
-# 导出主要的模块和函数
 
-# 数据加载
-from dashboard.preview.data_loader import load_and_process_data, normalize_string, LoadedIndustrialData
+# 核心抽象层
+from dashboard.preview.core import (
+    BasePreviewConfig,
+    FrequencyConfig,
+    BaseDataLoader,
+    BaseRenderer
+)
 
-# 新的统一模块
-from dashboard.preview.config import COLORS, UI_TEXT, UNIFIED_FREQUENCY_CONFIGS, PLOT_CONFIGS, SUMMARY_CONFIGS, FREQUENCY_ORDER
-from dashboard.preview.calculators import calculate_summary
-from dashboard.preview.plotting import plot_indicator
-from dashboard.preview.components import create_filter_ui, display_summary_table
-from dashboard.preview.tabs import display_time_series_tab, display_overview_tab
-from dashboard.preview.frequency_utils import (
+# 领域模型层
+from dashboard.preview.domain import LoadedPreviewData
+
+# 子模块管理
+from dashboard.preview.modules import PreviewModuleRegistry
+
+# 工业子模块
+from dashboard.preview.modules.industrial import (
+    IndustrialConfig,
+    IndustrialLoader,
+    IndustrialRenderer
+)
+
+# 共享组件
+from dashboard.preview.shared.frequency_utils import (
     get_indicator_frequencies,
     filter_indicators_by_frequency,
     iter_all_frequencies,
     create_empty_frequency_dict,
     get_all_frequency_names
 )
+from dashboard.preview.shared.calculators import calculate_summary
+from dashboard.preview.shared.plotting import plot_indicator
+from dashboard.preview.shared.components import create_filter_ui, display_summary_table
+from dashboard.preview.shared.tabs import display_time_series_tab, display_overview_tab
 
-# 主入口模块
-from dashboard.preview.main import display_industrial_tabs
+# 配置接口
+from dashboard.preview.modules.industrial.config import (
+    COLORS,
+    UI_TEXT,
+    UNIFIED_FREQUENCY_CONFIGS,
+    PLOT_CONFIGS,
+    SUMMARY_CONFIGS,
+    FREQUENCY_ORDER
+)
+
+# 数据加载接口
+from dashboard.preview.modules.industrial.loader import (
+    load_and_process_data,
+    normalize_string,
+    LoadedIndustrialData
+)
 
 __all__ = [
-    # 数据加载
+    # 核心抽象层
+    'BasePreviewConfig',
+    'FrequencyConfig',
+    'BaseDataLoader',
+    'BaseRenderer',
+
+    # 领域模型层
+    'LoadedPreviewData',
+
+    # 子模块管理
+    'PreviewModuleRegistry',
+
+    # 工业子模块
+    'IndustrialConfig',
+    'IndustrialLoader',
+    'IndustrialRenderer',
+
+    # 数据加载接口
     'load_and_process_data',
     'normalize_string',
     'LoadedIndustrialData',
 
-    # 配置
+    # 配置接口
     'COLORS',
     'UI_TEXT',
     'UNIFIED_FREQUENCY_CONFIGS',
@@ -35,7 +82,7 @@ __all__ = [
     'SUMMARY_CONFIGS',
     'FREQUENCY_ORDER',
 
-    # 核心功能
+    # 共享组件
     'calculate_summary',
     'plot_indicator',
     'create_filter_ui',
@@ -49,7 +96,4 @@ __all__ = [
     'iter_all_frequencies',
     'create_empty_frequency_dict',
     'get_all_frequency_names',
-
-    # 主入口
-    'display_industrial_tabs'
 ] 

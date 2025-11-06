@@ -11,13 +11,12 @@ import numpy as np
 from datetime import datetime
 import io
 
-from dashboard.preview.config import UNIFIED_FREQUENCY_CONFIGS, UI_TEXT
-from dashboard.preview.calculators import calculate_summary
-from dashboard.preview.plotting import plot_indicator
-from dashboard.preview.components import create_filter_ui, display_summary_table
+from dashboard.preview.modules.industrial.config import UNIFIED_FREQUENCY_CONFIGS, UI_TEXT, FREQUENCY_ORDER
+from dashboard.preview.shared.calculators import calculate_summary
+from dashboard.preview.shared.plotting import plot_indicator
+from dashboard.preview.shared.components import create_filter_ui, display_summary_table
 from dashboard.core.ui.utils.state_helpers import set_preview_state, get_preview_state
-from dashboard.preview.frequency_utils import get_indicator_frequencies, filter_indicators_by_frequency
-from dashboard.preview.config import FREQUENCY_ORDER
+from dashboard.preview.shared.frequency_utils import get_indicator_frequencies, filter_indicators_by_frequency
 
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=10)

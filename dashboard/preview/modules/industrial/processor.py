@@ -29,7 +29,7 @@ def read_indicator_mapping(
     Returns:
         Tuple[Dict, Dict, Dict]: (行业映射, 单位映射, 类型映射)
     """
-    from dashboard.preview.data_loader import normalize_string
+    from dashboard.preview.modules.industrial.loader import normalize_string
 
     industry_map = {}
     unit_map = {}
@@ -124,7 +124,7 @@ def determine_data_type(sheet_name: str) -> Optional[str]:
     Returns:
         Optional[str]: 数据类型 ('weekly'/'monthly'/'daily'/'ten_day'/'yearly' 或 None)
     """
-    from dashboard.preview.config import CHINESE_TO_ENGLISH_FREQ
+    from dashboard.preview.modules.industrial.config import CHINESE_TO_ENGLISH_FREQ
 
     # 使用配置字典，避免硬编码
     for chinese_name, english_name in CHINESE_TO_ENGLISH_FREQ.items():
@@ -241,7 +241,7 @@ def _process_periodic_frequency(
     Returns:
         pd.DataFrame: 处理后的DataFrame
     """
-    from dashboard.preview.data_loader import standardize_timestamps, apply_borrowing_logic
+    from dashboard.preview.modules.industrial.loader import standardize_timestamps, apply_borrowing_logic
 
     freq_name = '周度' if data_type == 'weekly' else '旬度'
     logger.debug(f"处理{freq_name}数据")
@@ -280,7 +280,7 @@ def process_frequency_specific(
     Returns:
         pd.DataFrame: 处理后的DataFrame
     """
-    from dashboard.preview.data_loader import normalize_string
+    from dashboard.preview.modules.industrial.loader import normalize_string
 
     # 月度数据特殊处理：工业增加值日期调整
     if data_type == "monthly":
@@ -430,33 +430,12 @@ def process_single_excel_file(
     }
     indicator_source_map = {}
 
-    # 处理文件输入 - 兼容多种文件对象类型
+    # 处理Streamlit上传的文件对象
     try:
-        # 优先使用Streamlit上传文件的getvalue()方法
-        if hasattr(file_input, 'getvalue'):
-            logger.info(f"[DEBUG] 使用getvalue()方法读取文件")
-            file_buffer = io.BytesIO(file_input.getvalue())
-            file_name_for_display = getattr(file_input, 'name', 'uploaded_file.xlsx')
-            logger.info(f"[DEBUG] 文件名: {file_name_for_display}, buffer大小: {len(file_buffer.getvalue())} bytes")
-        # 否则尝试使用read()方法(普通文件对象)
-        elif hasattr(file_input, 'read'):
-            logger.info(f"[DEBUG] 使用read()方法读取文件")
-            content = file_input.read()
-            if isinstance(content, bytes):
-                file_buffer = io.BytesIO(content)
-            else:
-                file_buffer = io.BytesIO(content.encode())
-            file_input.seek(0)  # 重置文件指针
-            file_name_for_display = getattr(file_input, 'name', 'uploaded_file.xlsx')
-            logger.info(f"[DEBUG] 文件名: {file_name_for_display}, buffer大小: {len(file_buffer.getvalue())} bytes")
-        else:
-            logger.error(f"[DEBUG] 不支持的文件类型: {type(file_input)}")
-            warnings.warn(f"Unsupported file input type: {type(file_input)}")
-            return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
+        file_buffer = io.BytesIO(file_input.getvalue())
+        file_name_for_display = file_input.name
     except Exception as e:
-        logger.error(f"[DEBUG] 文件读取失败: {e}")
-        import traceback
-        logger.error(f"[DEBUG] {traceback.format_exc()}")
+        logger.error(f"文件读取失败: {e}")
         warnings.warn(f"Failed to read file: {e}")
         return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
     source_name_base = file_name_for_display.rsplit('.', 1)[0] if '.' in file_name_for_display else file_name_for_display
@@ -528,7 +507,7 @@ def merge_dataframes_by_type(
     Returns:
         Dict[str, pd.DataFrame]: 数据类型到合并后DataFrame的字典
     """
-    from dashboard.preview.config import ENGLISH_TO_CHINESE_FREQ
+    from dashboard.preview.modules.industrial.config import ENGLISH_TO_CHINESE_FREQ
 
     result = {}
 

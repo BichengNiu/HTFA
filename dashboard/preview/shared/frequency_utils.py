@@ -5,10 +5,15 @@ Preview模块频率处理工具
 消除硬编码，提供统一的频率访问接口
 """
 
-from typing import Dict, List, Set, Callable, Any, Optional, Iterator, Tuple
+from typing import Dict, List, Set, Optional, Iterator, Any
 import pandas as pd
 
-from dashboard.preview.config import UNIFIED_FREQUENCY_CONFIGS, FREQUENCY_ORDER, CHINESE_TO_ENGLISH_FREQ, ENGLISH_TO_CHINESE_FREQ
+from dashboard.preview.modules.industrial.config import (
+    UNIFIED_FREQUENCY_CONFIGS,
+    FREQUENCY_ORDER,
+    CHINESE_TO_ENGLISH_FREQ,
+    ENGLISH_TO_CHINESE_FREQ
+)
 
 
 def get_indicator_frequencies(indicator: str, all_data_dict: Dict[str, pd.DataFrame]) -> List[str]:
@@ -69,9 +74,6 @@ def filter_indicators_by_frequency(
                 result[freq_name] = indicators
 
     return result
-
-
-# === 频率迭代和字典构建工具（消除硬编码） ===
 
 
 def iter_all_frequencies(use_english: bool = True) -> Iterator[str]:
@@ -137,8 +139,6 @@ def create_empty_frequency_dict(default_value: Any = None, use_english: bool = T
     return result
 
 
-
-
 def get_all_frequency_names(use_english: bool = True) -> List[str]:
     """获取所有频率名称列表
 
@@ -155,5 +155,3 @@ def get_all_frequency_names(use_english: bool = True) -> List[str]:
         ['周度', '月度', '日度', '旬度', '年度']
     """
     return list(iter_all_frequencies(use_english))
-
-

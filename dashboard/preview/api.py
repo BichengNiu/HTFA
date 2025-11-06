@@ -9,7 +9,7 @@ import pandas as pd
 from typing import Dict, Any, Union
 import logging
 
-from dashboard.preview.data_loader import load_and_process_data, LoadedIndustrialData
+from dashboard.preview.modules.industrial.loader import load_and_process_data, LoadedIndustrialData
 
 logger = logging.getLogger(__name__)
 

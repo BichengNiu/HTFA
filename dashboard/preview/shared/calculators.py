@@ -9,7 +9,7 @@ import numpy as np
 from typing import Dict, Any, List, Tuple, Optional
 import streamlit as st
 
-from dashboard.preview.config import SUMMARY_CONFIGS
+from dashboard.preview.modules.industrial.config import SUMMARY_CONFIGS
 
 
 @st.cache_data(show_spinner=False, max_entries=30, ttl=3600)

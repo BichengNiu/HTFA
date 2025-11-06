@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 import logging
 
-from dashboard.preview.data_loader import load_and_process_data
-from dashboard.preview.tabs import display_time_series_tab, display_overview_tab
+from dashboard.preview.modules.industrial.loader import load_and_process_data
+from dashboard.preview.shared.tabs import display_time_series_tab, display_overview_tab
 from dashboard.core.ui.utils.state_helpers import get_preview_state, set_preview_state
 
 logger = logging.getLogger(__name__)
