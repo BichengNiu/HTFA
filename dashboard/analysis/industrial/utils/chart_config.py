@@ -36,40 +36,46 @@ CHART_COLORS: List[str] = [
 ]
 
 # 图表尺寸
-CHART_HEIGHT_STANDARD: int = 500
-CHART_HEIGHT_COMPACT: int = 350
+CHART_HEIGHT_STANDARD: int = 600
+CHART_HEIGHT_COMPACT: int = 500
 
 # 图表边距
 CHART_MARGIN_STANDARD: Dict[str, int] = {
-    'l': 50,
+    'l': 80,
     'r': 50,
     't': 30,
-    'b': 80
+    'b': 120
 }
 
 CHART_MARGIN_WITH_LEGEND: Dict[str, int] = {
-    'l': 50,
+    'l': 80,
     'r': 50,
     't': 40,
-    'b': 150
+    'b': 180
 }
+
+# 字体大小配置
+FONT_SIZE_AXIS_TITLE: int = 16
+FONT_SIZE_AXIS_TICK: int = 14
+FONT_SIZE_LEGEND: int = 14
 
 # 图例配置
 LEGEND_CONFIG_BOTTOM_CENTER: Dict = {
     'orientation': "h",
     'yanchor': "top",
-    'y': -0.1,
+    'y': -0.18,
     'xanchor': "center",
-    'x': 0.5
+    'x': 0.5,
+    'font': dict(size=FONT_SIZE_LEGEND)
 }
 
 LEGEND_CONFIG_BOTTOM_CENTER_LARGE: Dict = {
     'orientation': "h",
     'yanchor': "top",
-    'y': -0.25,
+    'y': -0.30,
     'xanchor': "center",
     'x': 0.5,
-    'font': dict(family="SimHei, Microsoft YaHei, Arial")
+    'font': dict(size=FONT_SIZE_LEGEND)
 }
 
 # 坐标轴配置
@@ -149,6 +155,8 @@ def create_xaxis_config(
     config['dtick'] = dtick
     config['tickformat'] = tickformat
     config['hoverformat'] = "%Y-%m"  # 修复hover显示：只显示年月
+    config['tickfont'] = dict(size=FONT_SIZE_AXIS_TICK)
+    config['title'] = dict(text="", font=dict(size=FONT_SIZE_AXIS_TITLE))
 
     if tickangle != 0:
         config['tickangle'] = tickangle
@@ -170,7 +178,8 @@ def create_yaxis_config(title: str = "") -> Dict:
         Y轴配置字典
     """
     config = YAXIS_CONFIG_BASE.copy()
-    config['title'] = title
+    config['title'] = dict(text=title, font=dict(size=FONT_SIZE_AXIS_TITLE))
+    config['tickfont'] = dict(size=FONT_SIZE_AXIS_TICK)
     return config
 
 

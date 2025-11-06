@@ -17,402 +17,173 @@ from dashboard.analysis.industrial.utils import (
     convert_cumulative_to_yoy,
     convert_margin_to_yoy_diff,
     filter_data_by_time_range,
-    load_profit_breakdown_data,
     load_enterprise_profit_data,
     create_excel_download_button
 )
-
-# 数据加载函数已移至utils.data_loader模块，删除重复代码
-# 原函数：read_profit_breakdown_data → load_profit_breakdown_data
-# 原函数：read_enterprise_profit_data → load_enterprise_profit_data
-
-
-# ============================================================================
-# 利润分组计算辅助函数（已重构 - 消除205行长函数）
-# ============================================================================
-
-def _build_industry_weights_mapping(df_weights: pd.DataFrame) -> dict:
-    """
-    构建行业名称到权重信息的映射
-
-    Args:
-        df_weights: 权重数据DataFrame
-
-    Returns:
-        dict: {指标名称: {'出口依赖': 值, '上中下游': 值}}
-    """
-    weights_mapping = {}
-    for _, row in df_weights.iterrows():
-        indicator_name = row['指标名称']
-        if pd.notna(indicator_name):
-            weights_mapping[indicator_name] = {
-                '出口依赖': row['出口依赖'],
-                '上中下游': row['上中下游']
-            }
-    return weights_mapping
-
-
-def _match_industry_name(industry_col: str, weights_mapping: dict) -> Optional[str]:
-    """
-    匹配权重数据中的行业指标名称
-
-    匹配策略：
-    1. 精确匹配
-    2. 正则表达式提取行业名称匹配
-    3. 部分字符串匹配
-
-    Args:
-        industry_col: 利润拆解数据的列名
-        weights_mapping: 权重映射字典
-
-    Returns:
-        匹配的指标名称，未找到则返回None
-    """
-    import re
-
-    # 策略1：精确匹配
-    if industry_col in weights_mapping:
-        return industry_col
-
-    # 策略2：使用正则表达式提取行业名称进行匹配
-    # 从利润拆解列名中提取行业名称（格式: 规模以上工业企业:利润总额:行业名称:累计值）
-    profit_match = re.search(r'规模以上工业企业:利润总额:([^:]+):累计值', industry_col)
-    if profit_match:
-        profit_industry = profit_match.group(1)
-
-        # 在权重数据中查找匹配的行业
-        for indicator in weights_mapping.keys():
-            # 从权重指标名称中提取行业名称（格式: 规模以上工业增加值:行业名称:当月同比）
-            weight_match = re.search(r'规模以上工业增加值:([^:]+):当月同比', indicator)
-            if weight_match:
-                weight_industry = weight_match.group(1)
-                if profit_industry == weight_industry:
-                    return indicator
-
-    # 策略3：部分字符串匹配
-    for indicator in weights_mapping.keys():
-        if industry_col in indicator or indicator in industry_col:
-            return indicator
-
-    return None
-
-
-def _classify_industries_by_groups(industry_columns: pd.Index, weights_mapping: dict) -> tuple:
-    """
-    按分组分类行业（出口依赖、上中下游）
-
-    Args:
-        industry_columns: 行业列索引
-        weights_mapping: 权重映射字典
-
-    Returns:
-        (export_groups, stream_groups) 两个字典
-        - export_groups: {分组名: [列名列表]}
-        - stream_groups: {分组名: [列名列表]}
-    """
-    export_groups = {}
-    stream_groups = {}
-
-    for col in industry_columns:
-        matched_indicator = _match_industry_name(col, weights_mapping)
-
-        if matched_indicator and matched_indicator in weights_mapping:
-            info = weights_mapping[matched_indicator]
-            export_dep = info['出口依赖']
-            stream_type = info['上中下游']
-
-            # 分组到出口依赖
-            if pd.notna(export_dep):
-                if export_dep not in export_groups:
-                    export_groups[export_dep] = []
-                export_groups[export_dep].append(col)
-
-            # 分组到上中下游
-            if pd.notna(stream_type):
-                if stream_type not in stream_groups:
-                    stream_groups[stream_type] = []
-                stream_groups[stream_type].append(col)
-
-    return export_groups, stream_groups
-
-
-def _aggregate_group_profits(df_profit_breakdown: pd.DataFrame,
-                             export_groups: dict,
-                             stream_groups: dict) -> tuple:
-    """
-    按照映射汇总各分组的利润累计值
-
-    使用向量化操作提高性能（相比原实现使用循环）
-
-    Args:
-        df_profit_breakdown: 利润拆解数据
-        export_groups: 出口依赖分组映射
-        stream_groups: 上中下游分组映射
-
-    Returns:
-        (export_group_profits, stream_group_profits) 两个字典
-        - export_group_profits: {分组名: pd.Series（利润总额）}
-        - stream_group_profits: {分组名: pd.Series（利润总额）}
-    """
-    # 出口依赖分组利润汇总（向量化操作）
-    export_group_profits = {}
-    for group_name, columns in export_groups.items():
-        if columns:
-            # 使用向量化操作：直接对所有列求和（性能优化）
-            valid_columns = [col for col in columns if col in df_profit_breakdown.columns]
-            if valid_columns:
-                group_profit = df_profit_breakdown[valid_columns].sum(axis=1)
-                export_group_profits[group_name] = group_profit
-
-    # 上中下游分组利润汇总（向量化操作）
-    stream_group_profits = {}
-    for group_name, columns in stream_groups.items():
-        if columns:
-            # 使用向量化操作
-            valid_columns = [col for col in columns if col in df_profit_breakdown.columns]
-            if valid_columns:
-                group_profit = df_profit_breakdown[valid_columns].sum(axis=1)
-                stream_group_profits[group_name] = group_profit
-
-    return export_group_profits, stream_group_profits
-
-
-def _calculate_group_yoy(group_profits: dict, prefix: str, result_df: pd.DataFrame) -> None:
-    """
-    计算各分组的年同比增速并添加到结果DataFrame
-
-    Args:
-        group_profits: {分组名: pd.Series（利润总额）}
-        prefix: 列名前缀（'出口依赖_' 或 '上中下游_'）
-        result_df: 结果DataFrame（会被原地修改）
-    """
-    for group_name, group_profit in group_profits.items():
-        group_yoy = convert_cumulative_to_yoy(group_profit)
-        result_df[f'{prefix}{group_name}_利润累计同比'] = group_yoy
-
-
-def _calculate_total_profit_yoy(df_index: pd.Index,
-                               stream_group_profits: dict,
-                               result_df: pd.DataFrame) -> pd.Series:
-    """
-    计算总利润同比，使用上中下游分组的动态权重加权和
-
-    公式：总同比 = Σ(分组同比 × 分组权重)
-    其中，分组权重 = 分组利润 / 总利润
-
-    Args:
-        df_index: 时间索引
-        stream_group_profits: 上中下游分组利润字典
-        result_df: 包含分组同比的结果DataFrame
-
-    Returns:
-        pd.Series: 总利润累计同比
-    """
-    total_profit_yoy = pd.Series(index=df_index, dtype=float)
-    total_profit_yoy[:] = 0.0
-
-    for idx in df_index:
-        # 1月和2月数据设为NaN（累计同比无意义）
-        if hasattr(idx, 'month') and idx.month in [1, 2]:
-            total_profit_yoy.loc[idx] = float('nan')
-            continue
-
-        # 计算总利润（所有上中下游分组利润之和）
-        total_profit_at_idx = sum(
-            stream_group_profits[group_name].loc[idx]
-            for group_name in stream_group_profits.keys()
-        )
-
-        if total_profit_at_idx > 0:
-            # 使用动态权重计算总同比
-            total_weighted_sum = 0.0
-
-            for group_name in stream_group_profits.keys():
-                group_col = f'上中下游_{group_name}_利润累计同比'
-                if group_col in result_df.columns:
-                    group_profit = stream_group_profits[group_name].loc[idx]
-                    group_yoy = result_df[group_col].loc[idx]
-
-                    if pd.notna(group_yoy) and group_profit > 0:
-                        # 动态权重 = 该分组利润 / 总利润
-                        weight = group_profit / total_profit_at_idx
-                        total_weighted_sum += weight * group_yoy
-
-            total_profit_yoy.loc[idx] = total_weighted_sum
-        else:
-            total_profit_yoy.loc[idx] = float('nan')
-
-    return total_profit_yoy
-
-
-def calculate_grouped_profit_yoy(df_profit_breakdown: pd.DataFrame, df_weights: pd.DataFrame) -> pd.DataFrame:
-    """
-    根据权重数据中的分组映射，计算分组利润总额累计同比
-
-    重构说明（P0-3优化）：
-    - 原函数205行 → 拆分为6个辅助函数，每个函数职责单一
-    - 提高了代码可读性和可维护性
-    - 在 _aggregate_group_profits 中使用向量化操作，提升性能
-    - 便于单元测试每个子步骤
-    - 遵循KISS原则：每个函数只做一件事
-
-    Args:
-        df_profit_breakdown: 分上中下游利润拆解数据
-        df_weights: 权重数据，包含出口依赖、上中下游映射
-
-    Returns:
-        DataFrame: 包含各分组利润总额累计同比的数据
-    """
-    try:
-        # 数据验证
-        if df_profit_breakdown is None or df_profit_breakdown.empty:
-            return pd.DataFrame()
-        if df_weights is None or df_weights.empty:
-            return pd.DataFrame()
-        if len(df_profit_breakdown.columns) < 2:
-            return pd.DataFrame()
-
-        # 获取分行业利润数据（第3列到最后一列）
-        industry_columns = df_profit_breakdown.columns[2:]
-        if len(industry_columns) == 0:
-            return pd.DataFrame()
-
-        # 初始化结果DataFrame
-        result_df = pd.DataFrame(index=df_profit_breakdown.index)
-
-        # 步骤1：构建行业权重映射
-        weights_mapping = _build_industry_weights_mapping(df_weights)
-
-        # 步骤2：按分组分类行业
-        export_groups, stream_groups = _classify_industries_by_groups(
-            industry_columns, weights_mapping
-        )
-
-        # 步骤3：按照映射汇总各分组的利润累计值（向量化操作）
-        export_group_profits, stream_group_profits = _aggregate_group_profits(
-            df_profit_breakdown, export_groups, stream_groups
-        )
-
-        # 步骤4：计算各分组的年同比
-        _calculate_group_yoy(export_group_profits, '出口依赖_', result_df)
-        _calculate_group_yoy(stream_group_profits, '上中下游_', result_df)
-
-        # 步骤5：计算总利润同比（使用上中下游分组的动态权重加权和）
-        total_profit_yoy = _calculate_total_profit_yoy(
-            df_profit_breakdown.index, stream_group_profits, result_df
-        )
-
-        # 将总同比添加到结果的第一列
-        result_df.insert(0, '工业企业累计利润总额累计同比', total_profit_yoy)
-
-        return result_df
-
-    except KeyError as e:
-        logger.warning(f"数据列不存在，无法计算分组利润: {e}")
-        return pd.DataFrame()
-    except ValueError as e:
-        logger.warning(f"数据值错误，无法计算分组利润: {e}")
-        return pd.DataFrame()
-    except TypeError as e:
-        logger.warning(f"数据类型错误，无法计算分组利润: {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        logger.error(f"计算分组利润时发生未预期错误: {e}", exc_info=True)
-        return pd.DataFrame()
-
-
-# ============================================================================
-# 图表Fragment辅助函数（消除重复代码）
-# ============================================================================
-
-from typing import Callable, Tuple
-
-
-def _create_enterprise_chart_fragment(
-    st_obj,
-    chart_title: str,
-    state_key: str,
-    chart_func: Callable,
-    chart_data: pd.DataFrame,
-    radio_key_base: str,
-    chart_key: str,
-    initialize_states: bool = False
-) -> Tuple[str, Optional[str], Optional[str]]:
-    """
-    企业经营分析图表Fragment辅助函数
-
-    用于消除第1、2、3个图表中的重复代码（约136行 → ~21行）
-
-    Args:
-        st_obj: Streamlit对象
-        chart_title: 图表标题（Markdown格式）
-        state_key: 状态管理key
-        chart_func: 图表创建函数
-        chart_data: 图表数据
-        radio_key_base: Radio控件key前缀
-        chart_key: 图表显示key
-        initialize_states: 是否预初始化状态（仅第1个图表需要）
-
-    Returns:
-        (time_range, custom_start, custom_end) 元组
-    """
-    @st_obj.fragment
-    def render():
-        st_obj.markdown(chart_title)
-
-        from dashboard.analysis.industrial.industrial_analysis import get_industrial_state, set_industrial_state
-
-        # 预初始化状态（仅第1个图表需要）
-        if initialize_states:
-            from dashboard.analysis.industrial.industrial_analysis import initialize_industrial_states
-            initialize_industrial_states()
-
-        current_time_range = get_industrial_state(state_key, "3年")
-        time_range_options = ["1年", "3年", "5年", "全部", "自定义"]
-        default_index = time_range_options.index(current_time_range) if current_time_range in time_range_options else 1
-
-        time_range = st_obj.radio(
-            "时间范围",
-            time_range_options,
-            index=default_index,
-            horizontal=True,
-            key=f"{radio_key_base}_time_range_selector",
-            label_visibility="collapsed"
-        )
-
-        if time_range != current_time_range:
-            set_industrial_state(state_key, time_range)
-
-        custom_start = None
-        custom_end = None
-        if time_range == "自定义":
-            col_start, col_end = st_obj.columns([1, 1])
-            with col_start:
-                custom_start = st_obj.text_input(
-                    "开始年月",
-                    placeholder="2020-01",
-                    key=f"{radio_key_base}_custom_start_date"
-                )
-            with col_end:
-                custom_end = st_obj.text_input(
-                    "结束年月",
-                    placeholder="2024-12",
-                    key=f"{radio_key_base}_custom_end_date"
-                )
-
-        fig = chart_func(chart_data, time_range, custom_start, custom_end)
-
-        if fig is not None:
-            st_obj.plotly_chart(fig, use_container_width=True, key=chart_key)
-
-        return time_range, custom_start, custom_end
-
-    return render()
 
 
 # ============================================================================
 # 图表创建函数
 # ============================================================================
+
+
+def create_profit_contribution_chart(
+    df_contribution: pd.DataFrame,
+    total_growth: pd.Series,
+    time_range: str = "3年",
+    custom_start_date: Optional[str] = None,
+    custom_end_date: Optional[str] = None
+) -> Optional[go.Figure]:
+    """
+    创建工业企业利润分行业拉动率图表（堆叠柱状图+折线图）
+
+    Args:
+        df_contribution: 上中下游拉动率DataFrame
+        total_growth: 总体增速Series
+        time_range: 时间范围选择
+        custom_start_date: 自定义开始日期
+        custom_end_date: 自定义结束日期
+
+    Returns:
+        plotly Figure对象
+    """
+    try:
+        from dashboard.analysis.industrial.utils import filter_data_by_time_range
+
+        # 应用时间过滤
+        filtered_contribution = filter_data_by_time_range(
+            df_contribution, time_range, custom_start_date, custom_end_date
+        )
+        filtered_total_growth = filter_data_by_time_range(
+            total_growth.to_frame('total'), time_range, custom_start_date, custom_end_date
+        )['total']
+
+        if filtered_contribution.empty or filtered_total_growth.empty:
+            logger.warning("过滤后数据为空")
+            return None
+
+        # 创建图表
+        fig = go.Figure()
+
+        # 先添加总体增速折线图（确保在legend和hover中排第一）
+        if not filtered_total_growth.empty:
+            y_data_line = filtered_total_growth.dropna()
+
+            if not y_data_line.empty:
+                fig.add_trace(go.Scatter(
+                    x=y_data_line.index,
+                    y=y_data_line,
+                    mode='lines+markers',
+                    name='利润总额累计同比',
+                    line=dict(width=4, color='#1f77b4'),
+                    marker=dict(size=7),
+                    connectgaps=False,
+                    hovertemplate='<b>利润总额累计同比</b><br>' +
+                                  '时间: %{x|%Y年%m月}<br>' +
+                                  '数值: %{y:.2f}%<extra></extra>'
+                ))
+
+        # 定义颜色映射规则（按上游、中游、下游分类）
+        def get_color_for_stream(col_name):
+            """根据列名返回对应的颜色"""
+            if '上游' in col_name:
+                return '#d62728'  # 红色
+            elif '中游' in col_name:
+                return '#ff7f0e'  # 橙色
+            elif '下游' in col_name:
+                return '#2ca02c'  # 绿色
+            else:
+                return '#1f77b4'  # 默认蓝色
+
+        # 获取所有上中下游列，并按上游、中游、下游排序
+        stream_cols = [col for col in filtered_contribution.columns if col.startswith('上中下游_')]
+
+        # 自定义排序：上游优先，然后中游，最后下游
+        def stream_sort_key(col_name):
+            if '上游' in col_name:
+                return (0, col_name)
+            elif '中游' in col_name:
+                return (1, col_name)
+            elif '下游' in col_name:
+                return (2, col_name)
+            else:
+                return (3, col_name)
+
+        stream_cols_sorted = sorted(stream_cols, key=stream_sort_key)
+
+        # 添加堆叠柱状图
+        for stream_col in stream_cols_sorted:
+            y_data = filtered_contribution[stream_col].dropna()
+
+            if not y_data.empty:
+                # 获取图例名称（去掉前缀）
+                legend_name = stream_col.replace('上中下游_', '')
+                color = get_color_for_stream(stream_col)
+
+                fig.add_trace(go.Bar(
+                    x=y_data.index,
+                    y=y_data,
+                    name=legend_name,
+                    marker_color=color,
+                    opacity=0.8,
+                    hovertemplate=f'<b>{legend_name}</b><br>' +
+                                  '时间: %{x|%Y年%m月}<br>' +
+                                  '拉动率: %{y:.2f}百分点<extra></extra>'
+                ))
+
+        # 计算数据范围
+        min_date = filtered_contribution.index.min()
+        max_date = filtered_contribution.index.max()
+
+        # 配置x轴
+        xaxis_config = dict(
+            title=dict(text="", font=dict(size=16)),
+            type="date",
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='lightgray',
+            dtick="M3",  # 3个月间隔
+            tickformat="%Y-%m",
+            hoverformat="%Y-%m",
+            tickfont=dict(size=14)
+        )
+
+        if min_date and max_date:
+            xaxis_config['range'] = [min_date, max_date]
+
+        # 更新布局
+        fig.update_layout(
+            title="",
+            xaxis=xaxis_config,
+            yaxis=dict(
+                title=dict(text="%", font=dict(size=16)),
+                showgrid=True,
+                gridwidth=1,
+                gridcolor='lightgray',
+                tickfont=dict(size=14)
+            ),
+            barmode='relative',  # 相对堆积模式，正确处理正负值
+            hovermode='x unified',
+            height=600,
+            margin=dict(l=80, r=50, t=30, b=120),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="top",
+                y=-0.18,
+                xanchor="center",
+                x=0.5,
+                font=dict(size=14)
+            ),
+            plot_bgcolor='white',
+            paper_bgcolor='white'
+        )
+
+        return fig
+
+    except Exception as e:
+        logger.error(f"创建利润拉动率图表时发生错误: {e}", exc_info=True)
+        return None
 
 
 def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = "3年",
@@ -431,71 +202,65 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
         plotly Figure对象
     """
     try:
+        logger.info(f"[调试] create_enterprise_indicators_chart开始: df形状={df_data.shape}")
+        logger.info(f"[调试] df_data索引类型={type(df_data.index)}, 索引前5个值={df_data.index[:5].tolist() if len(df_data.index) > 0 else []}")
+        logger.info(f"[调试] 时间范围={time_range}, 自定义开始={custom_start_date}, 自定义结束={custom_end_date}")
+
         # Apply time filtering first
         filtered_df = filter_data_by_time_range(df_data, time_range, custom_start_date, custom_end_date)
+        logger.info(f"[调试] 过滤后df形状={filtered_df.shape}")
+        logger.info(f"[调试] 过滤后索引类型={type(filtered_df.index)}, 索引前5个值={filtered_df.index[:5].tolist() if len(filtered_df.index) > 0 else []}")
 
-        # 定义需要的四个指标
+        # 定义需要的四个指标（使用标准列名）
+        from dashboard.analysis.industrial.constants import (
+            PROFIT_TOTAL_COLUMN,
+            CUMULATIVE_INDUSTRIAL_GROWTH_COLUMN,
+            PPI_COLUMN,
+            PROFIT_MARGIN_COLUMN_YOY
+        )
+
         required_indicators = [
-            '中国:利润总额:规模以上工业企业:累计同比',
-            '中国:工业增加值:规模以上工业企业:累计同比',
-            'PPI:累计同比',
-            '规模以上工业企业:营业收入利润率:累计同比'
+            PROFIT_TOTAL_COLUMN,
+            CUMULATIVE_INDUSTRIAL_GROWTH_COLUMN,
+            PPI_COLUMN,
+            PROFIT_MARGIN_COLUMN_YOY
         ]
 
         # 检查哪些指标存在于数据中
-        available_indicators = []
-
-        # 首先尝试精确匹配
-        for indicator in required_indicators:
-            exact_match = [col for col in df_data.columns if col == indicator]
-            if exact_match:
-                available_indicators.append(exact_match[0])
-                continue
-
-            # 尝试关键词匹配
-            keywords_to_match = []
-            if '工业增加值' in indicator and '累计同比' in indicator:
-                keywords_to_match = ['工业增加值', '累计同比']
-            elif '利润总额' in indicator and '累计同比' in indicator:
-                keywords_to_match = ['利润总额', '累计同比']
-            elif '营业收入利润率' in indicator and '累计同比' in indicator:
-                keywords_to_match = ['营业收入利润率', '累计同比']
-            elif 'PPI' in indicator and '累计同比' in indicator:
-                keywords_to_match = ['PPI', '累计同比']
-
-            if keywords_to_match:
-                partial_matches = [col for col in df_data.columns
-                                 if all(keyword in str(col) for keyword in keywords_to_match)]
-                if partial_matches:
-                    available_indicators.append(partial_matches[0])
-                    continue
-
-            # 最后尝试单个关键词匹配
-            single_keyword_matches = [col for col in df_data.columns
-                                    if any(keyword in str(col) for keyword in indicator.split(':'))]
-            if single_keyword_matches:
-                available_indicators.append(single_keyword_matches[0])
+        available_indicators = [ind for ind in required_indicators if ind in df_data.columns]
+        logger.info(f"[调试] 可用指标数量={len(available_indicators)}, 指标={available_indicators}")
 
         if not available_indicators:
+            logger.warning("[调试] 没有可用指标，返回None")
             return None
 
         # 处理数据 - 改为更灵活的缺失数据策略
         complete_data_df = filtered_df[available_indicators].copy()
+        logger.info(f"[调试] complete_data_df初始形状={complete_data_df.shape}")
+        logger.info(f"[调试] complete_data_df前5行:\n{complete_data_df.head()}")
 
         # 转换所有列为数值型
         for col in complete_data_df.columns:
             complete_data_df[col] = pd.to_numeric(complete_data_df[col], errors='coerce')
 
-        # 新策略：只要有至少3个指标有数据就显示（而不是要求全部4个）
+        logger.info(f"[调试] 转换为数值型后，各列非空值数量:\n{complete_data_df.count()}")
+
+        # 新策略：降低要求，只要有至少1个指标有数据就显示
         # 计算每行的非空值数量
         non_null_counts = complete_data_df.count(axis=1)
+        logger.info(f"[调试] 每行非空值统计:\n{non_null_counts.describe()}")
+        logger.info(f"[调试] 非空值数量分布:\n{non_null_counts.value_counts().sort_index()}")
 
-        # 保留至少有3个指标数据的行
-        min_indicators = 3
+        # 保留至少有1个指标数据的行（降低要求）
+        min_indicators = 1
         valid_rows = non_null_counts >= min_indicators
+        logger.info(f"[调试] 满足最少{min_indicators}个指标的行数: {valid_rows.sum()} / {len(valid_rows)}")
+
         complete_data_df = complete_data_df[valid_rows]
+        logger.info(f"[调试] 过滤后complete_data_df形状={complete_data_df.shape}")
 
         if complete_data_df.empty:
+            logger.warning("[调试] 过滤后数据为空，返回None")
             return None
 
         # 创建图表
@@ -535,17 +300,15 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
                     is_line_indicator = any(line_key in indicator for line_key in line_indicators)
 
                     if is_line_indicator:
-                        # 添加线图，使用xperiod让数据点居中对齐到月份
+                        # 添加线图
                         fig.add_trace(go.Scatter(
                             x=y_data.index,
                             y=y_data,
                             mode='lines+markers',
                             name=get_legend_name(indicator),
-                            line=dict(width=2.5, color=colors[i % len(colors)]),
-                            marker=dict(size=4),
+                            line=dict(width=4, color=colors[i % len(colors)]),
+                            marker=dict(size=7),
                             connectgaps=False,  # 不连接缺失点
-                            xperiod="M1",  # 周期为1个月
-                            xperiodalignment="middle",  # 数据点居中对齐
                             hovertemplate=f'<b>{get_legend_name(indicator)}</b><br>' +
                                           '时间: %{x|%Y年%m月}<br>' +
                                           '数值: %{y:.2f}%<extra></extra>'
@@ -566,15 +329,13 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
                         opacity_value = 0.9 - (i * 0.15)  # 0.9, 0.75, 0.6, 0.45...
                         opacity_value = max(0.5, opacity_value)  # 最小透明度为0.5
 
-                        # 添加堆积条形图，使用xperiod让柱子居中对齐到月份
+                        # 添加堆积条形图
                         fig.add_trace(go.Bar(
                             x=y_data.index,
                             y=y_data,
                             name=get_legend_name(indicator),
                             marker_color=colors[i % len(colors)],
                             opacity=opacity_value,
-                            xperiod="M1",  # 周期为1个月
-                            xperiodalignment="middle",  # 柱子居中对齐
                             hovertemplate=f'<b>{get_legend_name(indicator)}</b><br>' +
                                           '时间: %{x|%Y年%m月}<br>' +
                                           '数值: %{y:.2f}%<extra></extra>'
@@ -589,13 +350,15 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
 
         # Configure x-axis with 3-month intervals
         xaxis_config = dict(
-            title="",  # No x-axis title
+            title=dict(text="", font=dict(size=16)),  # No x-axis title
             type="date",
             showgrid=True,
             gridwidth=1,
             gridcolor='lightgray',
             dtick="M3",  # 3-month intervals
-            hoverformat="%Y-%m"  # 修复hover显示：只显示年月
+            tickformat="%Y-%m",  # 时间轴刻度显示格式：年-月
+            hoverformat="%Y-%m",  # 鼠标悬停显示格式：年-月
+            tickfont=dict(size=14)
         )
 
         # Set the range to actual data if available
@@ -607,22 +370,24 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
             title="",  # No chart title
             xaxis=xaxis_config,
             yaxis=dict(
-                title="",  # No y-axis title
+                title=dict(text="%", font=dict(size=16)),
                 showgrid=True,
                 gridwidth=1,
-                gridcolor='lightgray'
+                gridcolor='lightgray',
+                tickfont=dict(size=14)
             ),
             barmode='relative',  # 设置为相对堆积模式，正确处理正负值堆叠
             hovermode='x unified',
-            height=500,
-            margin=dict(l=50, r=50, t=30, b=80),
+            height=600,
+            margin=dict(l=80, r=50, t=30, b=120),
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="top",
-                y=-0.1,
+                y=-0.18,
                 xanchor="center",
-                x=0.5
+                x=0.5,
+                font=dict(size=14)
             ),
             plot_bgcolor='white',
             paper_bgcolor='white'
@@ -644,195 +409,6 @@ def create_enterprise_indicators_chart(df_data: pd.DataFrame, time_range: str = 
         return None
 
 
-def create_profit_chart_unified(df_grouped_profit: pd.DataFrame,
-                               filter_prefix: str,
-                               filter_suffix: str = '_利润累计同比',
-                               time_range: str = "3年",
-                               custom_start_date: Optional[str] = None,
-                               custom_end_date: Optional[str] = None) -> Optional[go.Figure]:
-    """
-    统一的利润图表创建函数（消除重复代码）
-
-    这个函数替代了：
-    - create_upstream_downstream_profit_chart (132行)
-    - create_export_dependency_profit_chart (132行)
-
-    Args:
-        df_grouped_profit: 包含分组利润累计同比数据的DataFrame
-        filter_prefix: 列名前缀（如 '上中下游_' 或 '出口依赖_'）
-        filter_suffix: 列名后缀（默认 '_利润累计同比'）
-        time_range: 时间范围选择
-        custom_start_date: 自定义开始日期
-        custom_end_date: 自定义结束日期
-
-    Returns:
-        plotly Figure对象
-    """
-    try:
-        if df_grouped_profit is None or df_grouped_profit.empty:
-            return None
-
-        # 应用时间过滤
-        filtered_df = filter_data_by_time_range(df_grouped_profit, time_range, custom_start_date, custom_end_date)
-
-        if filtered_df.empty:
-            return None
-
-        # 创建图表
-        fig = go.Figure()
-
-        # 定义颜色
-        colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-
-        # 添加工业企业累计利润总额累计同比（线图）
-        if '工业企业累计利润总额累计同比' in filtered_df.columns:
-            total_profit_data = filtered_df['工业企业累计利润总额累计同比'].dropna()
-            if not total_profit_data.empty:
-                fig.add_trace(go.Scatter(
-                    x=total_profit_data.index,
-                    y=total_profit_data,
-                    mode='lines+markers',
-                    name='工业企业累计利润总额累计同比',
-                    line=dict(width=2.5, color=colors[0]),
-                    marker=dict(size=4),
-                    connectgaps=False,
-                    xperiod="M1",  # 周期为1个月
-                    xperiodalignment="middle",  # 数据点居中对齐
-                    hovertemplate='<b>工业企业累计利润总额累计同比</b><br>' +
-                                  '时间: %{x|%Y年%m月}<br>' +
-                                  '数值: %{y:.2f}%<extra></extra>'
-                ))
-
-        # 添加分组数据（条形图）
-        # 收集所有符合条件的分组列
-        group_columns = []
-        for col in filtered_df.columns:
-            if filter_prefix in col and filter_suffix in col:
-                group_columns.append(col)
-
-        # 按名称排序以保持一致性
-        group_columns.sort()
-
-        color_index = 1  # 从第二个颜色开始
-
-        for col in group_columns:
-            group_data = filtered_df[col].dropna()
-            if not group_data.empty:
-                # 清理列名用于显示
-                if col.startswith(filter_prefix) and col.endswith(filter_suffix):
-                    # 提取中间部分
-                    display_name = col[len(filter_prefix):-len(filter_suffix)]
-                else:
-                    # 回退逻辑
-                    display_name = col.replace(filter_prefix, '').replace(filter_suffix, '')
-
-                # 计算透明度
-                opacity_value = 0.9 - ((color_index - 1) * 0.15)
-                opacity_value = max(0.5, opacity_value)
-
-                fig.add_trace(go.Bar(
-                    x=group_data.index,
-                    y=group_data,
-                    name=display_name,
-                    marker_color=colors[color_index % len(colors)],
-                    opacity=opacity_value,
-                    xperiod="M1",  # 周期为1个月
-                    xperiodalignment="middle",  # 柱子居中对齐
-                    hovertemplate=f'<b>{display_name}</b><br>' +
-                                  '时间: %{x|%Y年%m月}<br>' +
-                                  '数值: %{y:.2f}%<extra></extra>'
-                ))
-                color_index += 1
-
-        # 设置x轴配置
-        min_date = filtered_df.index.min() if not filtered_df.empty else None
-        max_date = filtered_df.index.max() if not filtered_df.empty else None
-
-        xaxis_config = dict(
-            title="",
-            type="date",
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='lightgray',
-            dtick="M3",
-            hoverformat="%Y-%m"  # 修复hover显示：只显示年月
-        )
-
-        if min_date and max_date:
-            xaxis_config['range'] = [min_date, max_date]
-
-        # 更新布局
-        fig.update_layout(
-            title="",
-            xaxis=xaxis_config,
-            yaxis=dict(
-                title="",
-                showgrid=True,
-                gridwidth=1,
-                gridcolor='lightgray'
-            ),
-            barmode='relative',
-            hovermode='x unified',
-            height=500,
-            margin=dict(l=50, r=50, t=30, b=100),  # 增加底部边距确保图例空间充足
-            showlegend=True,
-            legend=dict(
-                orientation="h",
-                yanchor="top",
-                y=-0.15,  # 固定图例位置，避免自动调整
-                xanchor="center",
-                x=0.5,
-                tracegroupgap=0  # 减少trace组间距
-            ),
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-
-        return fig
-
-    except KeyError as e:
-        logger.warning(f"创建利润图表时列不存在: {e}")
-        return None
-    except ValueError as e:
-        logger.warning(f"创建利润图表时数据值错误: {e}")
-        return None
-    except pd.errors.EmptyDataError:
-        logger.warning("利润数据为空")
-        return None
-    except Exception as e:
-        logger.error(f"创建利润图表时发生未预期错误: {e}", exc_info=True)
-        return None
-
-
-# 便捷接口函数
-def create_upstream_downstream_profit_chart(df_grouped_profit: pd.DataFrame, time_range: str = "3年",
-                                          custom_start_date: Optional[str] = None,
-                                          custom_end_date: Optional[str] = None) -> Optional[go.Figure]:
-    """创建上中下游分组利润总额累计同比图表"""
-    return create_profit_chart_unified(
-        df_grouped_profit,
-        filter_prefix='上中下游_',
-        filter_suffix='_利润累计同比',
-        time_range=time_range,
-        custom_start_date=custom_start_date,
-        custom_end_date=custom_end_date
-    )
-
-
-def create_export_dependency_profit_chart(df_grouped_profit: pd.DataFrame, time_range: str = "3年",
-                                         custom_start_date: Optional[str] = None,
-                                         custom_end_date: Optional[str] = None) -> Optional[go.Figure]:
-    """创建出口依赖分组利润总额累计同比图表"""
-    return create_profit_chart_unified(
-        df_grouped_profit,
-        filter_prefix='出口依赖_',
-        filter_suffix='_利润累计同比',
-        time_range=time_range,
-        custom_start_date=custom_start_date,
-        custom_end_date=custom_end_date
-    )
-
-
 def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[pd.DataFrame], df_weights: Optional[pd.DataFrame], uploaded_file=None):
     """
     使用预加载数据渲染企业经营分析（用于统一模块）
@@ -847,19 +423,20 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
     if uploaded_file is None:
         uploaded_file = st.session_state.get("analysis.industrial.unified_file_uploader")
 
-    # Remove title text as requested
-
     if uploaded_file is None:
-        # Remove info text as requested
         return
 
     # 读取企业利润拆解数据
     df_profit = load_enterprise_profit_data(uploaded_file)
 
     if df_profit is None:
+        logger.error("[调试] load_enterprise_profit_data返回None")
+        st_obj.error("错误：无法加载企业利润数据")
         return
 
-    # Remove success message and data overview as requested
+    logger.info(f"[调试] 加载企业利润数据成功，形状: {df_profit.shape}")
+    logger.info(f"[调试] df_profit列名: {list(df_profit.columns)}")
+    logger.info(f"[调试] df_profit前3行:\n{df_profit.head(3)}")
 
     # 处理"规模以上工业企业:营业收入利润率:累计值"转换为年同比
     profit_margin_col = None
@@ -868,10 +445,16 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
             profit_margin_col = col
             break
 
-    # 处理日期列并设置为索引
-    date_col = df_profit.columns[0]
-    df_profit[date_col] = pd.to_datetime(df_profit[date_col], errors='coerce')
-    df_profit_with_index = df_profit.set_index(date_col)
+    # 检查索引是否已经是DatetimeIndex（load_enterprise_profit_data已经处理过）
+    if not isinstance(df_profit.index, pd.DatetimeIndex):
+        # 如果不是，则手动处理日期列并设置为索引
+        date_col = df_profit.columns[0]
+        df_profit[date_col] = pd.to_datetime(df_profit[date_col], errors='coerce')
+        df_profit_with_index = df_profit.set_index(date_col)
+    else:
+        # 如果已经是DatetimeIndex，直接使用
+        df_profit_with_index = df_profit
+        logger.info("[调试] 数据已包含DatetimeIndex，无需重新设置")
 
     if profit_margin_col:
         # 计算年同比：(当期值/去年同期值 - 1) × 100
@@ -889,23 +472,76 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
     df_profit = df_profit_with_index[~jan_feb_mask]
 
     # 调试日志：打印过滤前后的数据月份信息
-    logger.info(f"过滤前数据行数: {len(df_profit_with_index)}, 过滤后数据行数: {len(df_profit)}")
-    logger.info(f"过滤后数据月份分布: {df_profit.index.month.value_counts().sort_index().to_dict()}")
+    logger.info(f"[调试] 过滤1月2月前数据行数: {len(df_profit_with_index)}, 过滤后数据行数: {len(df_profit)}")
+    logger.info(f"[调试] 过滤后数据月份分布: {df_profit.index.month.value_counts().sort_index().to_dict()}")
     if len(df_profit) > 0:
-        logger.info(f"过滤后数据日期范围: {df_profit.index.min()} 到 {df_profit.index.max()}")
+        logger.info(f"[调试] 过滤后数据日期范围: {df_profit.index.min()} 到 {df_profit.index.max()}")
+        logger.info(f"[调试] 过滤后df_profit形状: {df_profit.shape}")
+        logger.info(f"[调试] 过滤后df_profit列名: {list(df_profit.columns)}")
+    else:
+        logger.error("[调试] 过滤1月2月后，数据为空！")
+        st_obj.error("错误：过滤1月2月后，数据为空！请检查上传的Excel文件。")
+        return
 
-    # Remove section title as requested
+    # 图表1：工业企业利润拆解（添加时间筛选器）
+    st_obj.markdown("#### 工业企业利润分析")
 
-    # 图表1：利润总额拆解（使用统一Fragment组件 - P1-4优化）
-    time_range, custom_start, custom_end = _create_enterprise_chart_fragment(
+    # 使用Fragment组件添加时间筛选器
+    from dashboard.analysis.industrial.utils import (
+        create_chart_with_time_selector_fragment,
+        IndustrialStateManager
+    )
+    from dashboard.analysis.industrial.constants import (
+        PROFIT_TOTAL_COLUMN,
+        CUMULATIVE_INDUSTRIAL_GROWTH_COLUMN,
+        PPI_COLUMN,
+        PROFIT_MARGIN_COLUMN_YOY
+    )
+
+    # 定义图表1的变量
+    chart1_variables = [
+        PROFIT_TOTAL_COLUMN,
+        CUMULATIVE_INDUSTRIAL_GROWTH_COLUMN,
+        PPI_COLUMN,
+        PROFIT_MARGIN_COLUMN_YOY
+    ]
+
+    # 过滤出存在的变量
+    available_vars = [var for var in chart1_variables if var in df_profit.columns]
+
+    # 添加调试信息显示
+    logger.info(f"[调试] df_profit形状: {df_profit.shape}")
+    logger.info(f"[调试] df_profit列名: {list(df_profit.columns)}")
+    logger.info(f"[调试] 可用变量: {available_vars}")
+
+    if not available_vars:
+        st_obj.error(f"错误：未找到任何必需的指标列！数据列名: {list(df_profit.columns[:5])}")
+        return
+
+    # 定义图表创建函数（包装create_enterprise_indicators_chart以符合Fragment接口）
+    def create_chart1(df, variables, time_range, custom_start_date, custom_end_date):
+        logger.info(f"[调试] create_chart1调用: df形状={df.shape}, variables={variables}")
+        logger.info(f"[调试] df列名: {list(df.columns)}")
+        fig = create_enterprise_indicators_chart(
+            df_data=df,
+            time_range=time_range,
+            custom_start_date=custom_start_date,
+            custom_end_date=custom_end_date
+        )
+        logger.info(f"[调试] 图表创建结果: {fig is not None}")
+        return fig
+
+    # 使用Fragment组件
+    current_time_range_1, custom_start_1, custom_end_1 = create_chart_with_time_selector_fragment(
         st_obj=st_obj,
-        chart_title="#### 工业企业利润拆解",
-        state_key='enterprise_time_range_chart1',
-        chart_func=create_enterprise_indicators_chart,
+        chart_id="enterprise_chart1",
+        state_namespace="monitoring.industrial.enterprise",
+        chart_title=None,
+        chart_creator_func=create_chart1,
         chart_data=df_profit,
-        radio_key_base="industrial_enterprise_operations_fragment",
-        chart_key="enterprise_operations_chart_1_fragment",
-        initialize_states=True  # 第1个图表需要预初始化
+        chart_variables=available_vars,
+        get_state_func=IndustrialStateManager.get,
+        set_state_func=IndustrialStateManager.set
     )
 
     # 添加第一个图表的数据下载功能 - 下载所有时间的完整数据
@@ -919,14 +555,108 @@ def render_enterprise_operations_analysis_with_data(st_obj, df_macro: Optional[p
             column_ratio=(1, 3)
         )
 
+    # ============================================================================
+    # 分割线 - 分行业利润拆解
+    # ============================================================================
+    st_obj.markdown("---")
 
+    # 加载分行业利润数据
+    from dashboard.analysis.industrial.utils import load_industry_profit_data
+    from dashboard.analysis.industrial.utils.contribution_calculator import calculate_profit_contributions
 
-def render_enterprise_operations_tab(st_obj):
-    """
-    企业经营分析标签页
+    df_industry_profit = load_industry_profit_data(uploaded_file)
 
-    Args:
-        st_obj: Streamlit 对象
-    """
-    # 直接调用新的分析函数
-    render_enterprise_operations_analysis_with_data(st_obj, None, None)
+    if df_industry_profit is None:
+        logger.error("[调试] 无法加载分行业利润数据")
+        st_obj.error("错误：无法加载分行业利润数据")
+        return
+
+    logger.info(f"[调试] 分行业利润数据形状: {df_industry_profit.shape}")
+    logger.info(f"[调试] 分行业利润数据列数: {len(df_industry_profit.columns)}")
+
+    if df_weights is None:
+        st_obj.error("错误：缺少权重数据，无法进行利润拆解分析")
+        return
+
+    # 计算利润拉动率
+    try:
+        profit_contribution_result = calculate_profit_contributions(
+            df_industry_profit=df_industry_profit,
+            df_weights=df_weights
+        )
+
+        stream_contribution_df = profit_contribution_result['stream_groups']
+        individual_contribution_df = profit_contribution_result['individual']
+        total_growth_series = profit_contribution_result['total_growth']
+        validation_result = profit_contribution_result['validation']
+
+        logger.info(f"[调试] 利润拉动率计算完成")
+        logger.info(f"[调试] 上中下游分组数: {len(stream_contribution_df.columns)}")
+        logger.info(f"[调试] 验证通过: {validation_result['passed']}")
+
+        # 定义图表2的创建函数
+        def create_chart2(df, variables, time_range, custom_start_date, custom_end_date):
+            # df是stream_contribution_df，但我们还需要total_growth_series
+            # 这里通过闭包访问total_growth_series
+            fig = create_profit_contribution_chart(
+                df_contribution=df,
+                total_growth=total_growth_series,
+                time_range=time_range,
+                custom_start_date=custom_start_date,
+                custom_end_date=custom_end_date
+            )
+            return fig
+
+        # 使用Fragment组件创建图表2
+        available_vars_chart2 = list(stream_contribution_df.columns)
+
+        if available_vars_chart2:
+            current_time_range_2, custom_start_2, custom_end_2 = create_chart_with_time_selector_fragment(
+                st_obj=st_obj,
+                chart_id="enterprise_chart2",
+                state_namespace="monitoring.industrial.enterprise",
+                chart_title=None,
+                chart_creator_func=create_chart2,
+                chart_data=stream_contribution_df,
+                chart_variables=available_vars_chart2,
+                get_state_func=IndustrialStateManager.get,
+                set_state_func=IndustrialStateManager.set
+            )
+        else:
+            st_obj.warning("未找到上中下游拉动率数据")
+
+        # 添加拉动率数据下载功能
+        if not stream_contribution_df.empty:
+            # 合并拉动率数据和总体增速
+            download_df = stream_contribution_df.copy()
+
+            # 去掉列名中的"上中下游_"前缀
+            download_df.columns = [col.replace('上中下游_', '') for col in download_df.columns]
+
+            # 添加总体增速列（放在第一列）
+            download_df.insert(0, '利润总额累计同比', total_growth_series)
+
+            # 按时间降序排列（近到远）
+            download_df = download_df.sort_index(ascending=False)
+
+            # 重置索引，并将日期格式化为"年-月"
+            download_df = download_df.reset_index()
+            # 将第一列（索引列）重命名为'时间'
+            first_col = download_df.columns[0]
+            download_df.rename(columns={first_col: '时间'}, inplace=True)
+            download_df['时间'] = download_df['时间'].dt.strftime('%Y-%m')
+
+            create_excel_download_button(
+                st_obj=st_obj,
+                data=download_df,
+                file_name="分行业利润拆解_拉动率数据.xlsx",
+                sheet_name='拉动率',
+                button_key="industrial_profit_contribution_download_button",
+                column_ratio=(1, 3)
+            )
+
+    except Exception as e:
+        logger.error(f"计算利润拉动率时发生错误: {e}", exc_info=True)
+        st_obj.error(f"计算利润拉动率失败：{str(e)}")
+        return
+

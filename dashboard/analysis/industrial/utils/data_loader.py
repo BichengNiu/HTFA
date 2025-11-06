@@ -168,20 +168,12 @@ def load_overall_industrial_data(uploaded_file, sheet_name: str = '总体工业�
         logger.info(f"已将0值转换为NaN")
 
         # 特殊处理：对总体工业增加值当月同比的1月和2月数据设为NaN
-        # 兼容新旧两种列名格式
-        target_column_old = "规模以上工业增加值:当月同比"
-        target_column_new = "中国:工业增加值:规模以上工业企业:当月同比"
+        from dashboard.analysis.industrial.constants import TOTAL_INDUSTRIAL_GROWTH_COLUMN
 
-        target_column = None
-        if target_column_old in df.columns:
-            target_column = target_column_old
-        elif target_column_new in df.columns:
-            target_column = target_column_new
-
-        if target_column and hasattr(df.index, 'month'):
+        if TOTAL_INDUSTRIAL_GROWTH_COLUMN in df.columns and hasattr(df.index, 'month'):
             jan_feb_mask = (df.index.month == 1) | (df.index.month == 2)
-            df.loc[jan_feb_mask, target_column] = np.nan
-            logger.info(f"已将{target_column}的1月和2月数据设为NaN")
+            df.loc[jan_feb_mask, TOTAL_INDUSTRIAL_GROWTH_COLUMN] = np.nan
+            logger.info(f"已将{TOTAL_INDUSTRIAL_GROWTH_COLUMN}的1月和2月数据设为NaN")
 
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df
@@ -259,11 +251,64 @@ def load_enterprise_profit_data(uploaded_file, sheet_name: str = '工业企业�
         elif hasattr(uploaded_file, 'path'):
             file_input = uploaded_file.path
 
-        # 统一格式读取：第一行是列名，第一列是时间（不设置为索引）
+        # 统一格式读取：第一行是列名，第一列是时间（设置为索引）
         df = pd.read_excel(
             file_input,
             sheet_name=sheet_name,
-            header=0
+            header=0,
+            index_col=0
+        )
+
+        # 清理数据：删除全为空的行和列
+        df = df.dropna(how='all').dropna(axis=1, how='all')
+
+        logger.info(f"{sheet_name}数据形状: {df.shape}")
+        return df
+
+    except Exception as e:
+        logger.error(f"读取{sheet_name}数据失败: {e}")
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_industry_profit_data(uploaded_file, sheet_name: Optional[str] = None) -> Optional[pd.DataFrame]:
+    """
+    加载分行业工业企业利润数据：第一行是列名，第一列是时间列
+
+    列名格式：规模以上工业企业:利润总额:行业名称:累计值
+    示例：规模以上工业企业:利润总额:专用设备制造业:累计值
+
+    性能优化：添加缓存装饰器，避免重复读取相同文件（缓存1小时）
+
+    Args:
+        uploaded_file: 上传的Excel文件对象或文件路径
+        sheet_name: Excel工作表名称，默认使用SHEET_NAME_INDUSTRY_PROFIT常量
+
+    Returns:
+        DataFrame: 包含分行业利润数据（时间为索引），如果读取失败则返回None
+    """
+    from dashboard.analysis.industrial.constants import SHEET_NAME_INDUSTRY_PROFIT
+
+    if sheet_name is None:
+        sheet_name = SHEET_NAME_INDUSTRY_PROFIT
+
+    try:
+        logger.info(f"读取{sheet_name}数据")
+
+        # 处理不同类型的文件输入
+        file_input = uploaded_file
+        if hasattr(uploaded_file, 'getvalue'):
+            file_input = BytesIO(uploaded_file.getvalue())
+        elif hasattr(uploaded_file, 'path'):
+            file_input = uploaded_file.path
+
+        # 统一格式读取：第一行是列名，第一列是时间（设置为索引）
+        df = pd.read_excel(
+            file_input,
+            sheet_name=sheet_name,
+            header=0,
+            index_col=0,
+            parse_dates=True
         )
 
         # 清理数据：删除全为空的行和列

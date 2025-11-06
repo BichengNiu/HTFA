@@ -23,7 +23,8 @@
       "Bash(if exist test_profit_margin.py del /f /q test_profit_margin.py)",
       "Bash(if exist test_profit_margin2.py del /f /q test_profit_margin2.py)",
       "Bash(if exist temp_data_output.txt del /f /q temp_data_output.txt)",
-      "Bash(if exist profit_margin_comparison.txt del /f /q profit_margin_comparison.txt)"
+      "Bash(if exist profit_margin_comparison.txt del /f /q profit_margin_comparison.txt)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

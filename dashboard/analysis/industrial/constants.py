@@ -10,8 +10,13 @@ Industrial Analysis Constants
 # ============================================================================
 
 # 宏观工业数据列名
-TOTAL_INDUSTRIAL_GROWTH_COLUMN = "规模以上工业增加值:当月同比"
+TOTAL_INDUSTRIAL_GROWTH_COLUMN = "中国:工业增加值:规模以上工业企业:当月同比"
 CUMULATIVE_INDUSTRIAL_GROWTH_COLUMN = "中国:工业增加值:规模以上工业企业:累计同比"
+
+# 三大产业列名
+MINING_INDUSTRY_COLUMN = "采矿业:当月同比"
+MANUFACTURING_INDUSTRY_COLUMN = "制造业:当月同比"
+UTILITIES_INDUSTRY_COLUMN = "电力、热力、燃气及水生产和供应业:当月同比"
 
 # 企业利润数据列名
 PROFIT_TOTAL_COLUMN = "中国:利润总额:规模以上工业企业:累计同比"
@@ -27,6 +32,7 @@ SHEET_NAME_WEIGHTS = "工业增加值分行业指标权重"
 SHEET_NAME_OVERALL_INDUSTRIAL = "总体工业增加值同比增速"
 SHEET_NAME_PROFIT_BREAKDOWN = "分上中下游利润拆解"
 SHEET_NAME_ENTERPRISE_PROFIT = "工业企业利润"
+SHEET_NAME_INDUSTRY_PROFIT = "分行业工业企业利润"
 
 # ============================================================================
 # 指标名称映射
@@ -38,32 +44,6 @@ OVERALL_INDUSTRIAL_NAME_MAPPING = {
     "制造业:当月同比": "制造业",
     "采矿业:当月同比": "采矿业",
 }
-
-# 处理包含特定关键词的变量名
-def get_simplified_name(column_name: str) -> str:
-    """
-    根据列名返回简化的显示名称
-
-    Args:
-        column_name: 原始列名
-
-    Returns:
-        简化后的显示名称
-    """
-    # 精确匹配
-    if column_name in OVERALL_INDUSTRIAL_NAME_MAPPING:
-        return OVERALL_INDUSTRIAL_NAME_MAPPING[column_name]
-
-    # 模糊匹配
-    if "制造业" in column_name and "当月同比" in column_name:
-        return "制造业"
-    elif "采矿业" in column_name and "当月同比" in column_name:
-        return "采矿业"
-    elif any(keyword in column_name for keyword in ["电力", "热力", "燃气", "水生产", "供应业"]) and "当月同比" in column_name:
-        return "电力、热力、燃气及水生产和供应业"
-
-    # 默认返回原名称
-    return column_name
 
 
 # ============================================================================
@@ -114,17 +94,8 @@ WEIGHT_YEAR_COLUMNS = ['权重_2012', '权重_2018', '权重_2020']
 # 分组前缀
 # ============================================================================
 
-# 出口依赖分组前缀
-EXPORT_DEPENDENCY_PREFIX = "出口依赖_"
-
-# 上中下游分组前缀
-UPSTREAM_DOWNSTREAM_PREFIX = "上中下游_"
-
 # 三大产业分组前缀
 INDUSTRY_PREFIX = "三大产业_"
-
-# 利润累计同比后缀
-PROFIT_CUMULATIVE_YOY_SUFFIX = "_利润累计同比"
 
 
 # ============================================================================
@@ -141,6 +112,13 @@ DEFAULT_TIME_RANGE = "3年"
 
 # 最小匹配指标数（用于企业经营分析）
 MIN_REQUIRED_INDICATORS = 3
+
+# 图表颜色列表
+CHART_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
+
+# 图表高度配置
+CHART_ROW_HEIGHT_PIXELS = 20  # 每行数据的像素高度
+CHART_MIN_HEIGHT_PIXELS = 500  # 图表最小高度
 
 # 图例显示最大示例数
 MAX_EXAMPLE_INDICATORS = 5
@@ -176,6 +154,12 @@ STATE_KEY_MACRO_TIME_RANGE_CHART3 = "macro.time_range.chart3"
 STATE_KEY_ENTERPRISE_TIME_RANGE_CHART1 = "enterprise.time_range.chart1"
 STATE_KEY_ENTERPRISE_TIME_RANGE_CHART2 = "enterprise.time_range.chart2"
 STATE_KEY_ENTERPRISE_TIME_RANGE_CHART3 = "enterprise.time_range.chart3"
+
+# 状态键常量 - 企业利润拆解数据
+STATE_KEY_PROFIT_CONTRIBUTION_STREAM = "profit_contribution_stream"
+STATE_KEY_PROFIT_CONTRIBUTION_INDIVIDUAL = "profit_contribution_individual"
+STATE_KEY_PROFIT_TOTAL_GROWTH = "profit_total_growth"
+STATE_KEY_PROFIT_VALIDATION_RESULT = "profit_validation_result"
 
 
 # ============================================================================

@@ -39,17 +39,6 @@ class ValidationResult:
         """是否有匹配的指标"""
         return self.matched_indicators_count > 0
 
-    def get_summary(self) -> Dict[str, any]:
-        """获取验证结果摘要"""
-        return {
-            'is_valid': self.is_valid,
-            'error_message': self.error_message,
-            'matched_indicators_count': self.matched_indicators_count,
-            'available_columns_count': self.available_columns_count,
-            'macro_shape': self.macro_shape,
-            'weights_shape': self.weights_shape
-        }
-
 
 def validate_data_format(
     df_macro: pd.DataFrame,

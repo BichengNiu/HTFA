@@ -24,6 +24,8 @@ from dashboard.analysis.industrial.utils import load_macro_data, load_weights_da
 from dashboard.analysis.industrial.ui import (
     IndustrialFileUploadComponent
 )
+# 导入统一状态管理
+from dashboard.analysis.industrial.utils import IndustrialStateManager
 from dashboard.analysis.industrial.constants import (
     STATE_NAMESPACE_INDUSTRIAL,
     STATE_KEY_UPLOADED_FILE,
@@ -37,33 +39,6 @@ from dashboard.analysis.industrial.constants import (
 )
 
 
-def get_industrial_state(key: str, default_value=None):
-    """
-    获取工业分析模块的状态
-
-    Args:
-        key: 状态键
-        default_value: 默认值
-
-    Returns:
-        状态值，如果不存在则返回默认值
-    """
-    full_key = f'{STATE_NAMESPACE_INDUSTRIAL}.{key}'
-    return st.session_state.get(full_key, default_value)
-
-
-def set_industrial_state(key: str, value):
-    """
-    设置工业分析模块的状态
-
-    Args:
-        key: 状态键
-        value: 状态值
-    """
-    full_key = f'{STATE_NAMESPACE_INDUSTRIAL}.{key}'
-    st.session_state[full_key] = value
-
-
 def initialize_industrial_states():
     """
     初始化工业分析模块的时间范围状态
@@ -72,15 +47,15 @@ def initialize_industrial_states():
     for key in [STATE_KEY_MACRO_TIME_RANGE_CHART1,
                 STATE_KEY_MACRO_TIME_RANGE_CHART2,
                 STATE_KEY_MACRO_TIME_RANGE_CHART3]:
-        if get_industrial_state(key) is None:
-            set_industrial_state(key, DEFAULT_TIME_RANGE)
+        if IndustrialStateManager.get(key) is None:
+            IndustrialStateManager.set(key, DEFAULT_TIME_RANGE)
 
     # 初始化企业分析图表的时间范围状态
     for key in [STATE_KEY_ENTERPRISE_TIME_RANGE_CHART1,
                 STATE_KEY_ENTERPRISE_TIME_RANGE_CHART2,
                 STATE_KEY_ENTERPRISE_TIME_RANGE_CHART3]:
-        if get_industrial_state(key) is None:
-            set_industrial_state(key, DEFAULT_TIME_RANGE)
+        if IndustrialStateManager.get(key) is None:
+            IndustrialStateManager.set(key, DEFAULT_TIME_RANGE)
 
 
 def render_unified_file_upload(st_obj) -> Optional[object]:

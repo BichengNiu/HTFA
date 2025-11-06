@@ -30,7 +30,7 @@ class IndustrialGroupDetailsComponent(UIComponent):
         with st_obj.expander(title):
             group_details = self._get_group_details(df_weights, group_type)
             if not group_details.empty:
-                st_obj.dataframe(group_details, use_container_width=True, hide_index=True)
+                st_obj.dataframe(group_details, width='stretch', hide_index=True)
                 st_obj.caption("权重基于2018年投入产出表增加值占比加权计算")
             else:
                 st_obj.write("暂无分组数据")

@@ -11,8 +11,10 @@ from typing import Dict, Any, Optional, List
 import streamlit as st
 from datetime import datetime
 import logging
-
+import warnings
 from dashboard.analysis.industrial.ui.shared.base import BaseAnalysisComponent
+
+warnings.filterwarnings("ignore", category = DeprecationWarning)
 
 logger = logging.getLogger(__name__)
 

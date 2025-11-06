@@ -21,7 +21,8 @@ from dashboard.analysis.industrial.utils.data_loader import (
     load_weights_data,
     load_overall_industrial_data,
     load_profit_breakdown_data,
-    load_enterprise_profit_data
+    load_enterprise_profit_data,
+    load_industry_profit_data
 )
 from dashboard.analysis.industrial.utils.chart_config import (
     # 常量
@@ -71,6 +72,8 @@ from dashboard.analysis.industrial.utils.download_utils import (
 )
 # 加权计算模块（优化版本）
 from dashboard.analysis.industrial.utils.weighted_calculation import calculate_weighted_groups_optimized
+# 统一状态管理
+from dashboard.analysis.industrial.utils.state_manager import IndustrialStateManager
 
 __all__ = [
     # 数据处理
@@ -85,6 +88,7 @@ __all__ = [
     'load_overall_industrial_data',
     'load_profit_breakdown_data',
     'load_enterprise_profit_data',
+    'load_industry_profit_data',
     # 图表配置常量
     'TIME_RANGE_OPTIONS',
     'DEFAULT_TIME_RANGE',
@@ -128,4 +132,6 @@ __all__ = [
     'prepare_grouping_annotation_data',
     # 优化的加权计算
     'calculate_weighted_groups_optimized',
+    # 统一状态管理
+    'IndustrialStateManager',
 ]

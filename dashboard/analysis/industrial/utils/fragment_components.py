@@ -191,8 +191,12 @@ def create_chart_with_time_selector_fragment(
                         use_container_width=True,
                         key=f"{chart_id}_chart_fragment"
                     )
+                else:
+                    st_obj.warning("图表数据不足或不可用，无法生成图表")
             except Exception as e:
                 st_obj.error(f"创建图表时出错: {e}")
+                import traceback
+                st_obj.code(traceback.format_exc())
 
         return time_range, custom_start, custom_end
 

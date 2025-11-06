@@ -138,8 +138,8 @@ def create_time_series_chart(
     custom_end_date: Optional[str] = None,
     var_name_mapping: Optional[Dict[str, str]] = None,
     y_axis_title: str = "",
-    height: int = 350,
-    bottom_margin: int = 150,
+    height: int = 500,
+    bottom_margin: int = 180,
     sort_variables: bool = False,
     sort_key_func: Optional[Callable] = None
 ) -> go.Figure:
@@ -210,7 +210,7 @@ def create_time_series_chart(
         # 获取颜色
         color = get_chart_color(i)
 
-        # 创建并添加trace，使用xperiod让数据点居中对齐
+        # 创建并添加trace
         try:
             trace = go.Scatter(
                 x=series.index,
@@ -221,8 +221,6 @@ def create_time_series_chart(
                 mode='lines+markers',
                 marker=dict(size=6),
                 name=display_name,
-                xperiod="M1",  # 周期为1个月
-                xperiodalignment="middle",  # 数据点居中对齐
                 hovertemplate='%{fullData.name}: %{y:.2f}<extra></extra>'
             )
             fig.add_trace(trace)
@@ -274,8 +272,8 @@ def create_mixed_chart(
     custom_end_date: Optional[str] = None,
     var_name_mapping: Optional[Dict[str, str]] = None,
     y_axis_title: str = "",
-    height: int = 500,
-    bottom_margin: int = 80,
+    height: int = 600,
+    bottom_margin: int = 120,
     barmode: str = 'relative'
 ) -> go.Figure:
     """
@@ -330,7 +328,7 @@ def create_mixed_chart(
         # 显示名称
         display_name = var_name_mapping.get(var, var) if var_name_mapping else var
 
-        # 添加线图，使用xperiod让数据点居中对齐到月份
+        # 添加线图
         fig.add_trace(go.Scatter(
             x=series.index,
             y=series,
@@ -339,8 +337,6 @@ def create_mixed_chart(
             line=dict(width=2.5, color=get_chart_color(color_index)),
             marker=dict(size=4),
             connectgaps=False,
-            xperiod="M1",  # 周期为1个月
-            xperiodalignment="middle",  # 数据点居中对齐
             hovertemplate='%{fullData.name}: %{y:.2f}<extra></extra>'
         ))
         color_index += 1
@@ -361,15 +357,13 @@ def create_mixed_chart(
         opacity = 0.9 - (i * 0.15)
         opacity = max(0.5, opacity)
 
-        # 添加条形图，使用xperiod让柱子居中对齐到月份
+        # 添加条形图
         fig.add_trace(go.Bar(
             x=series.index,
             y=series,
             name=display_name,
             marker_color=get_chart_color(color_index),
             opacity=opacity,
-            xperiod="M1",  # 周期为1个月
-            xperiodalignment="middle",  # 柱子居中对齐
             hovertemplate='%{fullData.name}: %{y:.2f}<extra></extra>'
         ))
         color_index += 1

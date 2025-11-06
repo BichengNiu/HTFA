@@ -20,6 +20,11 @@ if multiprocessing.current_process().name != 'MainProcess':
     # 如果这是子进程，立即退出，不执行任何UI相关代码
     sys.exit(0)
 
+# 在导入Streamlit之前抑制Plotly警告
+warnings.filterwarnings('ignore', message='.*keyword arguments have been deprecated.*')
+warnings.filterwarnings('ignore', message='.*Use `config` instead.*')
+warnings.filterwarnings('ignore', message='.*use_container_width.*')
+
 # Dashboard状态管理使用st.session_state
 
 # 在任何其他导入之前立即抑制 Streamlit 警告
@@ -42,6 +47,12 @@ def _suppress_streamlit_warnings():
     # 抑制所有警告
     warnings.filterwarnings("ignore")
 
+    # 特别抑制Plotly的弃用警告
+    warnings.filterwarnings("ignore", message=".*keyword arguments have been deprecated.*")
+    warnings.filterwarnings("ignore", message=".*Use.*config.*instead.*")
+    warnings.filterwarnings("ignore", category=DeprecationWarning, module="plotly")
+    warnings.filterwarnings("ignore", category=FutureWarning, module="plotly")
+
     # 预先配置 Streamlit 日志器
     streamlit_loggers = [
         "streamlit",
@@ -57,11 +68,28 @@ def _suppress_streamlit_warnings():
         "streamlit.web.bootstrap"
     ]
 
+    # 创建自定义日志过滤器，过滤Plotly相关警告
+    class PlotlyWarningFilter(logging.Filter):
+        def filter(self, record):
+            message = record.getMessage()
+            # 过滤Plotly废弃警告
+            if "keyword arguments have been deprecated" in message:
+                return False
+            if "Use `config` instead to specify Plotly configuration options" in message:
+                return False
+            if "Please replace `use_container_width` with `width`" in message:
+                return False
+            return True
+
     for logger_name in streamlit_loggers:
         logger = logging.getLogger(logger_name)
         logger.setLevel(logging.CRITICAL)
+        logger.addFilter(PlotlyWarningFilter())
         logger.disabled = True
         logger.propagate = False
+
+    # 为根logger也添加过滤器
+    logging.root.addFilter(PlotlyWarningFilter())
 
 # 立即执行警告抑制
 _suppress_streamlit_warnings()
@@ -83,6 +111,21 @@ if project_root not in sys.path:
 
 # 立即导入streamlit并设置页面配置 - 必须在任何其他操作之前
 import streamlit as st
+
+# Monkey patch Streamlit的警告显示函数来过滤Plotly相关警告
+_original_warning = st.warning
+
+def _filtered_warning(body, *args, **kwargs):
+    """过滤后的warning函数"""
+    if isinstance(body, str):
+        # 过滤Plotly相关警告
+        if "keyword arguments have been deprecated" in body:
+            return None
+        if "Use `config` instead" in body:
+            return None
+    return _original_warning(body, *args, **kwargs)
+
+st.warning = _filtered_warning
 
 # 直接设置页面配置，避免导入问题
 if 'dashboard_page_config_set' not in st.session_state:
