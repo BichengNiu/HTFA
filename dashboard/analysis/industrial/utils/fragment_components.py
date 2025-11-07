@@ -133,6 +133,7 @@ def create_chart_with_time_selector_fragment(
             with col_vars:
                 var_options = variable_selector_config['options']
                 var_mapping = variable_selector_config.get('name_mapping', {})
+                default_values = variable_selector_config.get('default_values', var_options)
 
                 # 创建水平排列的复选框
                 var_cols = st_obj.columns(len(var_options))
@@ -142,7 +143,7 @@ def create_chart_with_time_selector_fragment(
                     with var_cols[idx]:
                         if st_obj.checkbox(
                             var_mapping.get(var, var),
-                            value=True,
+                            value=(var in default_values),
                             key=f"{chart_id}_var_checkbox_{idx}"
                         ):
                             selected_variables.append(var)

@@ -110,3 +110,47 @@ def convert_margin_to_yoy_diff(data_series: pd.Series, periods: int = 12) -> pd.
 
     except Exception:
         return pd.Series()
+
+
+def convert_cumulative_to_current(data_series: pd.Series) -> pd.Series:
+    """
+    将累计值转换为当期值（月度值）
+
+    转换逻辑：
+    - 1月当期值 = 1月累计值（因为没有上月）
+    - 其他月当期值 = 当月累计值 - 上月累计值
+
+    与convert_cumulative_to_yoy的区别：
+    - convert_cumulative_to_yoy: 累计值 -> 年同比增长率（%），会过滤1-2月
+    - convert_cumulative_to_current: 累计值 -> 当期值（原始单位），保留所有月份
+
+    性能优化：使用pandas向量化操作
+
+    Args:
+        data_series: 累计值数据序列，索引应为DatetimeIndex
+
+    Returns:
+        当期值数据序列（单位与输入相同）
+
+    Example:
+        累计值: [100, 250, 420]（1月、2月、3月）
+        当期值: [100, 150, 170]（1月、2月、3月）
+    """
+    try:
+        # 确保数据是数值型
+        data_series = pd.to_numeric(data_series, errors='coerce')
+
+        # 确保索引已排序
+        data_series = data_series.sort_index()
+
+        # 使用diff()方法计算差分：当月 - 上月
+        current_values = data_series.diff()
+
+        # 第一个值（通常是1月）用原始累计值填充
+        # 因为diff()会将第一个值设为NaN
+        current_values.iloc[0] = data_series.iloc[0]
+
+        return current_values
+
+    except Exception:
+        return pd.Series()

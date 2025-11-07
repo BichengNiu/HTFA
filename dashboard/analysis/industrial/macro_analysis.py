@@ -154,7 +154,6 @@ def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, d
             IndustrialStateManager.set(STATE_KEY_CONTRIBUTION_INDUSTRY, None)
 
     # 添加标题
-    st_obj.subheader("工业行业(产业)拉动率分析")
 
     # First chart - Three major industries contribution rate (拉动率)
     contribution_industry = IndustrialStateManager.get(STATE_KEY_CONTRIBUTION_INDUSTRY)

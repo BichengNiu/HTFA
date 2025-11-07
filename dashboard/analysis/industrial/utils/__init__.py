@@ -15,14 +15,15 @@ This module contains shared utility functions to eliminate code duplication:
 
 from dashboard.analysis.industrial.utils.time_filter import filter_data_by_time_range
 from dashboard.analysis.industrial.utils.weight_calculator import get_weight_for_year, filter_data_from_2012
-from dashboard.analysis.industrial.utils.data_converter import convert_cumulative_to_yoy, convert_margin_to_yoy_diff
+from dashboard.analysis.industrial.utils.data_converter import convert_cumulative_to_yoy, convert_margin_to_yoy_diff, convert_cumulative_to_current
 from dashboard.analysis.industrial.utils.data_loader import (
     load_macro_data,
     load_weights_data,
     load_overall_industrial_data,
     load_profit_breakdown_data,
     load_enterprise_profit_data,
-    load_industry_profit_data
+    load_industry_profit_data,
+    load_enterprise_operations_data
 )
 from dashboard.analysis.industrial.utils.chart_config import (
     # 常量
@@ -82,6 +83,7 @@ __all__ = [
     'filter_data_from_2012',
     'convert_cumulative_to_yoy',
     'convert_margin_to_yoy_diff',
+    'convert_cumulative_to_current',
     # 数据加载
     'load_macro_data',
     'load_weights_data',
@@ -89,6 +91,7 @@ __all__ = [
     'load_profit_breakdown_data',
     'load_enterprise_profit_data',
     'load_industry_profit_data',
+    'load_enterprise_operations_data',
     # 图表配置常量
     'TIME_RANGE_OPTIONS',
     'DEFAULT_TIME_RANGE',

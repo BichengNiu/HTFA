@@ -26,6 +26,37 @@ logger = logging.getLogger(__name__)
 # 不需要手动计算MD5哈希，Streamlit会自动处理文件内容的哈希
 
 
+def clean_dataframe_index(df: pd.DataFrame, data_name: str = "数据") -> pd.DataFrame:
+    """
+    清理DataFrame索引：删除NaT值和重复索引
+
+    Args:
+        df: 待清理的DataFrame
+        data_name: 数据名称（用于日志）
+
+    Returns:
+        清理后的DataFrame
+    """
+    # 删除索引为NaT的行（无法解析的日期）
+    if isinstance(df.index, pd.DatetimeIndex):
+        nat_count = df.index.isna().sum()
+        if nat_count > 0:
+            logger.warning(f"{data_name}: 发现{nat_count}个无效日期(NaT)，将删除这些行")
+            df = df[~df.index.isna()]
+            logger.info(f"{data_name}: 删除无效日期后数据形状: {df.shape}")
+
+    # 检查并处理重复索引（在删除NaT之后）
+    if df.index.duplicated().any():
+        dup_count = df.index.duplicated().sum()
+        dup_dates = df.index[df.index.duplicated()].unique()
+        logger.warning(f"{data_name}: 发现{dup_count}个重复日期索引: {dup_dates.tolist()}")
+        logger.warning(f"{data_name}: 将保留第一次出现的数据，删除重复行")
+        df = df[~df.index.duplicated(keep='first')]
+        logger.info(f"{data_name}: 去重后数据形状: {df.shape}")
+
+    return df
+
+
 @st.cache_data(ttl=3600, show_spinner=False)
 def load_macro_data(uploaded_file, sheet_name: str = '分行业工业增加值同比增速') -> Optional[pd.DataFrame]:
     """
@@ -53,13 +84,20 @@ def load_macro_data(uploaded_file, sheet_name: str = '分行业工业增加值�
             parse_dates=True
         )
 
-        # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+        df = clean_dataframe_index(df, sheet_name)
 
         # 标准化日期索引为月初（解决图表时间轴错位问题）
         if isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
             logger.info(f"日期已标准化为月初格式")
+
+            # 标准化后再次检查重复（标准化可能导致不同日期变成相同月份）
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"{sheet_name}: 标准化后发现{dup_count}个重复月份，保留第一次出现的数据")
+                df = df[~df.index.duplicated(keep='first')]
+                logger.info(f"{sheet_name}: 最终数据形状: {df.shape}")
 
         # 将0值转换为NaN（新版本数据中0代表缺失值）
         import numpy as np
@@ -73,6 +111,8 @@ def load_macro_data(uploaded_file, sheet_name: str = '分行业工业增加值�
 
     except Exception as e:
         logger.error(f"读取{sheet_name}数据失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
         return None
 
 
@@ -162,13 +202,20 @@ def load_overall_industrial_data(uploaded_file, sheet_name: str = '总体工业�
             parse_dates=True
         )
 
-        # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+        df = clean_dataframe_index(df, sheet_name)
 
         # 标准化日期索引为月初（解决图表时间轴错位问题）
         if isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
             logger.info(f"日期已标准化为月初格式")
+
+            # 标准化后再次检查重复（标准化可能导致不同日期变成相同月份）
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"{sheet_name}: 标准化后发现{dup_count}个重复月份，保留第一次出现的数据")
+                df = df[~df.index.duplicated(keep='first')]
+                logger.info(f"{sheet_name}: 最终数据形状: {df.shape}")
 
         # 将0值转换为NaN（新版本数据中0代表缺失值）
         import numpy as np
@@ -190,6 +237,8 @@ def load_overall_industrial_data(uploaded_file, sheet_name: str = '总体工业�
 
     except Exception as e:
         logger.error(f"读取{sheet_name}数据失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
         return None
 
 
@@ -226,19 +275,28 @@ def load_profit_breakdown_data(uploaded_file, sheet_name: str = '分上中下游
             parse_dates=True
         )
 
-        # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+        df = clean_dataframe_index(df, sheet_name)
 
         # 标准化日期索引为月初（解决图表时间轴错位问题）
         if isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
             logger.info(f"日期已标准化为月初格式")
 
+            # 标准化后再次检查重复（标准化可能导致不同日期变成相同月份）
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"{sheet_name}: 标准化后发现{dup_count}个重复月份，保留第一次出现的数据")
+                df = df[~df.index.duplicated(keep='first')]
+                logger.info(f"{sheet_name}: 最终数据形状: {df.shape}")
+
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df
 
     except Exception as e:
         logger.error(f"读取{sheet_name}数据失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
         return None
 
 
@@ -275,19 +333,28 @@ def load_enterprise_profit_data(uploaded_file, sheet_name: str = '工业企业�
             parse_dates=True
         )
 
-        # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+        df = clean_dataframe_index(df, sheet_name)
 
         # 标准化日期索引为月初（解决图表时间轴错位问题）
         if isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
             logger.info(f"日期已标准化为月初格式")
 
+            # 标准化后再次检查重复（标准化可能导致不同日期变成相同月份）
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"{sheet_name}: 标准化后发现{dup_count}个重复月份，保留第一次出现的数据")
+                df = df[~df.index.duplicated(keep='first')]
+                logger.info(f"{sheet_name}: 最终数据形状: {df.shape}")
+
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df
 
     except Exception as e:
         logger.error(f"读取{sheet_name}数据失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
         return None
 
 
@@ -332,17 +399,90 @@ def load_industry_profit_data(uploaded_file, sheet_name: Optional[str] = None) -
             parse_dates=True
         )
 
-        # 清理数据：删除全为空的行和列
         df = df.dropna(how='all').dropna(axis=1, how='all')
+        df = clean_dataframe_index(df, sheet_name)
 
         # 标准化日期索引为月初（解决图表时间轴错位问题）
         if isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
             logger.info(f"日期已标准化为月初格式")
 
+            # 标准化后再次检查重复（标准化可能导致不同日期变成相同月份）
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"{sheet_name}: 标准化后发现{dup_count}个重复月份，保留第一次出现的数据")
+                df = df[~df.index.duplicated(keep='first')]
+                logger.info(f"{sheet_name}: 最终数据形状: {df.shape}")
+
         logger.info(f"{sheet_name}数据形状: {df.shape}")
         return df
 
     except Exception as e:
         logger.error(f"读取{sheet_name}数据失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def load_enterprise_operations_data(uploaded_file, sheet_name: str = '工业企业经营') -> Optional[pd.DataFrame]:
+    """
+    使用统一格式读取工业企业经营数据：第一行是列名，第一列是时间列
+
+    数据包含：
+    - 中国:利润总额:规模以上工业企业:累计值
+    - 中国:营业收入:规模以上工业企业:累计值
+    - 中国:资产合计:规模以上工业企业
+    - 中国:所有者权益合计:规模以上工业企业
+
+    性能优化：添加缓存装饰器，避免重复读取相同文件（缓存1小时）
+
+    Args:
+        uploaded_file: 上传的Excel文件对象或文件路径
+        sheet_name: Excel工作表名称
+
+    Returns:
+        DataFrame: 包含企业经营数据，如果读取失败则返回None
+    """
+    try:
+        logger.info(f"读取{sheet_name}数据")
+
+        # 处理不同类型的文件输入
+        file_input = uploaded_file
+        if hasattr(uploaded_file, 'getvalue'):
+            file_input = BytesIO(uploaded_file.getvalue())
+        elif hasattr(uploaded_file, 'path'):
+            file_input = uploaded_file.path
+
+        # 统一格式读取：第一行是列名，第一列是时间（设置为索引）
+        df = pd.read_excel(
+            file_input,
+            sheet_name=sheet_name,
+            header=0,
+            index_col=0,
+            parse_dates=True
+        )
+
+        df = df.dropna(how='all').dropna(axis=1, how='all')
+        df = clean_dataframe_index(df, sheet_name)
+
+        # 标准化日期索引为月初（解决图表时间轴错位问题）
+        if isinstance(df.index, pd.DatetimeIndex):
+            df.index = pd.to_datetime(df.index.to_period('M').to_timestamp())
+            logger.info(f"日期已标准化为月初格式")
+
+            # 标准化后再次检查重复（因为标准化可能导致不同日期变成相同月份）
+            if df.index.duplicated().any():
+                dup_count = df.index.duplicated().sum()
+                logger.warning(f"标准化后发现{dup_count}个重复月份，保留第一次出现的数据")
+                df = df[~df.index.duplicated(keep='first')]
+                logger.info(f"最终数据形状: {df.shape}")
+
+        logger.info(f"{sheet_name}数据形状: {df.shape}")
+        return df
+
+    except Exception as e:
+        logger.error(f"读取{sheet_name}数据失败: {e}")
+        import traceback
+        logger.error(f"详细错误: {traceback.format_exc()}")
         return None

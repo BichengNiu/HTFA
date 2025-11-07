@@ -120,6 +120,22 @@ def render_enterprise_operations_with_data(st_obj, df_macro: Optional[pd.DataFra
     render_enterprise_operations_analysis_with_data(st_obj, df_macro, df_weights, uploaded_file)
 
 
+def render_enterprise_profit_with_data(st_obj, df_macro: Optional[pd.DataFrame], df_weights: Optional[pd.DataFrame], uploaded_file=None):
+    """
+    使用共享数据渲染工业企业利润分析
+    """
+    from dashboard.analysis.industrial.enterprise_analysis import render_enterprise_profit_analysis_with_data
+    render_enterprise_profit_analysis_with_data(st_obj, df_macro, df_weights, uploaded_file)
+
+
+def render_enterprise_efficiency_with_data(st_obj, df_macro: Optional[pd.DataFrame], df_weights: Optional[pd.DataFrame], uploaded_file=None):
+    """
+    使用共享数据渲染工业企业经营效率分析
+    """
+    from dashboard.analysis.industrial.enterprise_analysis import render_enterprise_efficiency_analysis_with_data
+    render_enterprise_efficiency_analysis_with_data(st_obj, df_macro, df_weights, uploaded_file)
+
+
 def render_industrial_analysis(st_obj):
     """
     渲染统一的工业分析模块
@@ -134,10 +150,17 @@ def render_industrial_analysis(st_obj):
     df_macro, df_weights = load_and_cache_data(uploaded_file)
 
     # 3. 始终创建标签页（右侧主区域）
-    tab_macro, tab_enterprise = st_obj.tabs(["工业增加值分析", "工业企业经营分析"])
+    tab_macro, tab_profit, tab_efficiency = st_obj.tabs([
+        "工业增加值分析",
+        "工业企业利润分析",
+        "工业企业经营效率分析"
+    ])
 
     with tab_macro:
         render_macro_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)
 
-    with tab_enterprise:
-        render_enterprise_operations_with_data(st_obj, df_macro, df_weights, uploaded_file)
+    with tab_profit:
+        render_enterprise_profit_with_data(st_obj, df_macro, df_weights, uploaded_file)
+
+    with tab_efficiency:
+        render_enterprise_efficiency_with_data(st_obj, df_macro, df_weights, uploaded_file)
