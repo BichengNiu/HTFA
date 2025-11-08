@@ -608,6 +608,12 @@ def render_dfm_model_training_page(st_instance):
             set_dfm_state('dfm_model_results_paths', existing_results)
             set_dfm_state('dfm_training_log', ['[自动检测] 发现已有训练结果，已自动加载'])
 
+            # 保持当前导航状态，避免跳转
+            if 'navigation.selected_sub_module' in st.session_state:
+                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
+            if 'navigation.selected_detail_module' in st.session_state:
+                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
+
             # 刷新UI显示
             st_instance.rerun()
 
@@ -656,6 +662,12 @@ def render_dfm_model_training_page(st_instance):
             if training_status == '训练完成':
                 set_dfm_state('training_completed_refreshed', True)
 
+            # 保持当前导航状态，避免跳转
+            if 'navigation.selected_sub_module' in st.session_state:
+                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
+            if 'navigation.selected_detail_module' in st.session_state:
+                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
+
             st_instance.rerun()
         else:
             print(f"[HOT] [UI更新] 强制刷新被跳过，距离上次刷新仅 {current_time - last_forced_refresh:.1f} 秒")
@@ -671,11 +683,18 @@ def render_dfm_model_training_page(st_instance):
         refresh_count = get_dfm_state('training_refresh_count', 0)
         max_refresh_count = 10  # 最大刷新次数限制
         
-        if (current_time - last_refresh_time > min_refresh_interval and 
+        if (current_time - last_refresh_time > min_refresh_interval and
             refresh_count < max_refresh_count):
             set_dfm_state('last_training_refresh_time', current_time)
             set_dfm_state('training_refresh_count', refresh_count + 1)
             print(f"[HOT] [定期检查] 训练中，刷新UI以显示最新状态 (第{refresh_count + 1}次)")
+
+            # 保持当前导航状态，避免跳转
+            if 'navigation.selected_sub_module' in st.session_state:
+                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
+            if 'navigation.selected_detail_module' in st.session_state:
+                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
+
             st_instance.rerun()
 
     elif training_status == '训练完成':
@@ -685,7 +704,7 @@ def render_dfm_model_training_page(st_instance):
         if training_completed_refreshed is None:
             print("[HOT] [备用检查] 检测到训练完成但未刷新，执行备用刷新")
             set_dfm_state('training_completed_refreshed', True)
-            
+
             # 清除刷新计数器，防止后续循环
             set_dfm_state('training_refresh_count', 0)
             set_dfm_state('last_training_refresh_time', 0)
@@ -695,6 +714,12 @@ def render_dfm_model_training_page(st_instance):
                 print("[HOT] [缓存清除] Streamlit资源缓存已清除")
             except Exception as e:
                 print(f"[HOT] [缓存清除] 清除Streamlit缓存失败: {e}")
+
+            # 保持当前导航状态，避免跳转
+            if 'navigation.selected_sub_module' in st.session_state:
+                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
+            if 'navigation.selected_detail_module' in st.session_state:
+                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
 
             debug_training_state("备用检查触发UI刷新", show_in_ui=True)
             st_instance.rerun()
@@ -1208,7 +1233,7 @@ def render_dfm_model_training_page(st_instance):
                     training_start_date = datetime(2020, 1, 1).date()
 
                     # 验证期开始和结束日期固定
-                    validation_start_date = datetime(2025, 1, 1).date()  # 验证期开始：2025年1月1日
+                    validation_start_date = datetime(2025, 7, 1).date()  # 验证期开始：2025年7月1日
                     validation_end_date = datetime(2025, 12, 31).date()  # 验证期结束：2025年12月31日
 
                     return {
@@ -1300,7 +1325,7 @@ def render_dfm_model_training_page(st_instance):
                 'none': "无筛选 (使用全部已选变量)",
                 'global_backward': "全局后向剔除 (在已选变量中筛选)"
             }
-            default_var_method = 'none'  # [HOT] 紧急修复：强制默认为none
+            default_var_method = 'global_backward'  # 默认为全局后向剔除
 
         # 获取当前变量选择方法
         current_var_method = get_dfm_state('dfm_variable_selection_method', default_var_method)
@@ -1397,7 +1422,7 @@ def render_dfm_model_training_page(st_instance):
             if CONFIG_AVAILABLE:
                 default_fixed_factors = TrainDefaults.FIXED_NUMBER_OF_FACTORS
             else:
-                default_fixed_factors = 3
+                default_fixed_factors = 4  # 默认因子数量为4
 
             fixed_factors_value = st_instance.number_input(
                 "固定因子数",
@@ -1834,8 +1859,11 @@ def render_dfm_model_training_page(st_instance):
                             print(f"[HOT] [UI状态检查] 文件不存在或路径为空: {file_key}")
 
                     if available_files:
+                        # 创建两列布局，将下载按钮放在同一排
+                        download_col1, download_col2 = st_instance.columns(2)
+
                         # 为每个文件创建下载按钮
-                        for file_key, file_path, file_name in available_files:
+                        for idx, (file_key, file_path, file_name) in enumerate(available_files):
                             try:
                                 # 读取文件数据
                                 with open(file_path, 'rb') as f:
@@ -1844,19 +1872,25 @@ def render_dfm_model_training_page(st_instance):
                                 # 确定显示名称
                                 if file_key == 'final_model_joblib':
                                     display_name = "模型文件 (joblib)"
+                                    col = download_col1
                                 elif file_key == 'metadata':
                                     display_name = "元数据文件 (pkl)"
+                                    col = download_col2
                                 else:
                                     display_name = file_name
+                                    col = download_col1 if idx % 2 == 0 else download_col2
 
-                                # 创建下载按钮
-                                st_instance.download_button(
-                                    label=display_name,
-                                    data=file_data,
-                                    file_name=file_name,
-                                    mime="application/octet-stream",
-                                    key=f"dfm_download_{file_key}"
-                                )
+                                # 在对应列中创建下载按钮（使用primary样式）
+                                with col:
+                                    st_instance.download_button(
+                                        label=display_name,
+                                        data=file_data,
+                                        file_name=file_name,
+                                        mime="application/octet-stream",
+                                        key=f"dfm_download_{file_key}",
+                                        type="primary",
+                                        use_container_width=True
+                                    )
 
                             except Exception as e:
                                 st_instance.warning(f"[WARNING] {file_name} 文件读取失败: {e}")

@@ -295,14 +295,27 @@ class BackwardSelector:
         use_parallel = self.parallel_config.should_use_parallel(len(current_predictors))
 
         if use_parallel:
+            # 准备可序列化的评估器配置（从eval_params提取，移除不可序列化的progress_callback）
+            from dashboard.models.DFM.train.training.evaluator_strategy import extract_serializable_config
+
+            # 从self._eval_params提取可序列化的配置
+            evaluator_config = {
+                'training_start': self._eval_params['training_start_date'],
+                'train_end': self._eval_params['train_end_date'],
+                'validation_start': self._eval_params['validation_start'],
+                'validation_end': self._eval_params['validation_end'],
+                'max_iterations': self._eval_params.get('max_iter', 30),
+                'tolerance': 1e-4  # 使用默认值
+            }
+
             # 并行评估
             logger.info(f"  使用并行评估 ({self.parallel_config.get_effective_n_jobs()} 核心)")
             candidate_results = evaluate_removals_with_fallback(
                 current_predictors=current_predictors,
                 target_variable=target_variable,
-                evaluator_func=self.evaluator_func,
-                eval_params=self._eval_params,
+                full_data=self._eval_params['full_data'],
                 k_factors=k_factors,
+                evaluator_config=evaluator_config,
                 use_parallel=True,
                 n_jobs=self.parallel_config.get_effective_n_jobs(),
                 backend=self.parallel_config.backend,

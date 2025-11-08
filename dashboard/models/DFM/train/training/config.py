@@ -48,8 +48,8 @@ class TrainingConfig:
     factor_selection_method: str = 'fixed'  # fixed, cumulative
     pca_threshold: Optional[float] = 0.9  # cumulative方法的阈值
 
-    # 并行计算配置
-    enable_parallel: bool = False  # 是否启用并行计算
+    # 并行计算配置（2025-11-08重构后默认启用）
+    enable_parallel: bool = True  # 是否启用并行计算（重构后已解决序列化问题）
     n_jobs: int = -1  # 并行任务数（-1=所有核心，1=串行）
     parallel_backend: str = 'loky'  # 并行后端（loky, multiprocessing, threading）
     min_variables_for_parallel: int = 5  # 启用并行的最小变量数
