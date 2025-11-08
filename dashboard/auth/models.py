@@ -4,7 +4,7 @@
 """
 
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Dict, Optional, Any
 import uuid
 import json
@@ -25,6 +25,9 @@ class User:
     is_active: bool = True
     failed_login_attempts: int = 0
     locked_until: Optional[datetime] = None
+    valid_from: Optional[date] = None  # 使用期限开始日期
+    valid_until: Optional[date] = None  # 使用期限结束日期
+    is_permanent: bool = False  # 是否永久有效(默认非永久)
 
     def is_locked(self) -> bool:
         """检查用户是否被锁定"""
@@ -40,6 +43,38 @@ class User:
         self.locked_until = None
         self.failed_login_attempts = 0
 
+    def is_expired(self) -> bool:
+        """检查账户是否已过期"""
+        if self.is_permanent:
+            return False
+        if self.valid_until is None:
+            return False
+        return date.today() > self.valid_until
+
+    def is_not_yet_valid(self) -> bool:
+        """检查账户是否尚未生效"""
+        if self.is_permanent:
+            return False
+        if self.valid_from is None:
+            return False
+        return date.today() < self.valid_from
+
+    def days_until_expiry(self) -> Optional[int]:
+        """计算距离过期的天数,如果是永久账户或已过期返回None"""
+        if self.is_permanent or self.valid_until is None:
+            return None
+        if self.is_expired():
+            return None
+        delta = self.valid_until - date.today()
+        return delta.days
+
+    def is_expiring_soon(self, days: int = 30) -> bool:
+        """检查账户是否即将过期(默认30天内)"""
+        days_left = self.days_until_expiry()
+        if days_left is None:
+            return False
+        return 0 <= days_left <= days
+
     def to_dict(self) -> Dict[str, Any]:
         """
         将用户对象转换为字典（用于序列化）
@@ -53,6 +88,11 @@ class User:
             data['last_login'] = self.last_login.isoformat()
         if self.locked_until:
             data['locked_until'] = self.locked_until.isoformat()
+        # 将date对象转换为字符串
+        if self.valid_from:
+            data['valid_from'] = self.valid_from.isoformat()
+        if self.valid_until:
+            data['valid_until'] = self.valid_until.isoformat()
         # 移除密码哈希，不应暴露给前端
         data.pop('password_hash', None)
         return data

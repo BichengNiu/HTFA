@@ -11,6 +11,8 @@ from dashboard.explore.ui.dtw import DTWAnalysisComponent
 from dashboard.explore.ui.lead_lag import LeadLagAnalysisComponent
 from dashboard.explore.ui.unified_correlation import UnifiedCorrelationAnalysisComponent
 from dashboard.explore.ui.pages import DataExplorationWelcomePage
+from dashboard.explore.ui.univariate_page import render_univariate_analysis_page
+from dashboard.explore.ui.bivariate_page import render_bivariate_analysis_page
 
 __all__ = [
     'TimeSeriesAnalysisComponent',
@@ -20,4 +22,6 @@ __all__ = [
     'LeadLagAnalysisComponent',
     'UnifiedCorrelationAnalysisComponent',
     'DataExplorationWelcomePage',
+    'render_univariate_analysis_page',
+    'render_bivariate_analysis_page',
 ]

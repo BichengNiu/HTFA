@@ -8,7 +8,7 @@ import json
 import os
 import logging
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from dashboard.auth.models import User, UserSession
 
 
@@ -19,7 +19,8 @@ class AuthDatabase:
     USER_COLUMNS = (
         'id', 'username', 'password_hash', 'email', 'wechat', 'phone',
         'organization', 'permissions', 'created_at', 'last_login',
-        'is_active', 'failed_login_attempts', 'locked_until'
+        'is_active', 'failed_login_attempts', 'locked_until',
+        'valid_from', 'valid_until', 'is_permanent'
     )
 
     def __init__(self, db_path: str = None):
@@ -52,7 +53,10 @@ class AuthDatabase:
             last_login=datetime.fromisoformat(row[9]) if row[9] else None,
             is_active=bool(row[10]),
             failed_login_attempts=row[11],
-            locked_until=datetime.fromisoformat(row[12]) if row[12] else None
+            locked_until=datetime.fromisoformat(row[12]) if row[12] else None,
+            valid_from=date.fromisoformat(row[13]) if row[13] else None,
+            valid_until=date.fromisoformat(row[14]) if row[14] else None,
+            is_permanent=bool(row[15]) if len(row) > 15 else False
         )
 
     def _init_database(self):
@@ -107,9 +111,10 @@ class AuthDatabase:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    INSERT INTO users (username, password_hash, email, wechat, phone, organization, 
-                                     permissions, created_at, last_login, is_active, failed_login_attempts, locked_until)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO users (username, password_hash, email, wechat, phone, organization,
+                                     permissions, created_at, last_login, is_active, failed_login_attempts, locked_until,
+                                     valid_from, valid_until, is_permanent)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     user.username,
                     user.password_hash,
@@ -122,7 +127,10 @@ class AuthDatabase:
                     user.last_login.isoformat() if user.last_login else None,
                     int(user.is_active),
                     user.failed_login_attempts,
-                    user.locked_until.isoformat() if user.locked_until else None
+                    user.locked_until.isoformat() if user.locked_until else None,
+                    user.valid_from.isoformat() if user.valid_from else None,
+                    user.valid_until.isoformat() if user.valid_until else None,
+                    int(user.is_permanent)
                 ))
                 conn.commit()
                 return True
@@ -173,7 +181,8 @@ class AuthDatabase:
                 cursor.execute('''
                     UPDATE users SET password_hash = ?, email = ?, wechat = ?, phone = ?,
                            organization = ?, permissions = ?, last_login = ?, is_active = ?,
-                           failed_login_attempts = ?, locked_until = ?
+                           failed_login_attempts = ?, locked_until = ?,
+                           valid_from = ?, valid_until = ?, is_permanent = ?
                     WHERE id = ?
                 ''', (
                     user.password_hash,
@@ -186,6 +195,9 @@ class AuthDatabase:
                     int(user.is_active),
                     user.failed_login_attempts,
                     user.locked_until.isoformat() if user.locked_until else None,
+                    user.valid_from.isoformat() if user.valid_from else None,
+                    user.valid_until.isoformat() if user.valid_until else None,
+                    int(user.is_permanent),
                     user.id
                 ))
                 conn.commit()

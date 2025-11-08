@@ -8,12 +8,9 @@ import streamlit as st
 import logging
 from typing import Dict, Any, Optional
 from dashboard.core.ui.utils.tab_detector import TabStateDetector
-from dashboard.explore.ui import (
-    StationarityAnalysisComponent,
-    UnifiedCorrelationAnalysisComponent,
-    LeadLagAnalysisComponent
-)
-from dashboard.core.ui.components.sidebar import DataExplorationSidebar
+from dashboard.explore.ui.univariate_page import render_univariate_analysis_page
+from dashboard.explore.ui.bivariate_page import render_bivariate_analysis_page
+from dashboard.explore.ui.pages import DataExplorationWelcomePage
 from dashboard.auth.ui.pages.user_management_module import UserManagementWelcomePage, render_user_management_sub_module
 from dashboard.core import get_current_main_module, get_current_sub_module
 
@@ -210,6 +207,9 @@ def route_to_content(config: Dict[str, Any]) -> Dict[str, Any]:
             # 特殊处理：用户管理模块没有子模块时直接显示内容
             if main_module == '用户管理':
                 return render_user_management_content(sub_module)
+            # 特殊处理：数据探索模块显示欢迎页面
+            elif main_module == '数据探索':
+                return render_data_exploration_welcome()
             # 第一层：只选择了主模块，显示子模块选择界面
             return render_module_selection_guide(main_module, 'sub_module')
         elif navigation_level == 'SUB_MODULE_ONLY':
@@ -325,26 +325,53 @@ def render_model_analysis_content(sub_module: Optional[str]) -> Dict[str, Any]:
     try:
         # 如果选择了DFM模型，显示DFM功能的tab界面
         if sub_module == "DFM 模型":
-            # 状态同步已在dashboard.py主流程中完成，这里不再重复设置
+            # 导入DFM页面渲染函数
+            from dashboard.models.DFM.prep.ui.pages import render_dfm_data_prep_page
+            from dashboard.models.DFM.train.ui.pages import render_dfm_model_training_page
+            from dashboard.models.DFM.results.ui.pages import render_dfm_model_analysis_page
+            from dashboard.models.DFM.decomp.ui.pages import render_dfm_news_analysis_page
 
-            # 创建DFM功能标签页（移除Tab内容中的状态设置）
-            tab1, tab2, tab3, tab4 = st.tabs(["数据准备", "模型训练", "模型分析", "新闻分析"])
+            # 根据权限过滤Tab
+            debug_mode = st.session_state.get("auth.debug_mode", False)
+            current_user = st.session_state.get("auth.current_user", None)
 
-            with tab1:
-                from dashboard.models.DFM.prep.ui.pages import render_dfm_data_prep_page
-                render_dfm_data_prep_page(st)
+            # 定义所有Tab及其对应的权限和渲染函数
+            all_tabs = [
+                ("数据准备", "model_analysis.dfm.prep", lambda: render_dfm_data_prep_page(st)),
+                ("模型训练", "model_analysis.dfm.train", lambda: render_dfm_model_training_page(st)),
+                ("模型分析", "model_analysis.dfm.analysis", lambda: render_dfm_model_analysis_page(st)),
+                ("新闻分析", "model_analysis.dfm.news", lambda: render_dfm_news_analysis_page(st))
+            ]
 
-            with tab2:
-                from dashboard.models.DFM.train.ui.pages import render_dfm_model_training_page
-                render_dfm_model_training_page(st)
+            # 过滤Tab
+            if debug_mode or not current_user:
+                # 调试模式或未登录：显示所有Tab
+                visible_tabs = all_tabs
+            else:
+                # 正常模式：根据权限过滤
+                from dashboard.auth.ui.middleware import get_auth_middleware
+                auth_middleware = get_auth_middleware()
 
-            with tab3:
-                from dashboard.models.DFM.results.ui.pages import render_dfm_model_analysis_page
-                render_dfm_model_analysis_page(st)
+                visible_tabs = []
+                for tab_name, permission_code, render_func in all_tabs:
+                    if auth_middleware.permission_manager.has_granular_access(
+                        current_user, "模型分析", "DFM 模型", tab_name
+                    ):
+                        visible_tabs.append((tab_name, permission_code, render_func))
 
-            with tab4:
-                from dashboard.models.DFM.decomp.ui.pages import render_dfm_news_analysis_page
-                render_dfm_news_analysis_page(st)
+            # 如果没有可访问的Tab
+            if not visible_tabs:
+                st.warning("您没有权限访问任何Tab")
+                return {'status': 'warning', 'content_type': 'model_analysis', 'sub_module': sub_module}
+
+            # 创建可见的标签页
+            tab_names = [tab[0] for tab in visible_tabs]
+            tabs = st.tabs(tab_names)
+
+            # 渲染每个Tab
+            for i, (tab_name, permission_code, render_func) in enumerate(visible_tabs):
+                with tabs[i]:
+                    render_func()
         else:
             st.info("请选择一个模型分析子模块以开始分析")
 
@@ -354,49 +381,37 @@ def render_model_analysis_content(sub_module: Optional[str]) -> Dict[str, Any]:
         return {'status': 'error', 'content_type': 'model_analysis', 'sub_module': sub_module, 'error': str(e)}
 
 
+def render_data_exploration_welcome() -> Dict[str, Any]:
+    """
+    渲染数据探索欢迎页面
+
+    Returns:
+        Dict[str, Any]: 渲染结果
+    """
+    welcome_page = DataExplorationWelcomePage()
+    welcome_page.render(st)
+    return {'status': 'success', 'content_type': 'data_exploration', 'sub_module': None}
+
+
 def render_data_exploration_content(sub_module: Optional[str]) -> Dict[str, Any]:
     """
     渲染数据探索内容
 
     Args:
-        sub_module: 子模块名称（现在数据探索是主模块，此参数未使用）
+        sub_module: 子模块名称（单变量分析、双变量分析）
 
     Returns:
         Dict[str, Any]: 渲染结果
     """
-    # 渲染完整的数据探索界面
-    # 状态同步已在dashboard.py主流程中完成，这里不再重复设置
-
-    # 渲染侧边栏数据上传
-    sidebar = DataExplorationSidebar()
-    uploaded_data = sidebar.render(st)
-
-    # 创建分析标签页（相关分析标签页包含DTW分析）
-    tab1, tab2, tab3 = st.tabs(["平稳性分析", "相关分析", "领先滞后分析"])
-
-    with tab1:
-        stationarity_component = StationarityAnalysisComponent()
-        stationarity_component.render(st, tab_index=0)
-
-    with tab2:
-        try:
-            unified_correlation_component = UnifiedCorrelationAnalysisComponent()
-            unified_correlation_component.render(st, tab_index=1)
-        except Exception as e:
-            st.error(f"统一相关分析组件加载失败: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-
-    with tab3:
-        try:
-            lead_lag_component = LeadLagAnalysisComponent()
-            lead_lag_component.render(st, tab_index=2)
-        except Exception as e:
-            st.error(f"领先滞后分析组件加载失败: {e}")
-            import traceback
-            st.code(traceback.format_exc())
-
-    return {'status': 'success', 'content_type': 'data_exploration', 'sub_module': None}
+    if sub_module == '单变量分析':
+        render_univariate_analysis_page()
+        return {'status': 'success', 'content_type': 'data_exploration', 'sub_module': sub_module}
+    elif sub_module == '双变量分析':
+        render_bivariate_analysis_page()
+        return {'status': 'success', 'content_type': 'data_exploration', 'sub_module': sub_module}
+    else:
+        st.warning(f"未知的数据探索子模块: {sub_module}")
+        return {'status': 'warning', 'message': f'未知的数据探索子模块: {sub_module}'}
 
 
 def get_module_icon(main_module: str) -> str:
@@ -477,10 +492,6 @@ def detect_navigation_level(main_module: str, sub_module: Optional[str]) -> str:
         str: 导航层次 ('MAIN_MODULE_ONLY', 'SUB_MODULE_ONLY', 'FUNCTION_ACTIVE')
     """
     try:
-        # 对于数据探索模块，直接显示内容（无子模块）
-        if main_module == '数据探索':
-            return 'FUNCTION_ACTIVE'
-
         # 对于用户管理模块，直接显示内容（管理员专属，无子模块）
         if main_module == '用户管理':
             return 'FUNCTION_ACTIVE'

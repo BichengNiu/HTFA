@@ -51,6 +51,18 @@ class UIConstants:
         "DFM 模型": {
             "icon": "[MODEL]",
             "description": "动态因子模型分析工具，支持数据准备、模型训练、结果分析和新闻分解"
+        },
+        "数据探索": {
+            "icon": "🔍",
+            "description": "深入探索时间序列数据的统计特性和内在规律"
+        },
+        "单变量分析": {
+            "icon": "📊",
+            "description": "分析单个变量的平稳性特征，包括ADF检验和KPSS检验"
+        },
+        "双变量分析": {
+            "icon": "🔗",
+            "description": "分析两个变量之间的相关性和领先滞后关系"
         }
     }
 

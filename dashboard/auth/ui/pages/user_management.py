@@ -32,15 +32,20 @@ class UserManagementPage:
     def render(self, current_user: User) -> None:
         """
         渲染用户管理页面
-        
+
         Args:
-            current_user: 当前登录用户
+            current_user: 当前登录用户（调试模式下可以为None）
         """
-        # 检查管理员权限
-        if not self.permission_manager.is_admin(current_user):
-            st.error("权限不足：只有管理员可以访问用户管理功能")
-            st.info("如需管理权限，请联系系统管理员")
-            return
+        # 检查调试模式
+        debug_mode = st.session_state.get('auth.debug_mode', False)
+
+        # 在调试模式下跳过管理员权限检查
+        if not debug_mode:
+            # 生产模式：检查管理员权限
+            if not current_user or not self.permission_manager.is_admin(current_user):
+                st.error("权限不足：只有管理员可以访问用户管理功能")
+                st.info("如需管理权限，请联系系统管理员")
+                return
         
         
         # 创建标签页
@@ -70,16 +75,30 @@ class UserManagementPage:
                 # 获取用户可访问的模块名称（直接基于权限）
                 accessible_modules = self.permission_manager.get_accessible_modules(user)
                 permissions_str = "、".join(accessible_modules) if accessible_modules else "无权限"
-                
+
+                # 使用期限显示
+                if user.is_permanent:
+                    validity_str = "永久有效"
+                elif user.valid_from and user.valid_until:
+                    validity_str = f"{user.valid_from.strftime('%Y-%m-%d')} 至 {user.valid_until.strftime('%Y-%m-%d')}"
+                    if user.is_expired():
+                        validity_str += " (已过期)"
+                    elif user.is_expiring_soon(30):
+                        days_left = user.days_until_expiry()
+                        validity_str += f" (剩{days_left}天)"
+                else:
+                    validity_str = "未设置"
+
                 user_data.append({
                     "ID": user.id,
                     "用户名": user.username,
                     "邮箱": user.email or "未设置",
                     "微信号": user.wechat or "未设置",
-                    "手机号": user.phone or "未设置", 
+                    "手机号": user.phone or "未设置",
                     "单位名称": user.organization or "未设置",
                     "创建时间": user.created_at.strftime("%Y-%m-%d %H:%M"),
                     "最后登录": user.last_login.strftime("%Y-%m-%d %H:%M") if user.last_login else "从未登录",
+                    "使用期限": validity_str,
                     "权限": permissions_str,
                     "状态": "激活" if user.is_active else "失效"
                 })
@@ -100,6 +119,7 @@ class UserManagementPage:
                     "单位名称": st.column_config.TextColumn("单位名称", width="large"),
                     "创建时间": st.column_config.TextColumn("创建时间", width="medium"),
                     "最后登录": st.column_config.TextColumn("最后登录", width="medium"),
+                    "使用期限": st.column_config.TextColumn("使用期限", width="large"),
                     "权限": st.column_config.TextColumn("权限", width="large"),
                     "状态": st.column_config.TextColumn("状态", width="small")
                 }
@@ -161,102 +181,182 @@ class UserManagementPage:
         # 用户信息修改表单
         with st.form(form_key, clear_on_submit=False):
             st.markdown("**修改用户信息：**")
-            
+
             col1, col2 = st.columns(2)
-            
+
             with col1:
                 # 用户名（只读显示）
                 st.text_input(
                     "用户名",
                     value=selected_user.username,
-                    disabled=True,
-                    help="用户名不可修改"
+                    disabled=True
                 )
-                
+
                 # 邮箱修改
                 new_email = st.text_input(
                     "邮箱",
                     value=selected_user.email or "",
-                    placeholder=f"当前值：{selected_user.email or '未设置'}",
-                    help=f"当前值：{selected_user.email or '未设置'}"
+                    placeholder=f"当前值：{selected_user.email or '未设置'}"
                 )
-                
+
                 # 微信号修改
                 new_wechat = st.text_input(
-                    "微信号", 
+                    "微信号",
                     value=selected_user.wechat or "",
-                    placeholder=f"当前值：{selected_user.wechat or '未设置'}",
-                    help=f"当前值：{selected_user.wechat or '未设置'}"
+                    placeholder=f"当前值：{selected_user.wechat or '未设置'}"
                 )
-                
+
+            with col2:
                 # 手机号修改
                 new_phone = st.text_input(
                     "手机号",
                     value=selected_user.phone or "",
-                    placeholder=f"当前值：{selected_user.phone or '未设置'}",
-                    help=f"当前值：{selected_user.phone or '未设置'}"
+                    placeholder=f"当前值：{selected_user.phone or '未设置'}"
                 )
-                
-            with col2:
+
                 # 单位名称修改
                 new_organization = st.text_input(
                     "单位名称",
                     value=selected_user.organization or "",
-                    placeholder=f"当前值：{selected_user.organization or '未设置'}",
-                    help=f"当前值：{selected_user.organization or '未设置'}"
+                    placeholder=f"当前值：{selected_user.organization or '未设置'}"
                 )
-                
-                # 权限修改（多选框）
-                from dashboard.auth.permissions import PERMISSION_MODULE_MAP
 
-                # 获取所有可用模块权限
-                available_modules = list(PERMISSION_MODULE_MAP.keys())
-                current_accessible_modules = self.permission_manager.get_accessible_modules(selected_user)
-                
-                st.markdown("**用户权限模块：**")
-                new_permissions = []
-                
-                for module_name in available_modules:
-                    module_permissions = PERMISSION_MODULE_MAP[module_name]
-                    has_access = module_name in current_accessible_modules
-                    
-                    checkbox_value = st.checkbox(
-                        module_name,
-                        value=has_access,
-                        key=f"permission_{module_name}_{selected_user.id}",
-                        help=f"权限代码: {', '.join(module_permissions)}"
-                    )
-                    
-                    if checkbox_value:
-                        new_permissions.extend(module_permissions)
-                
-                # 去重权限列表
-                new_permissions = list(set(new_permissions))
-                
-                # 显示当前权限预览
-                if new_permissions:
-                    selected_modules = []
-                    for module_name, required_perms in PERMISSION_MODULE_MAP.items():
-                        if any(perm in new_permissions for perm in required_perms):
-                            selected_modules.append(module_name)
-                    st.info(f"可访问模块：{' | '.join(selected_modules)}")
-                else:
-                    st.warning("无权限访问任何模块")
-                
-                # 状态修改（下拉菜单）
+                # 状态修改
                 status_options = {
                     "激活": True,
                     "非激活": False
                 }
                 current_status_display = "激活" if selected_user.is_active else "非激活"
-                
+
                 selected_status_key = st.selectbox(
                     "用户状态",
                     options=list(status_options.keys()),
-                    index=list(status_options.keys()).index(current_status_display),
-                    help=f"当前状态：{current_status_display}"
+                    index=list(status_options.keys()).index(current_status_display)
                 )
                 new_is_active = status_options[selected_status_key]
+
+            # 用户信息与权限模块之间添加分割线
+            st.divider()
+
+            # 用户权限模块标题
+            st.markdown("**用户权限模块：**")
+
+            # 权限修改（单列布局，每个主模块及其子模块和tab占一行）
+            from dashboard.auth.permissions import GRANULAR_PERMISSION_MAP
+            from dashboard.auth.permission_builder import PermissionTreeBuilder
+
+            # 获取当前用户的权限集合
+            current_permissions = set(selected_user.permissions)
+
+            # 收集新权限
+            new_permissions = []
+
+            # 渲染函数：渲染单个主模块及其子模块（一行显示）
+            def render_permission_module(main_name, main_config, current_perms, perm_list):
+                main_code = main_config["code"]
+                has_main = main_code in current_perms
+
+                # 主模块checkbox（直接显示名称）
+                main_checked = st.checkbox(
+                    main_name,
+                    value=has_main,
+                    key=f"perm_main_{main_code}_{selected_user.id}"
+                )
+
+                if main_checked:
+                    perm_list.append(main_code)
+
+                # 子模块和Tab（横向排列在同一行，使用缩进）
+                if main_config.get("sub_modules"):
+                    sub_modules = main_config["sub_modules"]
+
+                    # 计算总列数：每个子模块一列
+                    sub_cols = st.columns(len(sub_modules))
+
+                    for idx, (sub_name, sub_config) in enumerate(sub_modules.items()):
+                        sub_code = sub_config["code"]
+                        has_sub = sub_code in current_perms
+
+                        with sub_cols[idx]:
+                            # 子模块使用缩进显示
+                            sub_checked = st.checkbox(
+                                f"　{sub_name}",
+                                value=has_sub,
+                                key=f"perm_sub_{sub_code}_{selected_user.id}"
+                            )
+
+                            if sub_checked:
+                                perm_list.append(sub_code)
+
+                            # Tab级别（垂直排列在子模块下方）
+                            if sub_config.get("tabs"):
+                                tabs = sub_config["tabs"]
+
+                                for tab_name, tab_code in tabs.items():
+                                    has_tab = tab_code in current_perms
+
+                                    # Tab使用更多缩进显示
+                                    tab_checked = st.checkbox(
+                                        f"　　{tab_name}",
+                                        value=has_tab,
+                                        key=f"perm_tab_{tab_code}_{selected_user.id}"
+                                    )
+
+                                    if tab_checked:
+                                        perm_list.append(tab_code)
+
+                # 分隔线
+                st.markdown("---")
+
+            # 遍历所有主模块，每个占一行
+            for main_name, main_config in GRANULAR_PERMISSION_MAP.items():
+                render_permission_module(
+                    main_name,
+                    main_config,
+                    current_permissions,
+                    new_permissions
+                )
+
+            # 去重权限列表
+            new_permissions = list(set(new_permissions))
+
+            # 显示当前权限预览
+            if new_permissions:
+                perm_display = [PermissionTreeBuilder.get_permission_display_name(p) for p in new_permissions]
+                st.info(f"已选权限数量: {len(new_permissions)}")
+                with st.expander("查看详细权限"):
+                    for display_name in sorted(perm_display):
+                        st.text(f"- {display_name}")
+            else:
+                st.warning("无权限访问任何模块")
+
+            # 权限模块与使用期限管理之间添加分割线
+            st.divider()
+
+            # 使用期限管理
+            st.markdown("**使用期限管理：**")
+            is_permanent = st.checkbox(
+                "永久有效",
+                value=selected_user.is_permanent,
+                key=f"permanent_{selected_user.id}"
+            )
+
+            valid_from = None
+            valid_until = None
+            if not is_permanent:
+                col_start, col_end = st.columns(2)
+                with col_start:
+                    valid_from = st.date_input(
+                        "生效日期",
+                        value=selected_user.valid_from if selected_user.valid_from else None,
+                        key=f"valid_from_{selected_user.id}"
+                    )
+                with col_end:
+                    valid_until = st.date_input(
+                        "过期日期",
+                        value=selected_user.valid_until if selected_user.valid_until else None,
+                        key=f"valid_until_{selected_user.id}"
+                    )
             
             # 提交按钮
             st.markdown("---")
@@ -277,22 +377,26 @@ class UserManagementPage:
                 self._handle_single_user_operation(
                     selected_user,
                     new_email,
-                    new_wechat, 
+                    new_wechat,
                     new_phone,
                     new_organization,
                     new_permissions,
-                    new_is_active
+                    new_is_active,
+                    is_permanent,
+                    valid_from,
+                    valid_until
                 )
     
-    def _handle_single_user_operation(self, user: User, new_email: str, new_wechat: str, 
-                                    new_phone: str, new_organization: str, 
-                                    new_permissions: List[str], new_is_active: bool):
+    def _handle_single_user_operation(self, user: User, new_email: str, new_wechat: str,
+                                    new_phone: str, new_organization: str,
+                                    new_permissions: List[str], new_is_active: bool,
+                                    is_permanent: bool, valid_from, valid_until):
         """处理单用户信息修改"""
         try:
             # 记录原始信息
             original_info = f"{user.username} (ID: {user.id})"
             changes = []
-            
+
             # 邮箱验证和更新
             if new_email != (user.email or ""):
                 if new_email:
@@ -303,12 +407,12 @@ class UserManagementPage:
                         return False
                 user.email = new_email if new_email else None
                 changes.append("邮箱")
-            
+
             # 微信号更新
             if new_wechat != (user.wechat or ""):
                 user.wechat = new_wechat if new_wechat else None
                 changes.append("微信号")
-                
+
             # 手机号验证和更新
             if new_phone != (user.phone or ""):
                 if new_phone:
@@ -318,23 +422,48 @@ class UserManagementPage:
                         return False
                 user.phone = new_phone if new_phone else None
                 changes.append("手机号")
-                
+
             # 单位名称更新
             if new_organization != (user.organization or ""):
                 user.organization = new_organization if new_organization else None
                 changes.append("单位名称")
-                
+
             # 权限更新
             if set(new_permissions) != set(user.permissions):
                 user.permissions = new_permissions
                 changes.append("权限")
-                
+
             # 状态更新
             if new_is_active != user.is_active:
                 user.is_active = new_is_active
                 status_change = "激活" if new_is_active else "禁用"
                 changes.append(f"状态({status_change})")
-            
+
+            # 使用期限更新
+            if is_permanent != user.is_permanent:
+                user.is_permanent = is_permanent
+                changes.append("永久有效状态")
+
+            if not is_permanent:
+                # 验证日期有效性
+                if valid_from and valid_until and valid_from >= valid_until:
+                    st.error("生效日期必须早于过期日期")
+                    return False
+
+                if valid_from != user.valid_from:
+                    user.valid_from = valid_from
+                    changes.append("生效日期")
+
+                if valid_until != user.valid_until:
+                    user.valid_until = valid_until
+                    changes.append("过期日期")
+            else:
+                # 永久有效时清空日期字段
+                if user.valid_from is not None or user.valid_until is not None:
+                    user.valid_from = None
+                    user.valid_until = None
+                    changes.append("清除期限限制")
+
             # 如果没有任何变化
             if not changes:
                 st.info("用户信息未发生变化")

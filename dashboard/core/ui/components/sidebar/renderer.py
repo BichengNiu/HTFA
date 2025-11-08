@@ -105,6 +105,19 @@ def render_complete_sidebar(
 
                 sub_module_options = list(sub_config.keys())
 
+                # 根据细粒度权限过滤子模块
+                if not debug_mode and current_user:
+                    from dashboard.auth.ui.middleware import get_auth_middleware
+                    auth_middleware = get_auth_middleware()
+
+                    # 获取用户在当前主模块下可访问的子模块
+                    accessible_submodules = auth_middleware.permission_manager.get_accessible_submodules(
+                        current_user, updated_main_module
+                    )
+
+                    # 过滤子模块选项
+                    sub_module_options = [sub for sub in sub_module_options if sub in accessible_submodules]
+
                 # 渲染子模块选择器
                 sub_module_result = render_sub_module_selector(
                     sub_module_options, current_sub_module, updated_main_module,

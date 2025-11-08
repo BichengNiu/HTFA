@@ -27,9 +27,23 @@ class UserManagementWelcomePage:
             # 获取认证中间件
             auth_middleware = get_auth_middleware()
 
+            # 检查调试模式
+            debug_mode = st.session_state.get('auth.debug_mode', False)
+
             # 从统一状态管理器获取当前用户（避免重复认证）
             current_user = st.session_state.get("auth.current_user", None)
 
+            # 调试模式：跳过认证和权限检查
+            if debug_mode:
+                st.info("调试模式：已自动授予管理员权限")
+                # 在调试模式下直接渲染用户管理页面
+                if render_user_management_page is None:
+                    st.error("用户管理页面组件未正确导入")
+                    return
+                render_user_management_page(current_user)
+                return
+
+            # 生产模式：进行正常的认证和权限检查
             if not current_user:
                 # 显示登录提示而不是停止渲染
                 st.warning("请先登录以访问用户管理功能")
@@ -109,15 +123,41 @@ def render_user_management_sub_module(sub_module_name: str) -> Optional[str]:
         # 添加子模块标题
         st.markdown(f"### {sub_module_name}")
 
+        # 检查调试模式
+        debug_mode = st.session_state.get('auth.debug_mode', False)
+
         # 从统一状态管理器获取当前用户（避免重复认证）
         current_user = st.session_state.get("auth.current_user", None)
 
+        # 调试模式：跳过认证和权限检查
+        if debug_mode:
+            st.info("调试模式：已自动授予管理员权限")
+            # 在调试模式下直接渲染子模块
+            if render_user_management_page is None:
+                st.error("用户管理页面组件未正确导入")
+                return "页面组件导入失败"
+
+            # 根据子模块名称渲染不同内容
+            if sub_module_name == "用户列表":
+                render_user_management_page(current_user)
+            elif sub_module_name in ("权限配置", "权限设置"):
+                render_user_management_page(current_user)
+            elif sub_module_name == "系统设置":
+                render_user_management_page(current_user)
+            else:
+                st.error(f"未知的用户管理子模块: {sub_module_name}")
+                st.info("可用的子模块: 用户列表, 权限配置, 系统设置")
+                return f"未知子模块: {sub_module_name}"
+
+            return "success"
+
+        # 生产模式：进行正常的认证和权限检查
         if not current_user:
-            st.warning("⚠️ 请先登录以访问用户管理功能")
-            st.info("💡 用户管理功能需要管理员权限")
+            st.warning("请先登录以访问用户管理功能")
+            st.info("用户管理功能需要管理员权限")
 
             # 显示登录按钮
-            if st.button("🔑 点击登录", key=f"login_btn_{sub_module_name}", type="primary"):
+            if st.button("点击登录", key=f"login_btn_{sub_module_name}", type="primary"):
                 # 清除当前状态并重新加载登录页面
                 for key in st.session_state.keys():
                     if key.startswith('user_') or key.startswith('auth_'):
@@ -128,8 +168,8 @@ def render_user_management_sub_module(sub_module_name: str) -> Optional[str]:
 
         # 检查管理员权限
         if not auth_middleware.permission_manager.is_admin(current_user):
-            st.error("❌ 权限不足：只有管理员可以访问用户管理功能")
-            st.info("💡 如需管理权限，请联系系统管理员")
+            st.error("权限不足：只有管理员可以访问用户管理功能")
+            st.info("如需管理权限，请联系系统管理员")
 
             # 显示当前用户信息
             with st.expander("当前用户信息", expanded=False):

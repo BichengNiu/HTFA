@@ -236,9 +236,22 @@ class RegisterPage:
                     return False
             
             # 创建用户
-            from datetime import datetime
+            from datetime import datetime, date, timedelta
             hashed_password = SecurityUtils.hash_password(password)
-            
+
+            # 设置使用期限
+            today = date.today()
+            if username.lower() == 'admin':
+                # 管理员账户永久有效
+                is_permanent = True
+                valid_from = None
+                valid_until = None
+            else:
+                # 普通用户7天试用期
+                is_permanent = False
+                valid_from = today
+                valid_until = today + timedelta(days=7)
+
             new_user = User(
                 id=0,  # 将由数据库自动分配
                 username=username,
@@ -251,13 +264,20 @@ class RegisterPage:
                 created_at=datetime.now(),
                 is_active=True,  # 新注册用户默认激活
                 failed_login_attempts=0,
-                locked_until=None
+                locked_until=None,
+                valid_from=valid_from,
+                valid_until=valid_until,
+                is_permanent=is_permanent
             )
             
             # 保存到数据库
             if self.db.create_user(new_user):
-                success_placeholder.success(f"用户 {username} 注册成功！\n\n请注意：新用户默认没有模块权限，需要联系系统管理员分配相应权限后才能使用各功能模块。\n\n现在可以返回登录页面进行登录。")
-                self.logger.info(f"新用户注册: {username}")
+                if is_permanent:
+                    success_msg = f"用户 {username} 注册成功！\n\n账户类型：永久有效\n\n请注意：新用户默认没有模块权限，需要联系系统管理员分配相应权限后才能使用各功能模块。\n\n现在可以返回登录页面进行登录。"
+                else:
+                    success_msg = f"用户 {username} 注册成功！\n\n使用期限：{valid_from.strftime('%Y-%m-%d')} 至 {valid_until.strftime('%Y-%m-%d')}（7天试用期）\n\n请注意：新用户默认没有模块权限，需要联系系统管理员分配相应权限后才能使用各功能模块。\n\n现在可以返回登录页面进行登录。"
+                success_placeholder.success(success_msg)
+                self.logger.info(f"新用户注册: {username}, 永久={is_permanent}, 有效期={valid_from}~{valid_until}")
                 return True
             else:
                 error_placeholder.error("用户注册失败，请稍后重试")

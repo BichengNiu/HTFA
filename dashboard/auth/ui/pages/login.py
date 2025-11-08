@@ -158,7 +158,12 @@ class LoginPage:
 
                     if session:
                         # 登录成功
-                        error_placeholder.success("登录成功！正在跳转...")
+                        success_msg = "登录成功！正在跳转..."
+                        if message:
+                            # 有警告信息(如过期提醒)
+                            error_placeholder.warning(f"{success_msg}\n\n{message}")
+                        else:
+                            error_placeholder.success(success_msg)
 
                         self.logger.info(f"用户 {username} 登录成功")
 

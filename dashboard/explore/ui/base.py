@@ -123,24 +123,18 @@ class TimeSeriesAnalysisComponent(UIComponent):
         """
         self.logger.debug(f"Getting module data for analysis type: {self.analysis_type}")
 
-        # 尝试获取探索模块的数据
-        data_key = f"exploration.{self.analysis_type}.data"
+        # 从tab内上传的独立数据读取
+        data_key = f"exploration.{self.analysis_type}.upload_data"
         file_name_key = f"exploration.{self.analysis_type}.file_name"
-        data_source_key = f"exploration.{self.analysis_type}.data_source"
 
         selected_data = st.session_state.get(data_key)
 
         if selected_data is not None:
             file_name = st.session_state.get(file_name_key, '')
-            data_source_type = st.session_state.get(data_source_key, 'unknown')
 
             self.logger.debug(f"Found data with shape: {selected_data.shape}, file: {file_name}")
 
-            if data_source_type == 'upload':
-                data_source = f"上传文件: {file_name}" if file_name else "上传文件"
-            else:
-                data_source = f"数据源: {data_source_type}"
-
+            data_source = f"上传文件: {file_name}" if file_name else "上传文件"
             selected_df_name = file_name or "data"
             return selected_data, data_source, selected_df_name
         else:
@@ -152,13 +146,13 @@ class TimeSeriesAnalysisComponent(UIComponent):
         selected_data, data_source, selected_df_name = self.get_module_data()
 
         if selected_data is None:
-            st_obj.info("请在左侧侧边栏上传数据文件以进行分析")
+            st_obj.info("请在上方上传数据文件以进行分析")
             st_obj.markdown("""
             **使用说明：**
-            1. **数据上传**：在左侧侧边栏上传数据文件
+            1. **数据上传**：在上方区域上传CSV或Excel文件
             2. **数据格式**：第一列为时间戳，其余列为变量数据
             3. **支持格式**：CSV、Excel (.xlsx, .xls)
-            4. **数据共享**：上传的数据在所有分析模块间自动共享
+            4. **数据隔离**：每个tab的数据独立管理，切换tab时数据保留
             """)
             return None, "", ""
         else:

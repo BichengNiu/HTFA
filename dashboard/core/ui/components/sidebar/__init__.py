@@ -5,7 +5,6 @@
 """
 
 from dashboard.core.ui.components.sidebar.base import SidebarComponent
-from dashboard.core.ui.components.sidebar.exploration import DataExplorationSidebar
 from dashboard.core.ui.components.sidebar.dfm import DFMDataUploadSidebar
 from dashboard.core.ui.components.sidebar.renderer import (
     render_complete_sidebar,
@@ -17,7 +16,6 @@ from dashboard.core.ui.components.sidebar.renderer import (
 
 __all__ = [
     'SidebarComponent',
-    'DataExplorationSidebar',
     'DFMDataUploadSidebar',
     'render_complete_sidebar',
     'render_data_upload_section',

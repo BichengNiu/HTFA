@@ -36,6 +36,14 @@ class AuthManager:
             self.audit_logger.warning(f"安全事件 - 类型: 账户锁定, 用户: {user.username}, 详情: 尝试登录被锁定的账户")
             return f"账户已被锁定，请{user.locked_until.strftime('%Y-%m-%d %H:%M:%S')}后重试"
 
+        if user.is_not_yet_valid():
+            self.audit_logger.warning(f"安全事件 - 类型: 账户未生效, 用户: {user.username}, 详情: 尝试登录未生效的账户")
+            return f"账户尚未生效，生效日期：{user.valid_from.strftime('%Y-%m-%d')}"
+
+        if user.is_expired():
+            self.audit_logger.warning(f"安全事件 - 类型: 账户过期, 用户: {user.username}, 详情: 尝试登录已过期的账户")
+            return f"账户使用期限已过期，过期日期：{user.valid_until.strftime('%Y-%m-%d')}"
+
         if not user.is_active:
             self.audit_logger.warning(f"安全事件 - 类型: 账户禁用, 用户: {user.username}, 详情: 尝试登录被禁用的账户")
             return "登录权限未激活"
@@ -64,7 +72,14 @@ class AuthManager:
         self.db.update_user(user)
         self.audit_logger.info(f"登录尝试 - 用户: {user.username}, 状态: 成功")
 
-        return True, user, ""
+        warning_msg = ""
+        if user.is_expiring_soon(30):
+            days_left = user.days_until_expiry()
+            if days_left is not None:
+                warning_msg = f"提醒：您的账户将于{days_left}天后过期（{user.valid_until.strftime('%Y-%m-%d')}）"
+                self.audit_logger.info(f"过期提醒 - 用户: {user.username}, 剩余天数: {days_left}")
+
+        return True, user, warning_msg
 
     def authenticate(self, username: str, password: str) -> Tuple[bool, Optional[User], str]:
         """
