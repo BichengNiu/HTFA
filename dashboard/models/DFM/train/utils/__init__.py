@@ -21,6 +21,15 @@ from dashboard.models.DFM.train.utils.data_utils import load_and_validate_data
 # 格式化工具
 from dashboard.models.DFM.train.utils.formatting import format_training_summary, print_training_summary
 
+# 文件缓存工具
+from dashboard.models.DFM.train.utils.file_cache import get_file_hash, load_cached_file
+
+# 行业过滤工具
+from dashboard.models.DFM.train.utils.industry_filter import filter_industries_by_target, get_non_target_indicators
+
+# 状态管理器
+from dashboard.models.DFM.train.utils.state_manager import StateManager
+
 __all__ = [
     # 日志
     'get_logger',
@@ -35,4 +44,15 @@ __all__ = [
     # 格式化
     'format_training_summary',
     'print_training_summary',
+
+    # 文件缓存
+    'get_file_hash',
+    'load_cached_file',
+
+    # 行业过滤
+    'filter_industries_by_target',
+    'get_non_target_indicators',
+
+    # 状态管理
+    'StateManager',
 ]

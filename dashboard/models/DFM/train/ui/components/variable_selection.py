@@ -117,13 +117,14 @@ class VariableSelectionComponent(DFMComponent):
             industry_to_vars = self._get_industry_mapping_from_state()
             all_industries = list(industry_to_vars.keys()) if industry_to_vars else []
 
+            selected_industries_from_ui = self._render_industry_selection(
+                st_obj, all_industries, industry_to_vars
+            )
+
             dfm_default_map = self._get_state('dfm_default_variables_map', {})
-            print(f"[DEBUG] 从DFM变量列读取配置: {len(dfm_default_map)}个标记为'是'的变量")
-            if not dfm_default_map:
-                print(f"[DEBUG] DFM变量列为空或全部为非'是'值，将不选择任何变量")
 
             selected_indicators = self._render_indicator_selection(
-                st_obj, all_industries, industry_to_vars, dfm_default_map
+                st_obj, selected_industries_from_ui, industry_to_vars, dfm_default_map
             )
 
             var_industry_map = self._get_state('dfm_industry_map_obj', {})
@@ -473,6 +474,10 @@ class VariableSelectionComponent(DFMComponent):
         if not current_selected_industries:
             st_obj.info("请先在上方选择至少一个行业。")
         else:
+            num_cols_indicator = 4
+            indicator_cols = st_obj.columns(num_cols_indicator)
+            col_idx = 0
+
             for industry_name in current_selected_industries:
                 all_indicators_for_industry = industry_to_vars.get(industry_name, [])
 
@@ -489,52 +494,55 @@ class VariableSelectionComponent(DFMComponent):
                     current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
                     current_selection[industry_name] = []
                     self._set_state('dfm_selected_indicators_per_industry', current_selection)
+                    col_idx += 1
                     continue
 
-                st_obj.markdown(f"**行业: {industry_name}**")
+                with indicator_cols[col_idx % num_cols_indicator]:
+                    st_obj.markdown(f"**{industry_name}**")
 
-                excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
-                if excluded_count > 0:
-                    st_obj.text(f"  已自动排除目标变量 '{current_target_var}' (共排除 {excluded_count} 个)")
+                    excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
+                    if excluded_count > 0:
+                        st_obj.caption(f"排除目标变量: {excluded_count}个")
 
-                current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
-                default_selection_for_industry = current_selection.get(industry_name, None)
+                    current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
+                    default_selection_for_industry = current_selection.get(industry_name, None)
 
-                if default_selection_for_industry is None:
-                    if dfm_default_map:
-                        dfm_selected_indicators = [
-                            indicator for indicator in indicators_for_this_industry
-                            if normalize_text(indicator) in dfm_default_map
-                        ]
-                        default_selection_for_industry = dfm_selected_indicators
-                        print(f"[DEBUG] {industry_name}: 根据DFM变量列配置选择了{len(dfm_selected_indicators)}个指标")
-                    else:
-                        default_selection_for_industry = []
-                        print(f"[DEBUG] {industry_name}: DFM变量列为空，全不选")
+                    if default_selection_for_industry is None:
+                        if dfm_default_map:
+                            dfm_selected_indicators = [
+                                indicator for indicator in indicators_for_this_industry
+                                if normalize_text(indicator) in dfm_default_map
+                            ]
+                            default_selection_for_industry = dfm_selected_indicators
+                        else:
+                            default_selection_for_industry = []
 
-                valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
+                    valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
 
-                deselect_all_checked = st_obj.checkbox(
-                    f"取消全选 {industry_name} 指标",
-                    key=f"dfm_legacy_deselect_all_{industry_name}",
-                    help=f"勾选此框将取消所有已为 '{industry_name}' 选中的指标。"
-                )
+                    deselect_all_checked = st_obj.checkbox(
+                        "取消全选",
+                        key=f"dfm_legacy_deselect_all_{industry_name}",
+                        help=f"取消所有 '{industry_name}' 的指标"
+                    )
 
-                if deselect_all_checked:
-                    valid_default = []
+                    if deselect_all_checked:
+                        valid_default = []
 
-                selected_in_widget = st_obj.multiselect(
-                    f"为 '{industry_name}' 选择指标",
-                    options=indicators_for_this_industry,
-                    default=valid_default,
-                    help=f"从 {industry_name} 行业中选择预测指标。"
-                )
+                    selected_in_widget = st_obj.multiselect(
+                        "选择指标",
+                        options=indicators_for_this_industry,
+                        default=valid_default,
+                        help=f"从 {industry_name} 中选择指标",
+                        key=f"dfm_indicator_multiselect_{industry_name}"
+                    )
 
-                current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
-                current_selection[industry_name] = selected_in_widget
-                self._set_state('dfm_selected_indicators_per_industry', current_selection)
+                    current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
+                    current_selection[industry_name] = selected_in_widget
+                    self._set_state('dfm_selected_indicators_per_industry', current_selection)
 
-                final_selected_indicators_flat.extend(selected_in_widget)
+                    final_selected_indicators_flat.extend(selected_in_widget)
+
+                col_idx += 1
 
             current_selection = self._get_state('dfm_selected_indicators_per_industry', {})
             industries_to_remove_from_state = [

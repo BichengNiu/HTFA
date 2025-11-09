@@ -31,6 +31,11 @@ from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 # 导入组件化训练状态管理
 from dashboard.models.DFM.train.ui.components.training_status import TrainingStatusComponent
 
+# 导入新增工具和组件
+from dashboard.models.DFM.train.utils import StateManager, filter_industries_by_target, get_non_target_indicators
+from dashboard.models.DFM.train.ui.components.file_uploader_component import FileUploaderComponent
+from dashboard.models.DFM.train.config import UIConfig
+
 # 配置日志记录器
 logger = logging.getLogger(__name__)
 
@@ -220,93 +225,6 @@ class TrainDefaults:
     VALIDATION_END_DAY = 31
 
 
-
-def manage_download_state(action, session_id=None):
-    """统一管理下载相关状态"""
-    import uuid
-    import time
-
-    if action == 'start':
-        # 生成新的下载会话ID
-        if session_id is None:
-            session_id = str(uuid.uuid4())[:8]
-
-        # 设置下载状态
-        set_dfm_state('dfm_downloading_files', True)
-        set_dfm_state('dfm_download_start_time', time.time())
-        set_dfm_state('dfm_download_session_id', session_id)
-        return session_id
-
-    elif action == 'check':
-        # 检查下载状态
-        is_downloading = get_dfm_state('dfm_downloading_files', False)
-        start_time = get_dfm_state('dfm_download_start_time', 0)
-        session_id = get_dfm_state('dfm_download_session_id', '')
-
-        return {
-            'is_downloading': is_downloading,
-            'start_time': start_time,
-            'session_id': session_id,
-            'duration': time.time() - start_time if start_time else 0
-        }
-
-    elif action == 'clear':
-        # 清理下载状态
-        set_dfm_state('dfm_downloading_files', False)
-        set_dfm_state('dfm_download_start_time', None)
-        set_dfm_state('dfm_download_session_id', None)
-
-        return True
-
-    return False
-
-
-def is_download_protected():
-    """检查当前是否处于下载保护状态"""
-    download_info = manage_download_state('check')
-
-    # 检查是否正在下载
-    if not download_info['is_downloading']:
-        return False
-
-    # 检查下载是否超时（5分钟）
-    if download_info['duration'] > 300:
-        print(f"[WARNING] [下载保护] 下载会话超时，自动清理: {download_info['session_id']}")
-        manage_download_state('clear')
-        return False
-
-    return True
-
-
-def cleanup_expired_downloads(timeout_seconds=300):
-    """清理超时的下载状态"""
-    download_info = manage_download_state('check')
-
-    if download_info['is_downloading'] and download_info['duration'] > timeout_seconds:
-        print(f"[CLEAN] [下载清理] 清理超时下载会话: {download_info['session_id']}")
-        manage_download_state('clear')
-        return True
-
-    return False
-
-
-def validate_date_consistency():
-    """验证数据准备tab和模型训练tab的日期参数一致性"""
-    data_prep_start = get_dfm_state('dfm_param_data_start_date')
-    data_prep_end = get_dfm_state('dfm_param_data_end_date')
-    training_start = get_dfm_state('dfm_training_start_date')
-    validation_end = get_dfm_state('dfm_validation_end_date')
-
-    # 如果数据准备页面设置了边界，确保训练参数在合理范围内
-    if data_prep_start and training_start:
-        if training_start < data_prep_start:
-            print(f"[WARNING] [日期一致性] 训练开始日期 {training_start} 早于数据边界 {data_prep_start}")
-
-    if data_prep_end and validation_end:
-        if validation_end > data_prep_end:
-            print(f"[WARNING] [日期一致性] 验证结束日期 {validation_end} 晚于数据边界 {data_prep_end}")
-
-    return True
 
 
 def load_mappings_from_state(available_data_columns=None):
@@ -545,9 +463,6 @@ def render_dfm_model_training_page(st_instance):
     from datetime import datetime
     import time
 
-
-    cleanup_expired_downloads()
-
     if _TRAIN_UI_IMPORT_ERROR_MESSAGE:
         if "train" in _TRAIN_UI_IMPORT_ERROR_MESSAGE:
             st_instance.error(f"关键模块导入错误，模型训练功能不可用:\n{_TRAIN_UI_IMPORT_ERROR_MESSAGE}")
@@ -555,10 +470,6 @@ def render_dfm_model_training_page(st_instance):
         else:
             # 如果只是数据准备模块的导入问题，显示警告但继续
             st_instance.warning("[WARNING] 数据准备模块导入警告，但映射数据传递已修复，功能应该正常")
-    else:
-        # 如果没有错误消息，显示成功信息
-        # st_instance.success("[SUCCESS] 所有必需模块已成功加载(使用train)，模型训练功能可用")
-        pass  # 已禁用模块加载成功提示
 
     current_training_status = get_dfm_state('dfm_training_status')
     current_model_results = get_dfm_state('dfm_model_results_paths')
@@ -585,37 +496,6 @@ def render_dfm_model_training_page(st_instance):
     if get_dfm_state('dfm_model_results_paths') is None:
         set_dfm_state('dfm_model_results_paths', None)
 
-
-    # 状态重置现在仅通过用户点击按钮触发
-
-    # === 自动检测功能已禁用 - 用户不希望自动恢复训练状态 ===
-
-    # 移除已有训练结果检测功能，不再检查dym_estimate目录
-    def _detect_existing_results():
-        """不再检测已存在的训练结果文件，所有结果通过UI下载获得"""
-        return None
-
-    # 检测已有结果并更新状态
-    if (get_dfm_state('dfm_training_status') == '等待开始' and
-        get_dfm_state('existing_results_checked') is None):
-
-        set_dfm_state('existing_results_checked', True)
-        existing_results = _detect_existing_results()
-
-        if existing_results:
-            # 更新全局状态和状态管理器
-            set_dfm_state('dfm_training_status', '训练完成')
-            set_dfm_state('dfm_model_results_paths', existing_results)
-            set_dfm_state('dfm_training_log', ['[自动检测] 发现已有训练结果，已自动加载'])
-
-            # 保持当前导航状态，避免跳转
-            if 'navigation.selected_sub_module' in st.session_state:
-                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
-            if 'navigation.selected_detail_module' in st.session_state:
-                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
-
-            # 刷新UI显示
-            st_instance.rerun()
 
 
     training_status = get_dfm_state('dfm_training_status', '等待开始')
@@ -728,182 +608,13 @@ def render_dfm_model_training_page(st_instance):
             # 确保刷新计数器已清除
             set_dfm_state('training_refresh_count', 0)
 
-    # [REMOVED] 重复的训练完成检查代码块已移除，避免渲染循环
+    # 使用组件化的文件上传器
+    state_manager = StateManager('train_model')
+    file_uploader = FileUploaderComponent(state_manager)
+    input_df, var_industry_map, dfm_default_map = file_uploader.render(st_instance)
 
-    # else:
-    #     pass  # 跳过页面刷新
-
-    # 文件上传区域 - 替代从data_prep命名空间读取数据
-    st_instance.markdown("### 数据文件上传")
-
-    # 检查是否已有上传的文件
-    existing_data = get_dfm_state('train_uploaded_data_file', None)
-    existing_map = get_dfm_state('train_uploaded_industry_map_file', None)
-
-    # 只在文件未完全上传时显示提示
-    if existing_data is None or existing_map is None:
-        st_instance.info("请上传数据准备模块导出的预处理数据和行业映射文件")
-
-    col_upload1, col_upload2 = st_instance.columns(2)
-
-    with col_upload1:
-        st_instance.markdown("**预处理数据文件 (.csv)**")
-        uploaded_data_file = st_instance.file_uploader(
-            "选择预处理数据文件",
-            type=['csv'],
-            key="train_data_upload",
-            help="上传数据准备模块导出的预处理数据CSV文件（包含日期索引和所有变量列）"
-        )
-
-        if uploaded_data_file:
-            set_dfm_state("train_uploaded_data_file", uploaded_data_file)
-            st_instance.success(f"已上传: {uploaded_data_file.name}")
-        else:
-            existing_data_file = get_dfm_state('train_uploaded_data_file', None)
-            if existing_data_file is not None and hasattr(existing_data_file, 'name'):
-                st_instance.success(f"当前文件: {existing_data_file.name}")
-
-    with col_upload2:
-        st_instance.markdown("**行业映射文件 (.csv)**")
-        uploaded_industry_map_file = st_instance.file_uploader(
-            "选择行业映射文件",
-            type=['csv'],
-            key="train_industry_map_upload",
-            help="上传数据准备模块导出的行业映射CSV文件（包含Indicator和Industry两列）"
-        )
-
-        if uploaded_industry_map_file:
-            set_dfm_state("train_uploaded_industry_map_file", uploaded_industry_map_file)
-            st_instance.success(f"已上传: {uploaded_industry_map_file.name}")
-        else:
-            existing_map_file = get_dfm_state('train_uploaded_industry_map_file', None)
-            if existing_map_file is not None and hasattr(existing_map_file, 'name'):
-                st_instance.success(f"当前文件: {existing_map_file.name}")
-
-    st_instance.markdown("---")
-
-    # 加载上传的文件
-    data_file = get_dfm_state('train_uploaded_data_file', None)
-    industry_map_file = get_dfm_state('train_uploaded_industry_map_file', None)
-
-    # 生成文件标识（用于检测文件变更）
-    def get_file_id(file_obj):
-        if file_obj is None:
-            return None
-        file_obj.seek(0, 2)  # 移动到文件末尾
-        size = file_obj.tell()
-        file_obj.seek(0)  # 重置到开头
-        name = getattr(file_obj, 'name', 'unknown')
-        return f"{name}_{size}"
-
-    # 加载预处理数据（带缓存）
-    input_df = None
-    if data_file is not None:
-        current_data_file_id = get_file_id(data_file)
-        cached_data_file_id = get_dfm_state('cached_data_file_id', None)
-        cached_df = get_dfm_state('dfm_prepared_data_df', None)
-
-        # 检查缓存是否有效
-        if cached_df is not None and current_data_file_id == cached_data_file_id:
-            input_df = cached_df
-            print(f"[模型训练] 使用缓存的预处理数据: {input_df.shape}")
-        else:
-            # 缓存无效，重新加载
-            try:
-                data_file.seek(0)
-                input_df = pd.read_csv(data_file, index_col=0, parse_dates=True)
-                set_dfm_state('dfm_prepared_data_df', input_df)
-                set_dfm_state('cached_data_file_id', current_data_file_id)
-                print(f"[模型训练] 重新加载预处理数据: {input_df.shape}")
-            except Exception as e:
-                st_instance.error(f"加载预处理数据失败: {e}")
-                input_df = None
-
-    # 加载行业映射（带缓存）
-    var_industry_map = {}
-    if industry_map_file is not None:
-        current_map_file_id = get_file_id(industry_map_file)
-        cached_map_file_id = get_dfm_state('cached_map_file_id', None)
-        cached_industry_map = get_dfm_state('dfm_industry_map_obj', None)
-        cached_dfm_default_map = get_dfm_state('dfm_default_variables_map', None)
-
-        # 检查缓存是否有效
-        if cached_industry_map is not None and current_map_file_id == cached_map_file_id:
-            var_industry_map = cached_industry_map
-            print(f"[模型训练] 使用缓存的行业映射: {len(var_industry_map)} 个变量")
-            if cached_dfm_default_map is not None:
-                print(f"[模型训练] 使用缓存的DFM变量配置: {len(cached_dfm_default_map)} 个标记为'是'的变量")
-        else:
-            # 缓存无效，重新加载
-            try:
-                import unicodedata as udata
-                industry_map_file.seek(0)
-                industry_map_df = pd.read_csv(industry_map_file)
-                if 'Indicator' in industry_map_df.columns and 'Industry' in industry_map_df.columns:
-                    var_industry_map = {
-                        udata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                        for k, v in zip(industry_map_df['Indicator'], industry_map_df['Industry'])
-                        if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip()
-                    }
-                    set_dfm_state('dfm_industry_map_obj', var_industry_map)
-                    set_dfm_state('cached_map_file_id', current_map_file_id)
-                    print(f"[模型训练] 重新加载行业映射: {len(var_industry_map)} 个变量")
-
-                    # 读取DFM变量列（如果存在），只保留标记为"是"的条目
-                    if 'DFM_Default' in industry_map_df.columns:
-                        var_dfm_default_map = {
-                            udata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                            for k, v in zip(industry_map_df['Indicator'], industry_map_df['DFM_Default'])
-                            if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
-                        }
-                        set_dfm_state('dfm_default_variables_map', var_dfm_default_map)
-                        print(f"[模型训练] 从CSV文件加载了 {len(var_dfm_default_map)} 个标记为'是'的变量")
-                    else:
-                        print(f"[模型训练] 映射文件未包含DFM_Default列（旧格式），跳过DFM变量配置加载")
-                else:
-                    st_instance.error("映射文件格式错误：必须包含 'Indicator' 和 'Industry' 列")
-            except Exception as e:
-                st_instance.error(f"加载映射文件失败: {e}")
-                import traceback
-                st_instance.code(traceback.format_exc(), language="python")
-
-    # 检查文件是否都已上传并成功解析
+    # 如果文件验证失败，提前返回
     if input_df is None or not var_industry_map:
-        missing_details = []
-        if input_df is None:
-            if data_file is None:
-                missing_details.append("预处理数据文件：未上传")
-            else:
-                missing_details.append("预处理数据文件：上传成功但解析失败，请检查CSV格式是否正确")
-
-        if not var_industry_map:
-            if industry_map_file is None:
-                missing_details.append("行业映射文件：未上传")
-            else:
-                missing_details.append("行业映射文件：上传成功但解析失败，可能原因：\n  - 缺少必需的列（需要包含'Indicator'和'Industry'列）\n  - 数据行全部为空或格式不正确")
-
-        st_instance.error(f"数据验证失败：\n\n" + "\n\n".join([f"{i+1}. {detail}" for i, detail in enumerate(missing_details)]))
-
-        # 添加排查建议
-        with st_instance.expander("查看排查建议"):
-            st_instance.markdown("""
-            **预处理数据文件要求：**
-            - 必须是CSV格式
-            - 第一列为日期索引
-            - 包含所有变量列
-
-            **行业映射文件要求：**
-            - 必须是CSV格式
-            - 必须包含'Indicator'和'Industry'两列
-            - 每行数据不能为空
-            - 可选包含'DFM_Default'列（标记默认变量）
-
-            **常见问题：**
-            - 文件编码问题：确保使用UTF-8编码
-            - 列名拼写错误：检查列名是否完全匹配
-            - 数据为空：确保文件中有有效数据行
-            """)
-
         return
 
     available_target_vars = []
@@ -996,25 +707,20 @@ def render_dfm_model_training_page(st_instance):
             options=available_target_vars,
             index=available_target_vars.index(current_target_var),
             key="ss_dfm_target_variable",
-            help="选择您希望模型预测的目标序列。"
+            label_visibility="collapsed"
         )
         set_dfm_state('dfm_target_variable', selected_target_var)
     else:
         st_instance.error("[ERROR] 无法找到任何可用的目标变量")
         set_dfm_state('dfm_target_variable', None)
 
-    # 2. 过滤行业：移除仅包含目标变量的行业
+    # 2. 过滤行业：移除仅包含目标变量的行业（使用工具函数）
     current_target_var = get_dfm_state('dfm_target_variable', None)
-    filtered_industries = []
-
-    for industry_name in unique_industries:
-        industry_indicators = var_to_indicators_map_by_industry.get(industry_name, [])
-        if current_target_var and current_target_var in industry_indicators:
-            non_target_indicators = [ind for ind in industry_indicators if ind != current_target_var]
-            if non_target_indicators:
-                filtered_industries.append(industry_name)
-        else:
-            filtered_industries.append(industry_name)
+    filtered_industries = filter_industries_by_target(
+        unique_industries,
+        var_to_indicators_map_by_industry,
+        current_target_var
+    )
 
     # 暂时存储过滤后的行业，以供后续步骤3中使用
     if not filtered_industries:
@@ -1037,14 +743,18 @@ def render_dfm_model_training_page(st_instance):
     else:
         current_selection = get_dfm_state('dfm_selected_indicators_per_industry', {})
 
+        num_cols = 3
+        cols = st_instance.columns(num_cols)
+        col_idx = 0
+
         for industry_name in current_selected_industries:
             all_indicators_for_industry = var_to_indicators_map_by_industry.get(industry_name, [])
-            
+
             # 修复：排除目标变量，确保用户无法选择目标变量作为预测变量
             current_target_var = get_dfm_state('dfm_target_variable', None)
             if current_target_var:
                 indicators_for_this_industry = [
-                    indicator for indicator in all_indicators_for_industry 
+                    indicator for indicator in all_indicators_for_industry
                     if indicator != current_target_var
                 ]
             else:
@@ -1053,91 +763,89 @@ def render_dfm_model_training_page(st_instance):
             # 修复：完全跳过没有可用指标的行业，不显示任何内容
             if not indicators_for_this_industry:
                 current_selection[industry_name] = []
+                col_idx += 1
                 continue
 
-            # 只有当行业有可用指标时才显示
-            st_instance.markdown(f"**行业: {industry_name}**")
-            
-            # 只有在有指标被排除且仍有可用指标时才显示提示
-            excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
-            if excluded_count > 0:
-                st_instance.text(f"  已自动排除目标变量 '{current_target_var}' (共排除 {excluded_count} 个)")
+            with cols[col_idx % num_cols]:
+                # 只有在有指标被排除且仍有可用指标时才显示提示
+                excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
 
-            # 从状态管理器读取已选指标，或使用DFM默认选择
-            default_selection_for_industry = current_selection.get(industry_name, None)
+                # 获取DFM默认变量映射
+                dfm_default_map = get_dfm_state('dfm_default_variables_map', {})
 
-            # 如果状态管理器中没有选择，使用DFM变量列配置
-            if default_selection_for_industry is None:
-                # dfm_default_map中已经只包含标记为"是"的变量，直接筛选该行业的指标
-                dfm_default_indicators = [
-                    indicator for indicator in indicators_for_this_industry
-                    if normalize_text(indicator) in dfm_default_map
-                ]
-                default_selection_for_industry = dfm_default_indicators
+                # 调试输出
+                print(f"[调试] 行业: {industry_name}")
+                print(f"[调试] dfm_default_map键数量: {len(dfm_default_map)}")
+                print(f"[调试] 可用指标数量: {len(indicators_for_this_industry)}")
+                if len(dfm_default_map) > 0:
+                    print(f"[调试] dfm_default_map前5个键: {list(dfm_default_map.keys())[:5]}")
 
-            # 确保默认值是实际可选列表的子集
-            valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
+                # 从状态管理器读取已选指标，或使用DFM默认选择
+                default_selection_for_industry = current_selection.get(industry_name, None)
 
-            # 全选复选框，使用key确保状态追踪
-            select_all_key = f"dfm_select_all_indicators_{industry_name}"
-            select_all_prev_key = f"dfm_select_all_prev_{industry_name}"
-            multiselect_key = f"dfm_indicators_multiselect_{industry_name}"
+                # 如果状态管理器中没有选择，使用DFM变量列配置
+                if default_selection_for_industry is None:
+                    dfm_default_indicators = [
+                        indicator for indicator in indicators_for_this_industry
+                        if normalize_text(indicator) in dfm_default_map
+                    ]
+                    default_selection_for_industry = dfm_default_indicators
 
-            # 判断是否应该默认勾选全选复选框（所有指标都已选中）
-            should_check_select_all = (
-                len(valid_default) > 0 and
-                len(valid_default) == len(indicators_for_this_industry)
-            )
+                    # 调试输出匹配结果
+                    print(f"[调试] DFM默认选中: {len(dfm_default_indicators)}个")
+                    if len(indicators_for_this_industry) > 0:
+                        print(f"[调试] 前3个可用指标标准化: {[normalize_text(ind) for ind in indicators_for_this_industry[:3]]}")
+                    for ind in dfm_default_indicators[:5]:
+                        print(f"  - {ind} (标准化: {normalize_text(ind)})")
 
-            # 确保 session_state 中一定有初始值（避免 Streamlit 警告）
-            if multiselect_key not in st.session_state:
-                # 使用默认选择初始化
-                st.session_state[multiselect_key] = valid_default
-                print(f"[DEBUG] 初始化multiselect状态: {industry_name}, {len(valid_default)}个指标")
+                # 确保默认值是实际可选列表的子集
+                valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
 
-            select_all_checked = st_instance.checkbox(
-                f"全选 {industry_name} 指标",
-                value=should_check_select_all,
-                key=select_all_key,
-                help=f"勾选此框将选中所有 '{industry_name}' 的指标。"
-            )
+                # 判断是否应该默认勾选全选（所有可用指标都在DFM默认配置中）
+                should_check_select_all = (
+                    len(valid_default) > 0 and
+                    len(valid_default) == len(indicators_for_this_industry)
+                )
 
-            # 检测全选复选框状态变化
-            prev_select_all = get_dfm_state(select_all_prev_key, should_check_select_all)
+                # 行业名称与全选checkbox同行
+                header_col1, header_col2 = st_instance.columns([3, 1])
+                with header_col1:
+                    st_instance.markdown(f"**{industry_name}**")
+                with header_col2:
+                    select_all_key = f"dfm_select_all_{industry_name}"
+                    select_all_checked = st_instance.checkbox(
+                        "全选",
+                        value=should_check_select_all,
+                        key=select_all_key
+                    )
 
-            # 如果全选状态发生变化，更新multiselect的值
-            if select_all_checked != prev_select_all:
+                if excluded_count > 0:
+                    st_instance.caption(f"排除目标变量: {excluded_count}个")
+
+                # 初始化multiselect
+                multiselect_key = f"dfm_indicators_multiselect_{industry_name}"
+
+                if multiselect_key not in st.session_state:
+                    st.session_state[multiselect_key] = valid_default
+
+                # 同步checkbox与multiselect
                 if select_all_checked:
-                    # 全选被勾选：更新session_state中multiselect的值为所有指标
-                    print(f"[DEBUG] 全选复选框被勾选: {industry_name}, 设置 {len(indicators_for_this_industry)} 个指标")
                     st.session_state[multiselect_key] = indicators_for_this_industry
                 else:
-                    # 全选被取消：清空multiselect的值
-                    print(f"[DEBUG] 全选复选框被取消: {industry_name}, 清空指标选择")
-                    st.session_state[multiselect_key] = []
-                # 保存当前全选状态
-                set_dfm_state(select_all_prev_key, select_all_checked)
+                    if st.session_state[multiselect_key] == indicators_for_this_industry:
+                        st.session_state[multiselect_key] = valid_default
 
-            selected_in_widget = st_instance.multiselect(
-                f"为 '{industry_name}' 选择指标",
-                options=indicators_for_this_industry,
-                key=multiselect_key,
-                help=f"从 {industry_name} 行业中选择预测指标。"
-            )
+                selected_in_widget = st_instance.multiselect(
+                    "选择指标",
+                    options=indicators_for_this_industry,
+                    key=multiselect_key,
+                    label_visibility="collapsed"
+                )
 
-            # 同步全选复选框状态：如果用户手动修改了multiselect
-            # 检查是否所有指标都被选中，如果是则同步全选状态
-            if len(selected_in_widget) == len(indicators_for_this_industry) and len(selected_in_widget) > 0:
-                # 所有指标都被选中，更新全选状态
-                if not select_all_checked:
-                    set_dfm_state(select_all_prev_key, True)
-            elif len(selected_in_widget) == 0 or len(selected_in_widget) < len(indicators_for_this_industry):
-                # 未全选，更新全选状态
-                if select_all_checked:
-                    set_dfm_state(select_all_prev_key, False)
+                current_selection[industry_name] = selected_in_widget
+                final_selected_indicators_flat.extend(selected_in_widget)
 
-            current_selection[industry_name] = selected_in_widget
-            final_selected_indicators_flat.extend(selected_in_widget)
+            col_idx += 1
 
         industries_to_remove_from_state = [
             ind for ind in current_selection
@@ -1206,11 +914,8 @@ def render_dfm_model_training_page(st_instance):
             data_prep_start = get_dfm_state('dfm_param_data_start_date')
             data_prep_end = get_dfm_state('dfm_param_data_end_date')
 
-            static_defaults = {
-                'training_start': datetime(2020, 1, 1).date(),  # 训练期开始：2020年1月1日
-                'validation_start': datetime(2025, 1, 1).date(),  # 验证期开始：2025年1月1日
-                'validation_end': datetime(2025, 12, 31).date()  # 验证期结束：2025年12月31日
-            }
+            # 使用统一配置类
+            static_defaults = UIConfig.get_date_defaults()
 
             try:
                 data_df = None
@@ -1229,12 +934,10 @@ def render_dfm_model_training_page(st_instance):
                         print(f"[WARNING] 警告: 数据包含未来日期 {data_last_date}，将使用今天作为最后日期")
                         data_last_date = today
 
-                    # 训练期开始日期固定为2020年1月1日
-                    training_start_date = datetime(2020, 1, 1).date()
-
-                    # 验证期开始和结束日期固定
-                    validation_start_date = datetime(2025, 7, 1).date()  # 验证期开始：2025年7月1日
-                    validation_end_date = datetime(2025, 12, 31).date()  # 验证期结束：2025年12月31日
+                    # 使用统一配置类的默认日期
+                    training_start_date = UIConfig.DEFAULT_TRAINING_START
+                    validation_start_date = UIConfig.DEFAULT_VALIDATION_START
+                    validation_end_date = UIConfig.DEFAULT_VALIDATION_END
 
                     return {
                         'training_start': training_start_date,       # [HOT] 训练开始日：优先使用数据准备页面设置
@@ -1282,11 +985,6 @@ def render_dfm_model_training_page(st_instance):
                 data_end = data_df.index.max().strftime('%Y-%m-%d')
                 data_count = len(data_df.index)
                 # st_instance.info(f"[DATA] 数据: {data_start} 至 {data_end} ({data_count}点)")
-
-
-        # 执行日期一致性验证
-        validate_date_consistency()
-
         # 1. 训练期开始日期
         training_start_value = st_instance.date_input(
             "训练期开始日期 (Training Start Date)",

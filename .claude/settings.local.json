@@ -25,7 +25,8 @@
       "Bash(if exist temp_data_output.txt del /f /q temp_data_output.txt)",
       "Bash(if exist profit_margin_comparison.txt del /f /q profit_margin_comparison.txt)",
       "WebSearch",
-      "Bash(NUL)"
+      "Bash(NUL)",
+      "Bash(chcp 65001)"
     ],
     "deny": [],
     "ask": []

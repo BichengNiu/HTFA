@@ -288,8 +288,11 @@ class DFMModel:
         else:
             # 多因子情况：使用VAR模型估计（保持原逻辑，已验证成功）
             from statsmodels.tsa.api import VAR
-            var_model = VAR(factors_current.dropna())
-            var_results = var_model.fit(self.max_lags)
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', message='.*No frequency information.*')
+                var_model = VAR(factors_current.dropna())
+                var_results = var_model.fit(self.max_lags)
 
             # 使用VAR系数初始化A矩阵（完全匹配老代码line 322）
             if self.max_lags == 1:
@@ -395,7 +398,6 @@ class DFMModel:
                 factors_df
             )
 
-            # [DEBUG] 检查Lambda_new
             if iteration == 0:
                 logger.debug(f"[EM第0次] estimate_loadings返回的Lambda_new[:3, :] =\n{Lambda_new[:3, :]}")
                 logger.debug(f"[EM第0次] Lambda_new中NaN数量: {np.isnan(Lambda_new).sum()}")

@@ -233,16 +233,9 @@ def calculate_next_month_rmse(
             logger.warning(f"[next_month_rmse] 配对数据不足: {len(aligned_df)}个数据点")
             return np.inf
 
-        # 调试日志：打印对齐数据的详细信息
-        logger.info(f"[RMSE_DEBUG] 对齐数据行数: {len(aligned_df)}")
-        logger.info(f"[RMSE_DEBUG] 独立月份数: {aligned_df['month'].nunique() if 'month' in aligned_df.columns else 'N/A'}")
-        logger.info(f"[RMSE_DEBUG] 前3个误差值: {list((aligned_df['nowcast'] - aligned_df['next_month_target']).head(3))}")
-
         # 计算RMSE
         squared_errors = (aligned_df['nowcast'] - aligned_df['next_month_target']) ** 2
         rmse = np.sqrt(squared_errors.mean())
-
-        logger.info(f"[RMSE_DEBUG] RMSE结果: {rmse:.6f}")
         return float(rmse)
 
     except Exception as e:
@@ -270,16 +263,9 @@ def calculate_next_month_mae(
             logger.warning(f"[next_month_mae] 配对数据不足: {len(aligned_df)}个数据点")
             return np.inf
 
-        # 调试日志：打印对齐数据的详细信息
-        logger.info(f"[MAE_DEBUG] 对齐数据行数: {len(aligned_df)}")
-        logger.info(f"[MAE_DEBUG] 独立月份数: {aligned_df['month'].nunique() if 'month' in aligned_df.columns else 'N/A'}")
-        logger.info(f"[MAE_DEBUG] 前3个误差值: {list((aligned_df['nowcast'] - aligned_df['next_target']).head(3))}")
-
         # 计算MAE
         abs_errors = np.abs(aligned_df['nowcast'] - aligned_df['next_target'])
         mae = abs_errors.mean()
-
-        logger.info(f"[MAE_DEBUG] MAE结果: {mae:.6f}")
         return float(mae)
 
     except Exception as e:
