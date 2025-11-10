@@ -4,6 +4,7 @@
 提供统一的文本标准化功能，用于处理中文变量名、列名等
 """
 
+import re
 import unicodedata
 import pandas as pd
 from typing import Union, Optional
@@ -16,6 +17,13 @@ def normalize_text(text: Union[str, float, None], to_lower: bool = True) -> str:
     此函数适用于中文和英文混合文本的标准化处理，
     主要用于变量名、列名的规范化以确保匹配一致性。
 
+    处理内容：
+    - Unicode NFKC规范化（统一全角/半角字符）
+    - 去除前后空格
+    - 去除冒号、逗号、括号等标点符号前后的空格
+    - 压缩连续多个空格为单个空格
+    - 可选的小写转换
+
     Args:
         text: 待标准化的文本，可以是字符串、浮点数或None
         to_lower: 是否转换为小写，默认True
@@ -26,7 +34,9 @@ def normalize_text(text: Union[str, float, None], to_lower: bool = True) -> str:
     Examples:
         >>> normalize_text('  工业增加值  ')
         '工业增加值'
-        >>> normalize_text('GDP Growth Rate', to_lower=True)
+        >>> normalize_text('用电量: 电气机械  ')
+        '用电量:电气机械'
+        >>> normalize_text('GDP  Growth  Rate', to_lower=True)
         'gdp growth rate'
         >>> normalize_text(None)
         ''
@@ -35,10 +45,27 @@ def normalize_text(text: Union[str, float, None], to_lower: bool = True) -> str:
         return ''
 
     # 转换为字符串并标准化Unicode（NFKC规范化）
+    # NFKC会将全角字符转换为半角，统一Unicode变体
     text = str(text)
     text = unicodedata.normalize('NFKC', text)
 
     # 移除前后空格
+    text = text.strip()
+
+    # 移除标点符号前后的空格
+    # 处理常见的中文和英文标点符号
+    punctuation_list = [':', '：', ',', '，', '(', ')', '（', '）', '[', ']',
+                        '【', '】', '{', '}', '-', '—', '·', '.', '。']
+
+    for punct in punctuation_list:
+        # 移除标点前后的空格
+        text = text.replace(f' {punct}', punct)
+        text = text.replace(f'{punct} ', punct)
+
+    # 压缩连续多个空格为单个空格
+    text = re.sub(r'\s+', ' ', text)
+
+    # 再次去除前后空格（防止标点处理后产生的空格）
     text = text.strip()
 
     # 根据参数决定是否转换为小写

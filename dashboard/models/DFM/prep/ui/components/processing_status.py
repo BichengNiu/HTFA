@@ -411,28 +411,36 @@ class ProcessingStatusComponent(DFMComponent):
             mapping_sheet_name: 映射表名称
         """
         try:
-            var_type_map, var_industry_map_loaded = load_mappings(
+            var_type_map, var_industry_map_loaded, var_dfm_single_stage_map, var_dfm_two_stage_map = load_mappings(
                 excel_path=excel_file,
                 sheet_name=mapping_sheet_name,
                 indicator_col='指标名称',
                 type_col='类型',
-                industry_col='行业'
+                industry_col='行业',
+                single_stage_col='一次估计',
+                two_stage_col='二次估计'
             )
-            
+
             # 保存映射数据
             final_industry_map = var_industry_map_loaded if var_industry_map_loaded else {}
             final_type_map = var_type_map if var_type_map else {}
-            
+            final_single_stage_map = var_dfm_single_stage_map if var_dfm_single_stage_map else {}
+            final_two_stage_map = var_dfm_two_stage_map if var_dfm_two_stage_map else {}
+
             self._set_state("dfm_var_type_map_obj", final_type_map)
             self._set_state("dfm_industry_map_obj", final_industry_map)
-            
-            st.info(f"[SUCCESS] 已成功加载映射：类型映射 {len(final_type_map)} 个，行业映射 {len(final_industry_map)} 个")
+            self._set_state("dfm_default_single_stage_map", final_single_stage_map)
+            self._set_state("dfm_default_two_stage_map", final_two_stage_map)
+
+            st.info(f"[SUCCESS] 已成功加载映射：类型映射 {len(final_type_map)} 个，行业映射 {len(final_industry_map)} 个，一次估计默认 {len(final_single_stage_map)} 个，二次估计默认 {len(final_two_stage_map)} 个")
             
         except Exception as e:
             logger.error(f"加载映射数据失败: {e}")
             st.error(f"映射数据加载失败: {e}")
             self._set_state("dfm_var_type_map_obj", {})
             self._set_state("dfm_industry_map_obj", {})
+            self._set_state("dfm_default_single_stage_map", {})
+            self._set_state("dfm_default_two_stage_map", {})
             raise RuntimeError(f"映射数据加载失败: {e}")
 
     def _format_processing_results(self, base_name: str, prepared_data: pd.DataFrame,

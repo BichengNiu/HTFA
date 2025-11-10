@@ -1,0 +1,120 @@
+# -*- coding: utf-8 -*-
+"""
+行业映射校验模块
+
+用于检测指标体系定义的行业映射与sheet名称推断的行业映射之间的冲突
+"""
+
+from typing import Dict, List, Any
+from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+
+
+def validate_industry_mapping(
+    reference_map: Dict[str, str],
+    sheet_based_map: Dict[str, str],
+    variable_list: List[str]
+) -> Dict[str, Any]:
+    """
+    对比指标体系行业映射与sheet名称推断的映射，检测冲突
+
+    Args:
+        reference_map: 指标体系定义的行业映射（标准化键）
+        sheet_based_map: 从sheet名称推断的行业映射（标准化键）
+        variable_list: 最终数据中的变量列表（原始名称）
+
+    Returns:
+        Dict包含:
+        - conflicts: 冲突变量列表，每项包含变量名和两个来源的行业
+        - undefined_in_reference: 在指标体系中未定义的变量列表
+        - conflict_count: 冲突数量
+        - undefined_count: 未定义数量
+        - validation_passed: 是否通过校验（无冲突且无未定义）
+    """
+
+    conflicts = []
+    undefined_in_reference = []
+
+    for var_original in variable_list:
+        var_norm = normalize_text(var_original)
+
+        if not var_norm:
+            continue
+
+        reference_industry = reference_map.get(var_norm)
+        sheet_industry = sheet_based_map.get(var_norm)
+
+        # 检查是否在指标体系中未定义
+        if not reference_industry:
+            undefined_in_reference.append(var_original)
+
+        # 检查冲突（两者都有定义但不一致）
+        if reference_industry and sheet_industry:
+            if reference_industry != sheet_industry:
+                conflicts.append({
+                    'variable': var_original,
+                    'reference_industry': reference_industry,
+                    'sheet_industry': sheet_industry
+                })
+
+    result = {
+        'conflicts': conflicts,
+        'undefined_in_reference': undefined_in_reference,
+        'conflict_count': len(conflicts),
+        'undefined_count': len(undefined_in_reference),
+        'validation_passed': len(conflicts) == 0 and len(undefined_in_reference) == 0
+    }
+
+    return result
+
+
+def print_validation_report(validation_result: Dict[str, Any]) -> None:
+    """
+    打印行业映射校验报告
+
+    Args:
+        validation_result: validate_industry_mapping()的返回结果
+    """
+
+    print("\n=== [行业映射校验] 校验报告 ===")
+
+    if validation_result['validation_passed']:
+        print("校验通过: 所有变量的行业映射一致且完整定义")
+        return
+
+    conflict_count = validation_result['conflict_count']
+    undefined_count = validation_result['undefined_count']
+
+    if conflict_count > 0:
+        print(f"\n警告: 发现 {conflict_count} 个变量的指标体系行业与Sheet位置不一致")
+        print("系统将使用指标体系定义的行业（Sheet名称仅用于数据组织）\n")
+
+        conflicts = validation_result['conflicts']
+        print("冲突详情（显示前10个）:")
+        for item in conflicts[:10]:
+            print(f"  变量: {item['variable']}")
+            print(f"    - 指标体系定义: {item['reference_industry']}")
+            print(f"    - Sheet名称推断: {item['sheet_industry']}")
+            print()
+
+        if conflict_count > 10:
+            print(f"  ... 还有 {conflict_count - 10} 个冲突变量")
+
+    if undefined_count > 0:
+        print(f"\n警告: 发现 {undefined_count} 个变量在指标体系中未定义行业")
+        print("这些变量将被标记为\"Unknown\"行业\n")
+
+        undefined = validation_result['undefined_in_reference']
+        print("未定义变量（显示前10个）:")
+        for var in undefined[:10]:
+            print(f"  - {var}")
+
+        if undefined_count > 10:
+            print(f"  ... 还有 {undefined_count - 10} 个未定义变量")
+
+    print("\n=== [行业映射校验] 报告结束 ===\n")
+
+
+__all__ = [
+    'validate_industry_mapping',
+    'print_validation_report'
+]

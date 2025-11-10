@@ -60,6 +60,11 @@ class TrainingConfig:
     # 行业映射（变量名 -> 行业名）
     industry_map: Optional[Dict[str, str]] = field(default_factory=dict)
 
+    # 二次估计法配置（2025-11-09新增）
+    estimation_method: str = 'single_stage'  # 估计方法: single_stage(一次估计) 或 two_stage(二次估计)
+    industry_k_factors: Dict[str, int] = field(default_factory=dict)  # 二次估计法中各行业因子数映射
+    second_stage_extra_predictors: List[str] = field(default_factory=list)  # 二次估计法第二阶段额外预测变量
+
     def __post_init__(self):
         """后初始化验证"""
         # 设置默认输出目录
@@ -111,6 +116,22 @@ class TrainingConfig:
                 f"parallel_backend必须是{valid_backends}之一,"
                 f"当前值: {self.parallel_backend}"
             )
+
+        # 验证二次估计法配置（2025-11-09）
+        valid_estimation_methods = ['single_stage', 'two_stage']
+        if self.estimation_method not in valid_estimation_methods:
+            raise ValueError(
+                f"estimation_method必须是{valid_estimation_methods}之一,"
+                f"当前值: {self.estimation_method}"
+            )
+
+        if self.estimation_method == 'two_stage':
+            if not self.industry_k_factors:
+                raise ValueError("二次估计法需要设置各行业因子数（industry_k_factors不能为空）")
+
+            for industry, k in self.industry_k_factors.items():
+                if not isinstance(k, int) or k <= 0:
+                    raise ValueError(f"行业 {industry} 的因子数必须为正整数，当前值: {k}")
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':

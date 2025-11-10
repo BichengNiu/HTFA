@@ -888,5 +888,152 @@ class TrainingResultExporter:
             logger.error(f"计算行业R²失败: {e}", exc_info=True)
             return None, None
 
+    def export_two_stage_results(
+        self,
+        result,  # TwoStageTrainingResult
+        config,  # TrainingConfig
+        output_dir: Optional[str] = None
+    ) -> Dict[str, str]:
+        """
+        导出二次估计法训练结果
+
+        目录结构:
+        output_dir/
+        ├── first_stage_models/
+        │   ├── 农副食品加工业_model_xxxxxx.joblib
+        │   ├── 农副食品加工业_metadata_xxxxxx.pkl
+        │   ├── 专用设备制造业_model_xxxxxx.joblib
+        │   ├── 专用设备制造业_metadata_xxxxxx.pkl
+        │   └── ...
+        ├── industry_nowcasts.csv
+        ├── final_dfm_model_xxxxxx.joblib
+        └── final_dfm_metadata_xxxxxx.pkl
+
+        Args:
+            result: 二次估计法训练结果
+            config: 训练配置
+            output_dir: 输出目录（None=创建临时目录）
+
+        Returns:
+            文件路径字典
+        """
+        logger.info("开始导出二次估计法结果")
+
+        # 创建输出目录
+        if output_dir is None:
+            output_dir = tempfile.mkdtemp(prefix='dfm_two_stage_results_')
+            logger.info(f"使用临时目录: {output_dir}")
+        else:
+            os.makedirs(output_dir, exist_ok=True)
+            logger.info(f"使用指定目录: {output_dir}")
+
+        export_paths = {}
+
+        # 步骤1: 创建第一阶段子目录
+        first_stage_dir = os.path.join(output_dir, 'first_stage_models')
+        os.makedirs(first_stage_dir, exist_ok=True)
+        logger.info(f"创建第一阶段模型目录: {first_stage_dir}")
+
+        # 步骤2: 循环导出各行业模型
+        logger.info(f"开始导出 {len(result.first_stage_results)} 个行业模型...")
+
+        industry_export_count = 0
+        for industry, ind_result in result.first_stage_results.items():
+            try:
+                # 为每个行业创建独立的时间戳
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+                # 导出行业模型文件
+                ind_model_path = os.path.join(
+                    first_stage_dir,
+                    f"{industry}_model_{timestamp}.joblib"
+                )
+                self._export_model(ind_result, ind_model_path)
+
+                # 导出行业元数据文件
+                ind_metadata_path = os.path.join(
+                    first_stage_dir,
+                    f"{industry}_metadata_{timestamp}.pkl"
+                )
+
+                # 为行业模型构建简化的配置（用于元数据导出）
+                ind_config_dict = {
+                    'data_path': config.data_path,
+                    'target_variable': ind_result.selected_variables[0] if ind_result.selected_variables else '',
+                    'selected_indicators': ind_result.selected_variables[1:] if len(ind_result.selected_variables) > 1 else [],
+                    'training_start': config.training_start,
+                    'train_end': config.train_end,
+                    'validation_start': config.validation_start,
+                    'validation_end': config.validation_end,
+                    'enable_variable_selection': False,
+                    'variable_selection_method': 'none',
+                    'industry_map': {}
+                }
+
+                # 创建简化的配置对象用于元数据导出
+                from dashboard.models.DFM.train.training.config import TrainingConfig
+                ind_config = TrainingConfig(**ind_config_dict)
+
+                self._export_metadata(ind_result, ind_config, ind_metadata_path, timestamp, prepared_data=None)
+
+                industry_export_count += 1
+                logger.debug(f"导出行业模型成功: {industry}")
+
+            except Exception as e:
+                logger.error(f"导出行业 {industry} 模型失败: {str(e)}")
+                continue
+
+        logger.info(f"成功导出 {industry_export_count}/{len(result.first_stage_results)} 个行业模型")
+        export_paths['first_stage_models_dir'] = first_stage_dir
+
+        # 步骤3: 导出分行业nowcasting汇总CSV
+        if result.industry_nowcast_df is not None:
+            nowcast_csv_path = os.path.join(output_dir, 'industry_nowcasts.csv')
+            result.industry_nowcast_df.to_csv(nowcast_csv_path, encoding='utf-8-sig')
+            export_paths['industry_nowcasts_csv'] = nowcast_csv_path
+            logger.info(f"导出分行业nowcasting汇总: {os.path.basename(nowcast_csv_path)}")
+
+        # 步骤4: 导出第二阶段模型（调用现有方法）
+        if result.second_stage_result is not None:
+            logger.info("开始导出第二阶段总量模型...")
+
+            # 调用现有的export_all方法导出第二阶段模型
+            second_stage_paths = self.export_all(
+                result=result.second_stage_result,
+                config=config,
+                output_dir=output_dir,
+                prepared_data=None
+            )
+
+            export_paths.update(second_stage_paths)
+
+            # 步骤5: 在第二阶段元数据中添加二次估计法标记
+            if 'metadata' in second_stage_paths:
+                metadata_path = second_stage_paths['metadata']
+
+                try:
+                    with open(metadata_path, 'rb') as f:
+                        metadata = pickle.load(f)
+
+                    # 添加二次估计法相关信息
+                    metadata['estimation_method'] = 'two_stage'
+                    metadata['industry_k_factors_used'] = result.industry_k_factors_used
+                    metadata['first_stage_models_dir'] = first_stage_dir
+                    metadata['first_stage_training_time'] = result.first_stage_time
+                    metadata['second_stage_training_time'] = result.second_stage_time
+                    metadata['total_training_time'] = result.total_training_time
+
+                    # 重新保存元数据
+                    with open(metadata_path, 'wb') as f:
+                        pickle.dump(metadata, f, protocol=pickle.HIGHEST_PROTOCOL)
+
+                    logger.info("已在元数据中添加二次估计法标记")
+
+                except Exception as e:
+                    logger.error(f"更新元数据标记失败: {str(e)}")
+
+        logger.info(f"二次估计法结果导出完成，共 {len(export_paths)} 个文件/目录")
+        return export_paths
+
 
 __all__ = ['TrainingResultExporter']

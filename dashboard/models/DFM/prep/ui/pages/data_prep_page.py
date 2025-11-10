@@ -190,24 +190,31 @@ def _auto_load_mapping_data(current_file, mapping_sheet_name: str = '指标体�
         # 加载映射数据
         from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
 
-        var_type_map, var_industry_map, var_dfm_default_map = load_mappings(
+        var_type_map, var_industry_map, var_dfm_single_stage_map, var_dfm_two_stage_map, var_first_stage_target_map = load_mappings(
             excel_path=current_file,
             sheet_name=mapping_sheet_name,
             indicator_col='指标名称',
             type_col='类型',
             industry_col='行业',
-            dfm_default_col='DFM变量'
+            single_stage_col='一次估计',
+            two_stage_col='二次估计',
+            first_stage_target_col='一阶段目标'
         )
 
         # 保存映射数据
         _set_state("var_type_map_obj", var_type_map if var_type_map else {})
         _set_state("industry_map_obj", var_industry_map if var_industry_map else {})
-        _set_state("dfm_default_variables_map", var_dfm_default_map if var_dfm_default_map else {})
+        _set_state("dfm_default_single_stage_map", var_dfm_single_stage_map if var_dfm_single_stage_map else {})
+        _set_state("dfm_default_two_stage_map", var_dfm_two_stage_map if var_dfm_two_stage_map else {})
+        _set_state("dfm_first_stage_target_map", var_first_stage_target_map if var_first_stage_target_map else {})
 
         # 标记为已加载
         _set_state(cache_key, True)
 
         print(f"自动加载映射数据完成: {len(var_industry_map)} 个指标")
+        print(f"一次估计默认变量: {len(var_dfm_single_stage_map)} 个")
+        print(f"二次估计默认变量: {len(var_dfm_two_stage_map)} 个")
+        print(f"一阶段目标映射: {len(var_first_stage_target_map)} 个")
 
     except Exception as e:
         print(f"自动加载映射数据失败: {e}")
@@ -614,6 +621,7 @@ def _execute_data_preparation(st_obj, uploaded_file):
                 industry_map = result['metadata']['variable_mapping']
                 transform_log = result['metadata']['transform_log']
                 removed_variables_log = result['metadata']['removal_log']
+                mapping_validation = result['metadata'].get('mapping_validation', {})
                 print(f"准备数据形状: {prepared_data.shape if prepared_data is not None else 'None'}")
                 print(f"移除日志长度: {len(removed_variables_log) if removed_variables_log else 0}")
             else:
@@ -621,6 +629,7 @@ def _execute_data_preparation(st_obj, uploaded_file):
                 industry_map = {}
                 transform_log = {}
                 removed_variables_log = []
+                mapping_validation = {}
                 st_obj.error(f"数据预处理失败: {result['message']}")
 
             if prepared_data is not None:
@@ -632,6 +641,7 @@ def _execute_data_preparation(st_obj, uploaded_file):
                 _set_state("transform_log_obj", transform_log)
                 _set_state("industry_map_obj", industry_map)
                 _set_state("removed_vars_log_obj", removed_variables_log)
+                _set_state("mapping_validation_result", mapping_validation)
 
                 st_obj.success("数据预处理完成！结果已准备就绪，可用于模型训练模块。")
                 st_obj.info(f"预处理后数据形状: {prepared_data.shape}")
@@ -652,8 +662,20 @@ def _execute_data_preparation(st_obj, uploaded_file):
 
                 if industry_map:
                     try:
-                        # 读取DFM默认选择映射
-                        dfm_default_map = _get_state('dfm_default_variables_map', {})
+                        # 重新加载映射以确保和industry_map使用同一份数据
+                        from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
+
+                        excel_file_like_object.seek(0)
+                        _, _, dfm_single_stage_map, dfm_two_stage_map, dfm_first_stage_target_map = load_mappings(
+                            excel_path=excel_file_like_object,
+                            sheet_name=_get_state('param_type_mapping_sheet'),
+                            indicator_col='指标名称',
+                            type_col='类型',
+                            industry_col='行业',
+                            single_stage_col='一次估计',
+                            two_stage_col='二次估计',
+                            first_stage_target_col='一阶段目标'
+                        )
 
                         # 创建统一映射数据
                         all_indicators = list(industry_map.keys())
@@ -661,17 +683,21 @@ def _execute_data_preparation(st_obj, uploaded_file):
 
                         for indicator in all_indicators:
                             industry = industry_map.get(indicator, '')
-                            dfm_default = dfm_default_map.get(indicator, '')
+                            single_stage_default = dfm_single_stage_map.get(indicator, '')
+                            two_stage_default = dfm_two_stage_map.get(indicator, '')
+                            first_stage_target = dfm_first_stage_target_map.get(indicator, '')
                             unified_mapping_data.append({
                                 'Indicator': indicator,
                                 'Industry': industry,
-                                'DFM_Default': dfm_default
+                                '一次估计': single_stage_default,
+                                '二次估计': two_stage_default,
+                                '一阶段目标': first_stage_target
                             })
 
                         # 创建统一映射DataFrame
                         df_unified_map = pd.DataFrame(
                             unified_mapping_data,
-                            columns=['Indicator', 'Industry', 'DFM_Default']
+                            columns=['Indicator', 'Industry', '一次估计', '二次估计', '一阶段目标']
                         )
                         processed_outputs['industry_map'] = df_unified_map.to_csv(
                             index=False,
@@ -679,8 +705,12 @@ def _execute_data_preparation(st_obj, uploaded_file):
                         ).encode('utf-8-sig')
 
                         print(f"导出统一映射文件: {len(df_unified_map)} 条记录")
-                        dfm_yes_count = len(df_unified_map[df_unified_map['DFM_Default'] == '是'])
-                        print(f"其中DFM默认变量: {dfm_yes_count} 个")
+                        single_yes_count = len(df_unified_map[df_unified_map['一次估计'] == '是'])
+                        two_yes_count = len(df_unified_map[df_unified_map['二次估计'] == '是'])
+                        first_stage_target_count = len(df_unified_map[df_unified_map['一阶段目标'] != ''])
+                        print(f"其中一次估计默认变量: {single_yes_count} 个")
+                        print(f"其中二次估计默认变量: {two_yes_count} 个")
+                        print(f"其中一阶段目标变量: {first_stage_target_count} 个")
 
                     except Exception as e:
                         st_obj.warning(f"映射文件转换到CSV时出错: {e}")
@@ -716,6 +746,35 @@ def _execute_data_preparation(st_obj, uploaded_file):
         st_obj.error(f"数据预处理过程中发生未预期的错误: {outer_e}")
         import traceback
         st_obj.text_area("详细错误信息:", traceback.format_exc(), height=200)
+
+
+def _render_mapping_warnings(st_obj):
+    """渲染行业映射警告信息"""
+
+    mapping_validation = _get_state("mapping_validation_result")
+
+    if not mapping_validation:
+        return
+
+    # conflicts = mapping_validation.get('conflicts', [])  # 冲突检查已禁用
+    undefined = mapping_validation.get('undefined_in_reference', [])
+
+    # 只显示未定义变量的警告
+    if not undefined:
+        return
+
+    # 显示警告信息
+    with st_obj.expander("行业映射警告", expanded=True):
+        if undefined:
+            st_obj.warning(f"发现 {len(undefined)} 个变量在指标体系中未定义行业（已标记为Unknown）")
+            st_obj.markdown("**建议**: 在Excel模板的\"指标体系\"sheet中为这些变量补充行业信息")
+
+            # 最多显示20个
+            undefined_to_show = undefined[:20]
+            st_obj.write(undefined_to_show)
+
+            if len(undefined) > 20:
+                st_obj.caption(f"... 还有 {len(undefined) - 20} 个未定义变量")
 
 
 def _render_removed_variables_log(st_obj):
@@ -856,8 +915,9 @@ def render_dfm_data_prep_page(st_obj):
     if run_button_clicked:
         _execute_data_preparation(st_obj, uploaded_file)
 
-    # 7. 在右侧列显示移除变量信息
+    # 7. 在右侧列显示处理结果和警告信息
     with right_col:
+        _render_mapping_warnings(st_obj)
         _render_removed_variables_log(st_obj)
 
     # 8. 渲染下载按钮

@@ -13,6 +13,7 @@ from datetime import datetime, date
 from dashboard.models.DFM.prep.modules.config_constants import ADF_P_THRESHOLD
 from dashboard.models.DFM.prep.modules.format_detection import parse_sheet_info
 from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings, create_industry_map_from_data
+from dashboard.models.DFM.prep.modules.mapping_validator import validate_industry_mapping, print_validation_report
 from dashboard.models.DFM.prep.modules.stationarity_processor import ensure_stationarity, apply_stationarity_transforms
 from dashboard.models.DFM.prep.modules.data_loader import DataLoader
 from dashboard.models.DFM.prep.modules.data_aligner import DataAligner
@@ -83,8 +84,24 @@ def prepare_data(
         data_start_date = standardize_date(data_start_date)
         data_end_date = standardize_date(data_end_date)
 
+        # 步骤0: 加载指标体系行业映射
+        print("\n--- [Data Prep] 步骤 0: 加载指标体系行业映射 ---")
+        _, reference_industry_map, _, _, _ = load_mappings(
+            excel_path=excel_path,
+            sheet_name=reference_sheet_name,
+            indicator_col=reference_column_name,
+            type_col='类型',
+            industry_col='行业',
+            single_stage_col='一次估计',
+            two_stage_col='二次估计',
+            first_stage_target_col='一阶段目标'
+        )
+        print(f"  从指标体系加载了 {len(reference_industry_map)} 个变量的行业映射")
+        if len(reference_industry_map) > 0:
+            print(f"  示例: {list(reference_industry_map.items())[:3]}")
+
         # 初始化组件
-        data_loader = DataLoader()
+        data_loader = DataLoader(reference_industry_map=reference_industry_map)
         data_aligner = DataAligner(target_freq)
 
         # 存储日志
@@ -136,7 +153,7 @@ def prepare_data(
             all_indices_for_range, data_start_date, data_end_date, target_freq,
             aligned_data.monthly_transform_log, removed_variables_detailed_log,
             loaded_data.var_industry_map, loaded_data.raw_columns_set,
-            reference_predictor_variables
+            reference_predictor_variables, reference_industry_map
         )
         
     except FileNotFoundError:
@@ -153,9 +170,9 @@ def _finalize_data_processing(
     df_combined_dw_weekly, actual_target_variable_name, target_sheet_cols,
     all_indices_for_range, data_start_date, data_end_date, target_freq,
     monthly_transform_log, removed_variables_detailed_log, var_industry_map,
-    raw_columns_across_all_sheets, reference_predictor_variables
+    raw_columns_across_all_sheets, reference_predictor_variables, reference_industry_map
 ):
-    """最终数据处理和合并"""
+    """最终数据处理和合并（使用指标体系的行业映射）"""
 
     print("\n--- [Data Prep V3 ] 步骤 4: 最终合并和处理 ---")
 
@@ -225,11 +242,36 @@ def _finalize_data_processing(
         print(f"  [DEBUG] 最终清理移除了 {len(final_clean_log)} 个变量")
         return None, None, None, None
 
-    # 继续到平稳性检查
+    # 步骤5: 行业映射校验和应用
+    print("\n--- [Data Prep] 步骤 5: 行业映射校验和应用 ---")
+
+    # 执行校验：对比指标体系映射 vs sheet推断映射
+    validation_result = validate_industry_mapping(
+        reference_industry_map,
+        var_industry_map,
+        list(all_data_aligned_weekly.columns)
+    )
+
+    # 打印校验报告（已禁用）
+    # print_validation_report(validation_result)
+
+    # 应用指标体系映射：为最终数据中的所有变量分配行业
+    final_industry_map = {}
+    for col in all_data_aligned_weekly.columns:
+        col_norm = normalize_text(col)
+        if col_norm and col_norm in reference_industry_map:
+            final_industry_map[col_norm] = reference_industry_map[col_norm]
+        else:
+            final_industry_map[col_norm] = "Unknown"
+
+    print(f"  最终行业映射大小: {len(final_industry_map)}")
+    print(f"  其中Unknown行业变量: {sum(1 for v in final_industry_map.values() if v == 'Unknown')} 个")
+
+    # 继续到平稳性检查（使用指标体系映射）
     return apply_final_stationarity_check(
         all_data_aligned_weekly, actual_target_variable_name, target_sheet_cols,
-        monthly_transform_log, removed_variables_detailed_log, var_industry_map,
-        raw_columns_across_all_sheets, reference_predictor_variables
+        monthly_transform_log, removed_variables_detailed_log, final_industry_map,
+        raw_columns_across_all_sheets, reference_predictor_variables, validation_result
     )
 
 def prepare_data_from_dataframe(

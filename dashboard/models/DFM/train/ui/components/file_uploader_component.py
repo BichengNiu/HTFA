@@ -138,14 +138,17 @@ class FileUploaderComponent:
         current_file_id = self._get_file_id(industry_map_file)
         cached_file_id = self.state.get('cached_map_file_id', None)
         cached_industry_map = self.state.get('dfm_industry_map_obj', None)
-        cached_dfm_default_map = self.state.get('dfm_default_variables_map', None)
+        cached_single_stage_map = self.state.get('dfm_default_single_stage_map', None)
+        cached_two_stage_map = self.state.get('dfm_default_two_stage_map', None)
 
         # 检查缓存
         if cached_industry_map is not None and current_file_id == cached_file_id:
             print(f"[模型训练] 使用缓存的行业映射: {len(cached_industry_map)} 个变量")
-            if cached_dfm_default_map is not None:
-                print(f"[模型训练] 使用缓存的DFM变量配置: {len(cached_dfm_default_map)} 个标记为'是'的变量")
-            return cached_industry_map, cached_dfm_default_map or {}
+            if cached_single_stage_map is not None:
+                print(f"[模型训练] 使用缓存的一次估计默认变量: {len(cached_single_stage_map)} 个")
+            if cached_two_stage_map is not None:
+                print(f"[模型训练] 使用缓存的二次估计默认变量: {len(cached_two_stage_map)} 个")
+            return cached_industry_map, cached_single_stage_map or {}
 
         # 重新加载
         try:
@@ -166,20 +169,34 @@ class FileUploaderComponent:
             self.state.set('cached_map_file_id', current_file_id)
             print(f"[模型训练] 重新加载行业映射: {len(var_industry_map)} 个变量")
 
-            # 加载DFM默认变量（如果存在）
-            dfm_default_map = {}
-            if 'DFM_Default' in industry_map_df.columns:
-                dfm_default_map = {
+            # 加载DFM默认变量（支持一次估计和二次估计两列）
+            dfm_default_single_stage = {}
+            dfm_default_two_stage = {}
+
+            # 读取一次估计列
+            if '一次估计' in industry_map_df.columns:
+                dfm_default_single_stage = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['DFM_Default'])
+                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['一次估计'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
-                self.state.set('dfm_default_variables_map', dfm_default_map)
-                print(f"[模型训练] 从CSV文件加载了 {len(dfm_default_map)} 个标记为'是'的变量")
-            else:
-                print(f"[模型训练] 映射文件未包含DFM_Default列（旧格式），跳过DFM变量配置加载")
+                print(f"[模型训练] 从CSV文件加载了一次估计默认变量: {len(dfm_default_single_stage)} 个")
 
-            return var_industry_map, dfm_default_map
+            # 读取二次估计列
+            if '二次估计' in industry_map_df.columns:
+                dfm_default_two_stage = {
+                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['二次估计'])
+                    if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                }
+                print(f"[模型训练] 从CSV文件加载了二次估计默认变量: {len(dfm_default_two_stage)} 个")
+
+            # 存储两个映射
+            self.state.set('dfm_default_single_stage_map', dfm_default_single_stage)
+            self.state.set('dfm_default_two_stage_map', dfm_default_two_stage)
+
+            # 返回single_stage作为默认
+            return var_industry_map, dfm_default_single_stage
 
         except Exception as e:
             st_instance.error(f"加载映射文件失败: {e}")

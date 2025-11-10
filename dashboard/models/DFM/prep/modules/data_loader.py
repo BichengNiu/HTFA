@@ -18,10 +18,18 @@ from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 
 class DataLoader:
     """数据加载器类"""
-    
-    def __init__(self):
+
+    def __init__(self, reference_industry_map: Optional[Dict[str, str]] = None):
+        """
+        初始化数据加载器
+
+        Args:
+            reference_industry_map: 从指标体系加载的行业映射（可选，用于校验）
+        """
         self.cleaner = DataCleaner()
-        self.var_industry_map = {}
+        self.var_industry_map = {}  # 从sheet名称推断的行业映射（保留用于校验）
+        self.sheet_inferred_map = {}  # 明确记录sheet推断的行业
+        self.reference_industry_map = reference_industry_map or {}
         self.raw_columns_across_all_sheets = set()
     
     def load_target_sheet(
@@ -90,9 +98,10 @@ class DataLoader:
             if target_valid_ratio < 0.5:
                 print(f"      警告: 目标变量数值转换质量较低，仅 {target_valid_ratio:.1%} 的值有效")
             
-            # 更新映射
+            # 更新映射（同时记录sheet推断的行业用于后续校验）
             norm_target_name = normalize_text(actual_target_variable_name)
             self.var_industry_map[norm_target_name] = industry_name
+            self.sheet_inferred_map[norm_target_name] = industry_name
             
             # 提取月度预测变量 (C列及以后)
             target_sheet_predictors = pd.DataFrame()
@@ -127,6 +136,7 @@ class DataLoader:
                     norm_pred_col = normalize_text(col_name)
                     if norm_pred_col:
                         self.var_industry_map[norm_pred_col] = industry_name
+                        self.sheet_inferred_map[norm_pred_col] = industry_name
                         self.raw_columns_across_all_sheets.add(norm_pred_col)
                 
                 target_sheet_predictors = pd.DataFrame(temp_monthly_predictors).sort_index()
@@ -203,6 +213,7 @@ class DataLoader:
                 norm_col = normalize_text(col)
                 if norm_col:
                     self.var_industry_map[norm_col] = industry_name
+                    self.sheet_inferred_map[norm_col] = industry_name
                     self.raw_columns_across_all_sheets.add(norm_col)
             
             return df_numeric
@@ -270,6 +281,7 @@ class DataLoader:
                 norm_col = normalize_text(col)
                 if norm_col:
                     self.var_industry_map[norm_col] = industry_name
+                    self.sheet_inferred_map[norm_col] = industry_name
                     self.raw_columns_across_all_sheets.add(norm_col)
 
             return df_numeric
@@ -343,6 +355,7 @@ class DataLoader:
                 norm_pred_col_p = normalize_text(col_name_pred)
                 if norm_pred_col_p:
                     self.var_industry_map[norm_pred_col_p] = industry_name
+                    self.sheet_inferred_map[norm_pred_col_p] = industry_name
                     self.raw_columns_across_all_sheets.add(norm_pred_col_p)
 
             df_monthly_pred_sheet = pd.DataFrame(temp_monthly_predictors_sheet).sort_index()

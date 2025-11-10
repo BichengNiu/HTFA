@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Any, Set
 from collections import Counter
+import streamlit as st
 
 from dashboard.models.DFM.prep.modules.stationarity_processor import ensure_stationarity, apply_stationarity_transforms
 from dashboard.models.DFM.prep.modules.mapping_manager import create_industry_map_from_data
@@ -16,11 +17,15 @@ from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 def apply_final_stationarity_check(
     all_data_aligned_weekly, actual_target_variable_name, target_sheet_cols,
     monthly_transform_log, removed_variables_detailed_log, var_industry_map,
-    raw_columns_across_all_sheets, reference_predictor_variables
+    raw_columns_across_all_sheets, reference_predictor_variables, validation_result
 ):
-    """应用最终的平稳性检查"""
+    """
+    应用最终的平稳性检查
 
-    print("\n--- [Data Prep V3] 步骤 5: 最终平稳性检查 ---")
+    注意：var_industry_map现在是基于指标体系的映射（非sheet推断）
+    """
+
+    print("\n--- [Data Prep V3] 步骤 6: 最终平稳性检查 ---")
 
     # 定义需要跳过平稳性检查的列
     cols_to_skip_weekly_stationarity = set()
@@ -131,13 +136,13 @@ def apply_final_stationarity_check(
     return finalize_results(
         final_data_stationary, actual_target_variable_name, monthly_transform_log,
         weekly_transform_log, removed_variables_detailed_log, var_industry_map,
-        raw_columns_across_all_sheets, reference_predictor_variables
+        raw_columns_across_all_sheets, reference_predictor_variables, validation_result
     )
 
 def finalize_results(
     final_data_stationary, actual_target_variable_name, monthly_transform_log,
     weekly_transform_log, removed_variables_detailed_log, var_industry_map,
-    raw_columns_across_all_sheets, reference_predictor_variables
+    raw_columns_across_all_sheets, reference_predictor_variables, validation_result
 ):
     """完成最终结果处理"""
     
@@ -233,7 +238,7 @@ def finalize_results(
     except Exception as e:
         print(f"[映射加载] 警告：保存映射数据失败: {e}")
     
-    return final_data_stationary, updated_var_industry_map, combined_transform_log, removed_variables_detailed_log
+    return final_data_stationary, updated_var_industry_map, combined_transform_log, removed_variables_detailed_log, validation_result
 
 # 导出的函数
 __all__ = [

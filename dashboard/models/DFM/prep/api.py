@@ -93,7 +93,7 @@ def prepare_dfm_data(
 
         # 步骤2: 调用内部数据准备函数
         logger.info("调用数据处理引擎...")
-        processed_data, variable_mapping, transform_log, removal_log = _prepare_data_internal(
+        processed_data, variable_mapping, transform_log, removal_log, validation_result = _prepare_data_internal(
             excel_path=excel_path,
             target_freq=target_freq,
             target_sheet_name=target_sheet_name,
@@ -121,6 +121,7 @@ def prepare_dfm_data(
             'variable_mapping': variable_mapping or {},
             'transform_log': transform_log or {},
             'removal_log': removal_log or [],
+            'mapping_validation': validation_result or {},
             'data_shape': processed_data.shape,
             'time_range': (
                 str(processed_data.index.min()) if not processed_data.empty else None,
