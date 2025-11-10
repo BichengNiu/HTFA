@@ -203,10 +203,16 @@ def load_variable_mappings(
         file_path = _handle_file_input(excel_path)
 
         # 加载映射
-        mappings = _load_mappings_internal(
+        _, mappings, _, _, _, _ = _load_mappings_internal(
             excel_path=file_path,
-            reference_sheet_name=reference_sheet_name,
-            reference_column_name=reference_column_name
+            sheet_name=reference_sheet_name,
+            indicator_col=reference_column_name,
+            type_col='类型',
+            industry_col='行业',
+            single_stage_col='一次估计',
+            first_stage_pred_col='一阶段预测',
+            first_stage_target_col='一阶段目标',
+            second_stage_target_col='二阶段目标'
         )
 
         if not mappings:

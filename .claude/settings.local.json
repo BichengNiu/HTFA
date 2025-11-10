@@ -26,7 +26,9 @@
       "Bash(if exist profit_margin_comparison.txt del /f /q profit_margin_comparison.txt)",
       "WebSearch",
       "Bash(NUL)",
-      "Bash(chcp 65001)"
+      "Bash(chcp 65001)",
+      "Bash(temp_columns.txt)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

@@ -190,31 +190,34 @@ def _auto_load_mapping_data(current_file, mapping_sheet_name: str = '指标体�
         # 加载映射数据
         from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
 
-        var_type_map, var_industry_map, var_dfm_single_stage_map, var_dfm_two_stage_map, var_first_stage_target_map = load_mappings(
+        var_type_map, var_industry_map, var_dfm_single_stage_map, var_first_stage_pred_map, var_first_stage_target_map, var_second_stage_target_map = load_mappings(
             excel_path=current_file,
             sheet_name=mapping_sheet_name,
             indicator_col='指标名称',
             type_col='类型',
             industry_col='行业',
             single_stage_col='一次估计',
-            two_stage_col='二次估计',
-            first_stage_target_col='一阶段目标'
+            first_stage_pred_col='一阶段预测',
+            first_stage_target_col='一阶段目标',
+            second_stage_target_col='二阶段目标'
         )
 
         # 保存映射数据
         _set_state("var_type_map_obj", var_type_map if var_type_map else {})
         _set_state("industry_map_obj", var_industry_map if var_industry_map else {})
         _set_state("dfm_default_single_stage_map", var_dfm_single_stage_map if var_dfm_single_stage_map else {})
-        _set_state("dfm_default_two_stage_map", var_dfm_two_stage_map if var_dfm_two_stage_map else {})
+        _set_state("dfm_first_stage_pred_map", var_first_stage_pred_map if var_first_stage_pred_map else {})
         _set_state("dfm_first_stage_target_map", var_first_stage_target_map if var_first_stage_target_map else {})
+        _set_state("dfm_second_stage_target_map", var_second_stage_target_map if var_second_stage_target_map else {})
 
         # 标记为已加载
         _set_state(cache_key, True)
 
         print(f"自动加载映射数据完成: {len(var_industry_map)} 个指标")
         print(f"一次估计默认变量: {len(var_dfm_single_stage_map)} 个")
-        print(f"二次估计默认变量: {len(var_dfm_two_stage_map)} 个")
-        print(f"一阶段目标映射: {len(var_first_stage_target_map)} 个")
+        print(f"一阶段预测默认变量: {len(var_first_stage_pred_map)} 个")
+        print(f"一阶段目标默认变量: {len(var_first_stage_target_map)} 个")
+        print(f"二阶段目标默认变量: {len(var_second_stage_target_map)} 个")
 
     except Exception as e:
         print(f"自动加载映射数据失败: {e}")
@@ -666,15 +669,16 @@ def _execute_data_preparation(st_obj, uploaded_file):
                         from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
 
                         excel_file_like_object.seek(0)
-                        _, _, dfm_single_stage_map, dfm_two_stage_map, dfm_first_stage_target_map = load_mappings(
+                        _, _, dfm_single_stage_map, dfm_first_stage_pred_map, dfm_first_stage_target_map, dfm_second_stage_target_map = load_mappings(
                             excel_path=excel_file_like_object,
                             sheet_name=_get_state('param_type_mapping_sheet'),
                             indicator_col='指标名称',
                             type_col='类型',
                             industry_col='行业',
                             single_stage_col='一次估计',
-                            two_stage_col='二次估计',
-                            first_stage_target_col='一阶段目标'
+                            first_stage_pred_col='一阶段预测',
+                            first_stage_target_col='一阶段目标',
+                            second_stage_target_col='二阶段目标'
                         )
 
                         # 创建统一映射数据
@@ -684,20 +688,22 @@ def _execute_data_preparation(st_obj, uploaded_file):
                         for indicator in all_indicators:
                             industry = industry_map.get(indicator, '')
                             single_stage_default = dfm_single_stage_map.get(indicator, '')
-                            two_stage_default = dfm_two_stage_map.get(indicator, '')
+                            first_stage_pred = dfm_first_stage_pred_map.get(indicator, '')
                             first_stage_target = dfm_first_stage_target_map.get(indicator, '')
+                            second_stage_target = dfm_second_stage_target_map.get(indicator, '')
                             unified_mapping_data.append({
                                 'Indicator': indicator,
                                 'Industry': industry,
                                 '一次估计': single_stage_default,
-                                '二次估计': two_stage_default,
-                                '一阶段目标': first_stage_target
+                                '一阶段预测': first_stage_pred,
+                                '一阶段目标': first_stage_target,
+                                '二阶段目标': second_stage_target
                             })
 
                         # 创建统一映射DataFrame
                         df_unified_map = pd.DataFrame(
                             unified_mapping_data,
-                            columns=['Indicator', 'Industry', '一次估计', '二次估计', '一阶段目标']
+                            columns=['Indicator', 'Industry', '一次估计', '一阶段预测', '一阶段目标', '二阶段目标']
                         )
                         processed_outputs['industry_map'] = df_unified_map.to_csv(
                             index=False,
@@ -706,11 +712,13 @@ def _execute_data_preparation(st_obj, uploaded_file):
 
                         print(f"导出统一映射文件: {len(df_unified_map)} 条记录")
                         single_yes_count = len(df_unified_map[df_unified_map['一次估计'] == '是'])
-                        two_yes_count = len(df_unified_map[df_unified_map['二次估计'] == '是'])
-                        first_stage_target_count = len(df_unified_map[df_unified_map['一阶段目标'] != ''])
+                        first_stage_pred_count = len(df_unified_map[df_unified_map['一阶段预测'] == '是'])
+                        first_stage_target_count = len(df_unified_map[df_unified_map['一阶段目标'] == '是'])
+                        second_stage_target_count = len(df_unified_map[df_unified_map['二阶段目标'] == '是'])
                         print(f"其中一次估计默认变量: {single_yes_count} 个")
-                        print(f"其中二次估计默认变量: {two_yes_count} 个")
-                        print(f"其中一阶段目标变量: {first_stage_target_count} 个")
+                        print(f"其中一阶段预测默认变量: {first_stage_pred_count} 个")
+                        print(f"其中一阶段目标默认变量: {first_stage_target_count} 个")
+                        print(f"其中二阶段目标默认变量: {second_stage_target_count} 个")
 
                     except Exception as e:
                         st_obj.warning(f"映射文件转换到CSV时出错: {e}")

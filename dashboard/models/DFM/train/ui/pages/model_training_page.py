@@ -774,8 +774,8 @@ def render_dfm_model_training_page(st_instance):
 
                 # 根据估计方法选择对应的默认变量映射
                 if current_estimation_method == 'two_stage':
-                    dfm_default_map = get_dfm_state('dfm_default_two_stage_map', {})
-                    method_label = "二次估计"
+                    dfm_default_map = get_dfm_state('dfm_first_stage_pred_map', {})
+                    method_label = "一阶段预测"
                 else:
                     dfm_default_map = get_dfm_state('dfm_default_single_stage_map', {})
                     method_label = "一次估计"
@@ -1262,13 +1262,13 @@ def render_dfm_model_training_page(st_instance):
                 if col not in excluded_vars
             ]
 
-            # 获取二次估计的默认变量
-            dfm_two_stage_map = get_dfm_state('dfm_default_two_stage_map', {})
+            # 获取二阶段目标的默认变量
+            dfm_second_stage_target_map = get_dfm_state('dfm_second_stage_target_map', {})
 
             # 计算默认选中的变量
             default_extra_vars = [
                 col for col in available_extra_vars
-                if unicodedata.normalize('NFKC', str(col)).strip().lower() in dfm_two_stage_map
+                if unicodedata.normalize('NFKC', str(col)).strip().lower() in dfm_second_stage_target_map
             ]
 
             print(f"[调试] 第二阶段可用变量: {len(available_extra_vars)}")

@@ -17,9 +17,10 @@ def load_mappings(
     type_col: str = '类型',
     industry_col: Optional[str] = '行业',
     single_stage_col: Optional[str] = '一次估计',
-    two_stage_col: Optional[str] = '二次估计',
-    first_stage_target_col: Optional[str] = '一阶段目标'
-) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
+    first_stage_pred_col: Optional[str] = '一阶段预测',
+    first_stage_target_col: Optional[str] = '一阶段目标',
+    second_stage_target_col: Optional[str] = '二阶段目标'
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
     """
     从指定的Excel表格中加载变量类型和行业映射
 
@@ -32,24 +33,27 @@ def load_mappings(
         type_col: 类型列名，默认'类型'
         industry_col: 行业列名，默认'行业'，可选
         single_stage_col: 一次估计列名，默认'一次估计'，可选
-        two_stage_col: 二次估计列名，默认'二次估计'，可选
+        first_stage_pred_col: 一阶段预测列名，默认'一阶段预测'，可选
         first_stage_target_col: 一阶段目标列名，默认'一阶段目标'，可选
+        second_stage_target_col: 二阶段目标列名，默认'二阶段目标'，可选
 
     Returns:
-        Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
-        (变量类型映射, 变量行业映射, 一次估计默认选择映射, 二次估计默认选择映射, 一阶段目标映射)
+        Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
+        (变量类型映射, 变量行业映射, 一次估计默认选择映射, 一阶段预测默认选择映射, 一阶段目标映射, 二阶段目标默认选择映射)
     """
     var_type_map = {}
     var_industry_map = {}
     var_dfm_single_stage_map = {}
-    var_dfm_two_stage_map = {}
+    var_first_stage_pred_map = {}
     var_first_stage_target_map = {}
+    var_second_stage_target_map = {}
 
     print(f"\n--- [Mappings] Loading type/industry/estimation maps from: ")
     print(f"    Excel: {excel_path}")
     print(f"    Sheet: {sheet_name}")
     print(f"    Indicator Col: '{indicator_col}', Type Col: '{type_col}', Industry Col: '{industry_col}'")
-    print(f"    Single Stage Col: '{single_stage_col}', Two Stage Col: '{two_stage_col}', First Stage Target Col: '{first_stage_target_col}'")
+    print(f"    Single Stage Col: '{single_stage_col}', First Stage Pred Col: '{first_stage_pred_col}'")
+    print(f"    First Stage Target Col: '{first_stage_target_col}', Second Stage Target Col: '{second_stage_target_col}'")
 
     try:
         # 处理不同类型的输入
@@ -79,10 +83,12 @@ def load_mappings(
             industry_col = industry_col.strip()
         if single_stage_col:
             single_stage_col = single_stage_col.strip()
-        if two_stage_col:
-            two_stage_col = two_stage_col.strip()
+        if first_stage_pred_col:
+            first_stage_pred_col = first_stage_pred_col.strip()
         if first_stage_target_col:
             first_stage_target_col = first_stage_target_col.strip()
+        if second_stage_target_col:
+            second_stage_target_col = second_stage_target_col.strip()
 
         # 检查必需列是否存在
         if indicator_col not in indicator_sheet.columns or type_col not in indicator_sheet.columns:
@@ -141,23 +147,23 @@ def load_mappings(
         else:
             print(f"  [Mappings] Warning: 一次估计列未找到")
 
-        # 创建二次估计默认选择映射
-        if two_stage_col and two_stage_col in indicator_sheet.columns:
-            two_stage_map_temp = pd.Series(
-                indicator_sheet[two_stage_col].astype(str).str.strip().values,
+        # 创建一阶段预测默认选择映射
+        if first_stage_pred_col and first_stage_pred_col in indicator_sheet.columns:
+            first_stage_pred_map_temp = pd.Series(
+                indicator_sheet[first_stage_pred_col].astype(str).str.strip().values,
                 index=indicator_sheet[indicator_col].astype(str).str.strip()
             ).to_dict()
 
             # 标准化键并只保留标记为"是"的条目
-            var_dfm_two_stage_map = {
+            var_first_stage_pred_map = {
                 normalize_text(k): str(v).strip()
-                for k, v in two_stage_map_temp.items()
+                for k, v in first_stage_pred_map_temp.items()
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
                 and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] 从二次估计列加载了 {len(var_dfm_two_stage_map)} 个标记为'是'的变量")
+            print(f"  [Mappings] 从一阶段预测列加载了 {len(var_first_stage_pred_map)} 个标记为'是'的变量")
         else:
-            print(f"  [Mappings] Warning: 二次估计列未找到")
+            print(f"  [Mappings] Warning: 一阶段预测列未找到")
 
         # 创建一阶段目标映射
         if first_stage_target_col and first_stage_target_col in indicator_sheet.columns:
@@ -166,16 +172,34 @@ def load_mappings(
                 index=indicator_sheet[indicator_col].astype(str).str.strip()
             ).to_dict()
 
-            # 标准化键并过滤NaN/空字符串
+            # 标准化键并只保留标记为"是"的条目
             var_first_stage_target_map = {
                 normalize_text(k): str(v).strip()
                 for k, v in first_stage_target_map_temp.items()
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
-                and pd.notna(v) and str(v).strip().lower() not in ['', 'nan']
+                and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] 从一阶段目标列加载了 {len(var_first_stage_target_map)} 个映射")
+            print(f"  [Mappings] 从一阶段目标列加载了 {len(var_first_stage_target_map)} 个标记为'是'的变量")
         else:
             print(f"  [Mappings] Warning: 一阶段目标列未找到")
+
+        # 创建二阶段目标默认选择映射
+        if second_stage_target_col and second_stage_target_col in indicator_sheet.columns:
+            second_stage_target_map_temp = pd.Series(
+                indicator_sheet[second_stage_target_col].astype(str).str.strip().values,
+                index=indicator_sheet[indicator_col].astype(str).str.strip()
+            ).to_dict()
+
+            # 标准化键并只保留标记为"是"的条目
+            var_second_stage_target_map = {
+                normalize_text(k): str(v).strip()
+                for k, v in second_stage_target_map_temp.items()
+                if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
+                and pd.notna(v) and str(v).strip() == '是'
+            }
+            print(f"  [Mappings] 从二阶段目标列加载了 {len(var_second_stage_target_map)} 个标记为'是'的变量")
+        else:
+            print(f"  [Mappings] Warning: 二阶段目标列未找到")
 
     except FileNotFoundError as e:
         print(f"Error loading mappings: {e}")
@@ -187,8 +211,8 @@ def load_mappings(
         print(f"An unexpected error occurred while loading mappings: {e}")
         # Return empty maps on other errors
 
-    print(f"--- [Mappings] Loading finished. Type map size: {len(var_type_map)}, Industry map size: {len(var_industry_map)}, Single stage map size: {len(var_dfm_single_stage_map)}, Two stage map size: {len(var_dfm_two_stage_map)}, First stage target map size: {len(var_first_stage_target_map)} ---")
-    return var_type_map, var_industry_map, var_dfm_single_stage_map, var_dfm_two_stage_map, var_first_stage_target_map
+    print(f"--- [Mappings] Loading finished. Type map size: {len(var_type_map)}, Industry map size: {len(var_industry_map)}, Single stage map size: {len(var_dfm_single_stage_map)}, First stage pred map size: {len(var_first_stage_pred_map)}, First stage target map size: {len(var_first_stage_target_map)}, Second stage target map size: {len(var_second_stage_target_map)} ---")
+    return var_type_map, var_industry_map, var_dfm_single_stage_map, var_first_stage_pred_map, var_first_stage_target_map, var_second_stage_target_map
 
 def create_industry_map_from_data(
     final_columns: set,

@@ -86,15 +86,16 @@ def prepare_data(
 
         # 步骤0: 加载指标体系行业映射
         print("\n--- [Data Prep] 步骤 0: 加载指标体系行业映射 ---")
-        _, reference_industry_map, _, _, _ = load_mappings(
+        _, reference_industry_map, _, _, _, _ = load_mappings(
             excel_path=excel_path,
             sheet_name=reference_sheet_name,
             indicator_col=reference_column_name,
             type_col='类型',
             industry_col='行业',
             single_stage_col='一次估计',
-            two_stage_col='二次估计',
-            first_stage_target_col='一阶段目标'
+            first_stage_pred_col='一阶段预测',
+            first_stage_target_col='一阶段目标',
+            second_stage_target_col='二阶段目标'
         )
         print(f"  从指标体系加载了 {len(reference_industry_map)} 个变量的行业映射")
         if len(reference_industry_map) > 0:

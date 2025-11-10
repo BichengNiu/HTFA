@@ -139,15 +139,21 @@ class FileUploaderComponent:
         cached_file_id = self.state.get('cached_map_file_id', None)
         cached_industry_map = self.state.get('dfm_industry_map_obj', None)
         cached_single_stage_map = self.state.get('dfm_default_single_stage_map', None)
-        cached_two_stage_map = self.state.get('dfm_default_two_stage_map', None)
+        cached_first_stage_pred_map = self.state.get('dfm_first_stage_pred_map', None)
+        cached_first_stage_target_map = self.state.get('dfm_first_stage_target_map', None)
+        cached_second_stage_target_map = self.state.get('dfm_second_stage_target_map', None)
 
         # 检查缓存
         if cached_industry_map is not None and current_file_id == cached_file_id:
             print(f"[模型训练] 使用缓存的行业映射: {len(cached_industry_map)} 个变量")
             if cached_single_stage_map is not None:
                 print(f"[模型训练] 使用缓存的一次估计默认变量: {len(cached_single_stage_map)} 个")
-            if cached_two_stage_map is not None:
-                print(f"[模型训练] 使用缓存的二次估计默认变量: {len(cached_two_stage_map)} 个")
+            if cached_first_stage_pred_map is not None:
+                print(f"[模型训练] 使用缓存的一阶段预测默认变量: {len(cached_first_stage_pred_map)} 个")
+            if cached_first_stage_target_map is not None:
+                print(f"[模型训练] 使用缓存的一阶段目标默认变量: {len(cached_first_stage_target_map)} 个")
+            if cached_second_stage_target_map is not None:
+                print(f"[模型训练] 使用缓存的二阶段目标默认变量: {len(cached_second_stage_target_map)} 个")
             return cached_industry_map, cached_single_stage_map or {}
 
         # 重新加载
@@ -169,9 +175,11 @@ class FileUploaderComponent:
             self.state.set('cached_map_file_id', current_file_id)
             print(f"[模型训练] 重新加载行业映射: {len(var_industry_map)} 个变量")
 
-            # 加载DFM默认变量（支持一次估计和二次估计两列）
+            # 加载DFM默认变量（支持四列：一次估计、一阶段预测、一阶段目标、二阶段目标）
             dfm_default_single_stage = {}
-            dfm_default_two_stage = {}
+            dfm_first_stage_pred = {}
+            dfm_first_stage_target = {}
+            dfm_second_stage_target = {}
 
             # 读取一次估计列
             if '一次估计' in industry_map_df.columns:
@@ -182,20 +190,40 @@ class FileUploaderComponent:
                 }
                 print(f"[模型训练] 从CSV文件加载了一次估计默认变量: {len(dfm_default_single_stage)} 个")
 
-            # 读取二次估计列
-            if '二次估计' in industry_map_df.columns:
-                dfm_default_two_stage = {
+            # 读取一阶段预测列
+            if '一阶段预测' in industry_map_df.columns:
+                dfm_first_stage_pred = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['二次估计'])
+                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['一阶段预测'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
-                print(f"[模型训练] 从CSV文件加载了二次估计默认变量: {len(dfm_default_two_stage)} 个")
+                print(f"[模型训练] 从CSV文件加载了一阶段预测默认变量: {len(dfm_first_stage_pred)} 个")
 
-            # 存储两个映射
+            # 读取一阶段目标列
+            if '一阶段目标' in industry_map_df.columns:
+                dfm_first_stage_target = {
+                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['一阶段目标'])
+                    if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                }
+                print(f"[模型训练] 从CSV文件加载了一阶段目标默认变量: {len(dfm_first_stage_target)} 个")
+
+            # 读取二阶段目标列
+            if '二阶段目标' in industry_map_df.columns:
+                dfm_second_stage_target = {
+                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['二阶段目标'])
+                    if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                }
+                print(f"[模型训练] 从CSV文件加载了二阶段目标默认变量: {len(dfm_second_stage_target)} 个")
+
+            # 存储四个映射
             self.state.set('dfm_default_single_stage_map', dfm_default_single_stage)
-            self.state.set('dfm_default_two_stage_map', dfm_default_two_stage)
+            self.state.set('dfm_first_stage_pred_map', dfm_first_stage_pred)
+            self.state.set('dfm_first_stage_target_map', dfm_first_stage_target)
+            self.state.set('dfm_second_stage_target_map', dfm_second_stage_target)
 
-            # 返回single_stage作为默认
+            # 返回single_stage作为默认（向后兼容）
             return var_industry_map, dfm_default_single_stage
 
         except Exception as e:
