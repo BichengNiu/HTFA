@@ -30,8 +30,6 @@ def prepare_dfm_data(
     data_start_date: str = "2010-01-31",
     data_end_date: str = "2025-07-03",
     target_freq: str = "W-FRI",
-    target_sheet_name: str = "工业增加值同比增速_月度_同花顺",
-    target_variable_name: str = "规模以上工业增加值:当月同比",
     consecutive_nan_threshold: int = 10,
     reference_sheet_name: str = "指标体系",
     reference_column_name: str = "指标名称"
@@ -41,18 +39,17 @@ def prepare_dfm_data(
 
     这是DFM数据准备的主要API接口，负责：
     1. 加载和验证Excel文件
-    2. 数据清理和预处理
-    3. 频率对齐（转换为周度数据）
-    4. 平稳性处理
-    5. 生成变量映射和转换日志
+    2. 自动识别包含目标变量的工作表（从映射文件推断）
+    3. 数据清理和预处理
+    4. 频率对齐（转换为周度数据）
+    5. 平稳性处理
+    6. 生成变量映射和转换日志
 
     Args:
         uploaded_file: Excel文件路径（str）或文件对象
         data_start_date: 数据起始日期，格式："YYYY-MM-DD"
         data_end_date: 数据结束日期，格式："YYYY-MM-DD"
         target_freq: 目标频率，默认"W-FRI"（周五结尾的周度数据）
-        target_sheet_name: Excel中目标变量所在的工作表名称
-        target_variable_name: 目标变量名称
         consecutive_nan_threshold: 允许的最大连续NaN值数量
         reference_sheet_name: 指标映射表的工作表名称
         reference_column_name: 映射表中的参考列名
@@ -91,13 +88,14 @@ def prepare_dfm_data(
         # 步骤1: 处理文件输入
         excel_path = _handle_file_input(uploaded_file)
 
-        # 步骤2: 调用内部数据准备函数
-        logger.info("调用数据处理引擎...")
+        # 步骤2: 调用内部数据准备函数（使用自动推断）
+        logger.info("调用数据处理引擎（启用工作表自动推断）...")
+
         processed_data, variable_mapping, transform_log, removal_log, validation_result = _prepare_data_internal(
             excel_path=excel_path,
             target_freq=target_freq,
-            target_sheet_name=target_sheet_name,
-            target_variable_name=target_variable_name,
+            target_sheet_name=None,  # 使用自动推断
+            target_variable_name=None,  # 使用自动推断
             consecutive_nan_threshold=consecutive_nan_threshold,
             data_start_date=data_start_date,
             data_end_date=data_end_date,
@@ -117,6 +115,9 @@ def prepare_dfm_data(
         # 步骤4: 构建元数据
         processing_time = (datetime.now() - start_time).total_seconds()
 
+        # 推断目标变量名称（通常是第一列）
+        inferred_target = processed_data.columns[0] if len(processed_data.columns) > 0 else "auto-inferred"
+
         metadata = {
             'variable_mapping': variable_mapping or {},
             'transform_log': transform_log or {},
@@ -132,7 +133,7 @@ def prepare_dfm_data(
                 'data_start_date': data_start_date,
                 'data_end_date': data_end_date,
                 'target_freq': target_freq,
-                'target_variable': target_variable_name,
+                'target_variable': inferred_target,
                 'nan_threshold': consecutive_nan_threshold
             }
         }

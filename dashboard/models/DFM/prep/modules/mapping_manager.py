@@ -11,7 +11,7 @@ from typing import Dict, Tuple, Optional, Union
 from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 
 def load_mappings(
-    excel_path: Union[str, io.BytesIO, object],
+    excel_path: Union[str, io.BytesIO, pd.ExcelFile, object],
     sheet_name: str,
     indicator_col: str = '指标名称',
     type_col: str = '类型',
@@ -27,7 +27,7 @@ def load_mappings(
     将指标名称（键）标准化为小写NFKC格式
 
     Args:
-        excel_path: Excel文件路径、BytesIO对象或类文件对象
+        excel_path: Excel文件路径、BytesIO对象、pd.ExcelFile对象或类文件对象
         sheet_name: 表格名称
         indicator_col: 指标列名，默认'指标名称'
         type_col: 类型列名，默认'类型'
@@ -57,7 +57,11 @@ def load_mappings(
 
     try:
         # 处理不同类型的输入
-        if isinstance(excel_path, str):
+        if isinstance(excel_path, pd.ExcelFile):
+            # 已经是ExcelFile对象，直接使用
+            excel_file_obj = excel_path
+            print(f"  [Mappings] 使用已有的ExcelFile对象")
+        elif isinstance(excel_path, str):
             # 字符串路径
             excel_file_obj = pd.ExcelFile(excel_path)
         elif isinstance(excel_path, io.BytesIO):

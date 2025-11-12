@@ -252,11 +252,11 @@ def load_mappings_from_state(available_data_columns=None):
 
         # 如果提供了实际数据列名，进行过滤
         if available_data_columns is not None:
-            # 标准化实际数据的列名
+            # 标准化实际数据的列名（使用normalize_text确保与映射键一致）
             normalized_data_columns = {}
             for col in available_data_columns:
                 if col and pd.notna(col):
-                    norm_col = unicodedata.normalize('NFKC', str(col)).strip().lower()
+                    norm_col = normalize_text(col)
                     if norm_col:
                         normalized_data_columns[norm_col] = col
 
@@ -687,31 +687,100 @@ def render_dfm_model_training_page(st_instance):
     # 添加变量选择大标题
     st_instance.subheader("变量选择")
 
-    # 1. 选择目标变量
-    st_instance.markdown("**选择目标变量**")
-    if available_target_vars:
-        # 初始化目标变量状态
-        if get_dfm_state('dfm_target_variable') is None:
-            set_dfm_state('dfm_target_variable', available_target_vars[0])
+    # 1. 目标变量选择/识别
+    st_instance.markdown("**目标变量**")
 
-        current_target_var = get_dfm_state('dfm_target_variable')
+    # 获取当前估计方法
+    current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
 
-        # 确保当前目标变量在可选列表中
-        if current_target_var not in available_target_vars:
-            current_target_var = available_target_vars[0]
-            set_dfm_state('dfm_target_variable', current_target_var)
+    if current_estimation_method == 'single_stage':
+        # 一次估计法：从映射文件自动识别目标变量
+        # 目标变量来自'二阶段目标'列（总量指标）
+        second_stage_target_map = get_dfm_state('dfm_second_stage_target_map', {})
 
-        selected_target_var = st_instance.selectbox(
-            "目标变量",
-            options=available_target_vars,
-            index=available_target_vars.index(current_target_var),
-            key="ss_dfm_target_variable",
-            label_visibility="collapsed"
-        )
-        set_dfm_state('dfm_target_variable', selected_target_var)
+        # 将标准化的键转换回原始列名
+        single_stage_targets = []
+
+        if input_df is not None:
+            for col in input_df.columns:
+                col_norm = normalize_text(col)
+                if col_norm in second_stage_target_map:
+                    single_stage_targets.append(col)
+
+
+        # 验证唯一性
+        if len(single_stage_targets) == 0:
+            st_instance.error("[ERROR] 映射文件'二阶段目标'列中未标记任何目标变量，一次估计法需要目标变量")
+            st_instance.info("提示：一次估计法的目标变量来自'二阶段目标'列（总量指标），预测变量默认来自'一次估计'列")
+            set_dfm_state('dfm_target_variable', None)
+        elif len(single_stage_targets) > 1:
+            st_instance.error(f"[ERROR] 映射文件'二阶段目标'列中标记了多个目标变量，请确保只有一个目标变量标记为'是'")
+            st_instance.warning(f"当前识别到的目标变量：{', '.join(single_stage_targets)}")
+            set_dfm_state('dfm_target_variable', None)
+        else:
+            # 唯一目标变量
+            target_var = single_stage_targets[0]
+            set_dfm_state('dfm_target_variable', target_var)
+            st_instance.info(f"已从映射文件自动识别目标变量：{target_var}")
     else:
-        st_instance.error("[ERROR] 无法找到任何可用的目标变量")
-        set_dfm_state('dfm_target_variable', None)
+        # 二次估计法：从映射文件自动识别目标变量
+        first_stage_target_map = get_dfm_state('dfm_first_stage_target_map', {})
+        second_stage_target_map = get_dfm_state('dfm_second_stage_target_map', {})
+
+        # 将标准化的键转换回原始列名
+        first_stage_targets = []
+        second_stage_targets = []
+
+        if input_df is not None:
+            for col in input_df.columns:
+                col_norm = normalize_text(col)
+                if col_norm in first_stage_target_map:
+                    first_stage_targets.append(col)
+                if col_norm in second_stage_target_map:
+                    second_stage_targets.append(col)
+
+
+        # 显示识别到的目标变量
+        if first_stage_targets or second_stage_targets:
+            st_instance.info(f"已从映射文件自动识别目标变量")
+
+            if first_stage_targets:
+                with st_instance.expander("一阶段目标变量（各行业）", expanded=False):
+                    for idx, target in enumerate(first_stage_targets, 1):
+                        st_instance.text(f"{idx}. {target}")
+                # 显示自动全选提示
+                st_instance.success(f"已自动选择 {len(first_stage_targets)} 个一阶段目标变量用于训练")
+            else:
+                st_instance.warning("未识别到一阶段目标变量（请检查映射文件'一阶段目标'列）")
+
+            if second_stage_targets:
+                # 二阶段目标只有一个，直接显示不使用expander
+                st_instance.info(f"二阶段目标变量（总量）：**{second_stage_targets[0]}**")
+                # 显示自动选择提示
+                st_instance.success(f"已自动选择二阶段目标变量用于最终预测")
+
+                # 将二阶段目标变量保存到全局状态（用于后续训练逻辑）
+                set_dfm_state('dfm_target_variable', second_stage_targets[0] if second_stage_targets else None)
+                set_dfm_state('dfm_first_stage_target_variables', first_stage_targets)
+                set_dfm_state('dfm_second_stage_target_variable', second_stage_targets[0] if second_stage_targets else None)
+            else:
+                st_instance.error("未识别到二阶段目标变量（请检查映射文件'二阶段目标'列）")
+                set_dfm_state('dfm_target_variable', None)
+                set_dfm_state('dfm_second_stage_target_variable', None)
+        else:
+            st_instance.error("[ERROR] 映射文件中未标记任何目标变量，请检查'一阶段目标'和'二阶段目标'列")
+            set_dfm_state('dfm_target_variable', None)
+
+    # 根据估计方法选择正确的预测变量默认映射
+    if current_estimation_method == 'single_stage':
+        # 一次估计法：使用'一次估计'列作为预测变量默认选择
+        dfm_default_map = get_dfm_state('dfm_default_single_stage_map', {})
+    else:
+        # 二次估计法：使用'一阶段预测'列作为预测变量默认选择
+        dfm_default_map = get_dfm_state('dfm_first_stage_pred_map', {})
+
+    # 更新到状态，供后续使用
+    set_dfm_state('dfm_default_variables_map', dfm_default_map)
 
     # 2. 过滤行业：移除仅包含目标变量的行业（使用工具函数）
     current_target_var = get_dfm_state('dfm_target_variable', None)
@@ -729,182 +798,178 @@ def render_dfm_model_training_page(st_instance):
         pass  # 继续进行到步骤3，用户将直接选择指标
 
     # 3. 根据选定行业选择预测指标 (每个行业一个多选下拉菜单，默认全选)
-    st_instance.markdown("**选择预测指标**")
-    # 初始化指标选择状态
-    if get_dfm_state('dfm_selected_indicators_per_industry', None) is None:
-        set_dfm_state('dfm_selected_indicators_per_industry', {})
+    with st_instance.expander("选择预测指标", expanded=False):
+        # 获取当前估计方法，用于状态键命名
+        current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
+        indicators_state_key = f'dfm_selected_indicators_per_industry_{current_estimation_method}'
 
-    final_selected_indicators_flat = []
-    current_selected_industries = filtered_industries  # 直接使用过滤后的所有行业
+        # 初始化指标选择状态（按估计方法分别存储）
+        if get_dfm_state(indicators_state_key, None) is None:
+            set_dfm_state(indicators_state_key, {})
 
-    if not current_selected_industries:
-        st_instance.info("没有可用的行业数据。")
-    else:
-        current_selection = get_dfm_state('dfm_selected_indicators_per_industry', {})
+        final_selected_indicators_flat = []
+        current_selected_industries = filtered_industries  # 直接使用过滤后的所有行业
 
-        num_cols = 3
-        cols = st_instance.columns(num_cols)
-        col_idx = 0
+        if not current_selected_industries:
+            st_instance.info("没有可用的行业数据。")
+        else:
+            current_selection = get_dfm_state(indicators_state_key, {})
 
-        for industry_name in current_selected_industries:
-            all_indicators_for_industry = var_to_indicators_map_by_industry.get(industry_name, [])
+            num_cols = 3
+            cols = st_instance.columns(num_cols)
+            col_idx = 0
 
-            # 修复：排除目标变量，确保用户无法选择目标变量作为预测变量
-            current_target_var = get_dfm_state('dfm_target_variable', None)
-            if current_target_var:
-                indicators_for_this_industry = [
-                    indicator for indicator in all_indicators_for_industry
-                    if indicator != current_target_var
-                ]
-            else:
-                indicators_for_this_industry = all_indicators_for_industry
+            for industry_name in current_selected_industries:
+                all_indicators_for_industry = var_to_indicators_map_by_industry.get(industry_name, [])
 
-            # 修复：完全跳过没有可用指标的行业，不显示任何内容
-            if not indicators_for_this_industry:
-                current_selection[industry_name] = []
-                col_idx += 1
-                continue
-
-            with cols[col_idx % num_cols]:
-                # 只有在有指标被排除且仍有可用指标时才显示提示
-                excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
-
-                # 获取当前选择的估计方法
+                # 修复：排除目标变量，确保用户无法选择目标变量作为预测变量
+                current_target_var = get_dfm_state('dfm_target_variable', None)
+                first_stage_targets = get_dfm_state('dfm_first_stage_target_variables', [])
                 current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
 
-                # 根据估计方法选择对应的默认变量映射
-                if current_estimation_method == 'two_stage':
-                    dfm_default_map = get_dfm_state('dfm_first_stage_pred_map', {})
-                    method_label = "一阶段预测"
-                else:
-                    dfm_default_map = get_dfm_state('dfm_default_single_stage_map', {})
-                    method_label = "一次估计"
+                # 构建排除列表：包括全局目标变量和一阶段目标变量
+                exclude_targets = []
+                if current_target_var:
+                    exclude_targets.append(current_target_var)
+                if first_stage_targets:
+                    exclude_targets.extend(first_stage_targets)
 
-                # 调试输出
-                print(f"[调试] 行业: {industry_name}")
-                print(f"[调试] 当前估计方法: {method_label}")
-                print(f"[调试] dfm_default_map键数量: {len(dfm_default_map)}")
-                print(f"[调试] 可用指标数量: {len(indicators_for_this_industry)}")
-                if len(dfm_default_map) > 0:
-                    print(f"[调试] dfm_default_map前5个键: {list(dfm_default_map.keys())[:5]}")
-
-                # 从状态管理器读取已选指标，或使用DFM默认选择
-                default_selection_for_industry = current_selection.get(industry_name, None)
-
-                # 如果状态管理器中没有选择，使用DFM变量列配置
-                if default_selection_for_industry is None:
-                    dfm_default_indicators = [
-                        indicator for indicator in indicators_for_this_industry
-                        if normalize_text(indicator) in dfm_default_map
+                # 排除所有目标变量
+                if exclude_targets:
+                    indicators_for_this_industry = [
+                        indicator for indicator in all_indicators_for_industry
+                        if indicator not in exclude_targets
                     ]
-                    default_selection_for_industry = dfm_default_indicators
+                else:
+                    indicators_for_this_industry = all_indicators_for_industry
 
-                    # 调试输出匹配结果
-                    print(f"[调试] {method_label}默认选中: {len(dfm_default_indicators)}个")
-                    if len(indicators_for_this_industry) > 0:
-                        print(f"[调试] 前3个可用指标标准化: {[normalize_text(ind) for ind in indicators_for_this_industry[:3]]}")
-                    for ind in dfm_default_indicators[:5]:
-                        print(f"  - {ind} (标准化: {normalize_text(ind)})")
+                # 二次估计法：第一阶段排除"综合"类变量（综合变量应该在第二阶段使用）
+                if current_estimation_method == 'two_stage':
+                    var_industry_map = get_dfm_state('dfm_industry_map_filtered', None)
+                    if var_industry_map is None:
+                        var_industry_map = get_dfm_state('dfm_industry_map_obj', {})
 
-                # 确保默认值是实际可选列表的子集
-                valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
+                    if var_industry_map:
+                        indicators_before_filter = indicators_for_this_industry.copy()
+                        indicators_for_this_industry = [
+                            indicator for indicator in indicators_for_this_industry
+                            if var_industry_map.get(
+                                unicodedata.normalize('NFKC', str(indicator)).strip().lower(),
+                                None
+                            ) != '综合'
+                        ]
+                        excluded_general_count = len(indicators_before_filter) - len(indicators_for_this_industry)
 
-                # 判断是否应该默认勾选全选（所有可用指标都在DFM默认配置中）
-                should_check_select_all = (
-                    len(valid_default) > 0 and
-                    len(valid_default) == len(indicators_for_this_industry)
-                )
+                # 修复：完全跳过没有可用指标的行业，不显示任何内容
+                if not indicators_for_this_industry:
+                    current_selection[industry_name] = []
+                    col_idx += 1
+                    continue
 
-                # 行业名称与全选checkbox同行
-                header_col1, header_col2 = st_instance.columns([3, 1])
-                with header_col1:
-                    st_instance.markdown(f"**{industry_name}**")
-                with header_col2:
-                    select_all_key = f"dfm_select_all_{industry_name}_{current_estimation_method}"
-                    select_all_checked = st_instance.checkbox(
-                        "全选",
-                        value=should_check_select_all,
-                        key=select_all_key
+                with cols[col_idx % num_cols]:
+                    # 只有在有指标被排除且仍有可用指标时才显示提示
+                    excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
+
+                    # 从状态读取已设置的默认变量映射（在目标变量识别后已根据估计方法设置）
+                    dfm_default_map = get_dfm_state('dfm_default_variables_map', {})
+                    current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
+                    method_label = "一阶段预测" if current_estimation_method == 'two_stage' else "一次估计"
+
+
+                    # 从状态管理器读取已选指标，或使用DFM默认选择
+                    default_selection_for_industry = current_selection.get(industry_name, None)
+
+                    # 如果状态管理器中没有选择，使用DFM变量列配置
+                    if default_selection_for_industry is None:
+                        dfm_default_indicators = [
+                            indicator for indicator in indicators_for_this_industry
+                            if normalize_text(indicator) in dfm_default_map
+                        ]
+                        default_selection_for_industry = dfm_default_indicators
+
+                    # 确保默认值是实际可选列表的子集
+                    valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
+
+                    # 判断是否应该默认勾选全选（所有可用指标都在DFM默认配置中）
+                    should_check_select_all = (
+                        len(valid_default) > 0 and
+                        len(valid_default) == len(indicators_for_this_industry)
                     )
 
-                if excluded_count > 0:
-                    st_instance.caption(f"排除目标变量: {excluded_count}个")
+                    # 行业名称与全选checkbox同行
+                    header_col1, header_col2 = st_instance.columns([3, 1])
+                    with header_col1:
+                        st_instance.markdown(f"**{industry_name}**")
+                    with header_col2:
+                        select_all_key = f"dfm_select_all_{industry_name}_{current_estimation_method}"
+                        select_all_checked = st_instance.checkbox(
+                            "全选",
+                            value=should_check_select_all,
+                            key=select_all_key
+                        )
 
-                # 初始化multiselect（key中包含估计方法，确保切换方法时重新初始化）
-                multiselect_key = f"dfm_indicators_multiselect_{industry_name}_{current_estimation_method}"
+                    if excluded_count > 0:
+                        st_instance.caption(f"排除目标变量: {excluded_count}个")
 
-                if multiselect_key not in st.session_state:
-                    st.session_state[multiselect_key] = valid_default
+                    # 初始化multiselect（key中包含估计方法，确保切换方法时重新初始化）
+                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}_{current_estimation_method}"
 
-                # 同步checkbox与multiselect
-                if select_all_checked:
-                    st.session_state[multiselect_key] = indicators_for_this_industry
-                else:
-                    if st.session_state[multiselect_key] == indicators_for_this_industry:
+                    if multiselect_key not in st.session_state:
                         st.session_state[multiselect_key] = valid_default
 
-                selected_in_widget = st_instance.multiselect(
-                    "选择指标",
-                    options=indicators_for_this_industry,
-                    key=multiselect_key,
-                    label_visibility="collapsed"
-                )
+                    # 同步checkbox与multiselect
+                    if select_all_checked:
+                        st.session_state[multiselect_key] = indicators_for_this_industry
+                    else:
+                        if st.session_state[multiselect_key] == indicators_for_this_industry:
+                            st.session_state[multiselect_key] = valid_default
 
-                current_selection[industry_name] = selected_in_widget
-                final_selected_indicators_flat.extend(selected_in_widget)
+                    selected_in_widget = st_instance.multiselect(
+                        "选择指标",
+                        options=indicators_for_this_industry,
+                        key=multiselect_key,
+                        label_visibility="collapsed"
+                    )
 
-            col_idx += 1
+                    current_selection[industry_name] = selected_in_widget
+                    final_selected_indicators_flat.extend(selected_in_widget)
 
-        industries_to_remove_from_state = [
-            ind for ind in current_selection
-            if ind not in current_selected_industries
-        ]
-        for ind_to_remove in industries_to_remove_from_state:
-            del current_selection[ind_to_remove]
+                col_idx += 1
 
-        set_dfm_state('dfm_selected_indicators_per_industry', current_selection)
+            industries_to_remove_from_state = [
+                ind for ind in current_selection
+                if ind not in current_selected_industries
+            ]
+            for ind_to_remove in industries_to_remove_from_state:
+                del current_selection[ind_to_remove]
 
-    # 修复：如果循环没有执行（filtered_industries为空），但dfm_selected_indicators_per_industry中有数据
-    # 说明这是旧数据，应该从dfm_selected_indicators_per_industry重建指标列表
-    if len(final_selected_indicators_flat) == 0 and len(current_selected_industries) == 0:
-        saved_selection = get_dfm_state('dfm_selected_indicators_per_industry', {})
-        if saved_selection:
-            for industry, indicators in saved_selection.items():
-                final_selected_indicators_flat.extend(indicators)
+            set_dfm_state(indicators_state_key, current_selection)
 
-    # 更新最终的扁平化预测指标列表 (去重)
-    final_indicators = sorted(list(set(final_selected_indicators_flat)))
-    set_dfm_state('dfm_selected_indicators', final_indicators)
+        # 修复：如果循环没有执行（filtered_industries为空），但状态中有数据
+        # 说明是旧数据，应该从状态重建指标列表
+        if len(final_selected_indicators_flat) == 0 and len(current_selected_industries) == 0:
+            saved_selection = get_dfm_state(indicators_state_key, {})
+            if saved_selection:
+                for industry, indicators in saved_selection.items():
+                    final_selected_indicators_flat.extend(indicators)
 
-    # 调试：打印选择的指标
-    print(f"[UI] 用户选择的指标数量: {len(final_indicators)}")
-    if final_indicators:
-        print(f"[UI] 选择的指标列表:")
-        for idx, var in enumerate(final_indicators, 1):
-            print(f"  {idx}. {var}")
+        # 更新最终的扁平化预测指标列表 (去重)
+        final_indicators = sorted(list(set(final_selected_indicators_flat)))
+        set_dfm_state('dfm_selected_indicators', final_indicators)
 
-    # 从选择的指标自动推断实际使用的行业（只有当该行业有指标被选中时）
-    inferred_industries = []
-    selected_indicators_per_industry = get_dfm_state('dfm_selected_indicators_per_industry', {})
-    for industry, indicators in selected_indicators_per_industry.items():
-        if indicators and len(indicators) > 0:  # 如果该行业有选中的指标
-            inferred_industries.append(industry)
 
-    set_dfm_state('dfm_selected_industries', inferred_industries)
+        # 从选择的指标自动推断实际使用的行业（只有当该行业有指标被选中时）
+        inferred_industries = []
+        selected_indicators_per_industry = get_dfm_state(indicators_state_key, {})
+        for industry, indicators in selected_indicators_per_industry.items():
+            if indicators and len(indicators) > 0:  # 如果该行业有选中的指标
+                inferred_industries.append(industry)
+
+        set_dfm_state('dfm_selected_industries', inferred_industries)
 
     # 变量选择完成
 
-    # 显示汇总信息 (可选)
     st_instance.markdown("--- ")
-    current_target_var = get_dfm_state('dfm_target_variable', None)
-    current_selected_indicators = get_dfm_state('dfm_selected_indicators', [])
-    current_selected_industries_for_display = get_dfm_state('dfm_selected_industries', [])
-
-    st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
-    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
-    st_instance.text(f" - 选定预测指标总数: {len(current_selected_indicators)}")
-
-    st_instance.markdown("--- ") # 分隔线，将变量选择与参数配置分开
     st_instance.subheader("模型参数")
 
     # 创建三列布局
@@ -1027,15 +1092,28 @@ def render_dfm_model_training_page(st_instance):
             'two_stage': '二次估计法'
         }
 
+        # 定义回调函数：切换估计方法时同步状态
+        # 注意：回调执行后Streamlit会自动重新运行脚本，无需手动调用rerun()
+        def on_estimation_method_change():
+            # 从临时key读取新值并同步到dfm状态
+            new_method = st_instance.session_state.get('temp_estimation_method_selector', 'single_stage')
+            set_dfm_state('dfm_estimation_method', new_method)
+
+        # 获取当前选择的估计方法（用于确定默认index）
+        current_method = get_dfm_state('dfm_estimation_method', 'single_stage')
+        current_index = 0 if current_method == 'single_stage' else 1
+
         estimation_method = st_instance.selectbox(
             "估计方法",
             options=list(estimation_methods.keys()),
             format_func=lambda x: estimation_methods[x],
-            index=0,
-            key='dfm_estimation_method',
-            help="一次估计法：当前方法；二次估计法：先按行业估计，再汇总估计"
+            index=current_index,
+            key='temp_estimation_method_selector',  # 使用临时key
+            on_change=on_estimation_method_change,  # 回调函数处理状态同步和重载
+            help="一次估计法：直接预测总量指标；二次估计法：先预测各行业，再加总"
         )
 
+        # 手动同步状态（确保即使回调未触发也能保持一致）
         set_dfm_state('dfm_estimation_method', estimation_method)
 
         if CONFIG_AVAILABLE:
@@ -1179,122 +1257,162 @@ def render_dfm_model_training_page(st_instance):
     # 二次估计法配置
     if estimation_method == 'two_stage':
         st_instance.info("二次估计法说明：上方'固定因子数'为第二阶段总量模型的因子数，下方设置各行业模型的因子数")
-        st_instance.markdown("##### 第一阶段：分行业因子数设置")
+        with st_instance.expander("第一阶段：分行业因子数设置", expanded=False):
+            # 使用训练模块上传的数据（input_df从第614行获得）
+            if input_df is not None:
+                # 提取行业列表
+                from dashboard.models.DFM.train.utils.industry_data_processor import extract_industry_list
 
-        # 使用训练模块上传的数据（input_df从第614行获得）
-        if input_df is not None:
-            # 提取行业列表
-            from dashboard.models.DFM.train.utils.industry_data_processor import extract_industry_list
+                industry_list = extract_industry_list(input_df)
 
-            industry_list = extract_industry_list(input_df)
+                if industry_list:
+                    st_instance.info(f"共识别到 {len(industry_list)} 个行业，请设定各行业因子数（默认值为1）")
 
-            if industry_list:
-                st_instance.info(f"共识别到 {len(industry_list)} 个行业，请设定各行业因子数（默认值为1）")
+                    # 使用列布局优化显示（每行3个）
+                    cols_per_row = 3
+                    industry_k_factors = {}
 
-                # 使用列布局优化显示（每行3个）
-                cols_per_row = 3
-                industry_k_factors = {}
+                    for i in range(0, len(industry_list), cols_per_row):
+                        cols = st_instance.columns(cols_per_row)
+                        for j, col in enumerate(cols):
+                            idx = i + j
+                            if idx < len(industry_list):
+                                industry = industry_list[idx]
+                                with col:
+                                    k_val = st_instance.number_input(
+                                        f"{industry}",
+                                        min_value=1,
+                                        max_value=5,
+                                        value=get_dfm_state(f'industry_k_{industry}', 1),
+                                        step=1,
+                                        key=f'industry_k_{industry}'
+                                    )
+                                    industry_k_factors[industry] = k_val
 
-                for i in range(0, len(industry_list), cols_per_row):
-                    cols = st_instance.columns(cols_per_row)
-                    for j, col in enumerate(cols):
-                        idx = i + j
-                        if idx < len(industry_list):
-                            industry = industry_list[idx]
-                            with col:
-                                k_val = st_instance.number_input(
-                                    f"{industry}",
-                                    min_value=1,
-                                    max_value=5,
-                                    value=get_dfm_state(f'industry_k_{industry}', 1),
-                                    step=1,
-                                    key=f'industry_k_{industry}'
-                                )
-                                industry_k_factors[industry] = k_val
+                    # 存储到session_state
+                    set_dfm_state('dfm_industry_k_factors', industry_k_factors)
+                else:
+                    st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
 
-                # 存储到session_state
-                set_dfm_state('dfm_industry_k_factors', industry_k_factors)
             else:
-                st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
-
-        else:
-            st_instance.warning("请先上传预处理后的数据文件")
+                st_instance.warning("请先上传预处理后的数据文件")
 
         # 第二阶段额外指标选择
-        st_instance.markdown("##### 第二阶段：变量选择")
+        with st_instance.expander("第二阶段：变量选择", expanded=False):
+            if input_df is not None:
+                # 获取当前估计方法
+                current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
 
-        if input_df is not None:
-            # 获取当前估计方法
-            current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
+                # 获取需要排除的变量
+                target_variable = get_dfm_state('dfm_target_variable', None)
+                first_stage_selected_indicators = get_dfm_state('dfm_selected_indicators', [])
+                var_industry_map = get_dfm_state('dfm_industry_map_filtered', None)
+                if var_industry_map is None:
+                    var_industry_map = get_dfm_state('dfm_industry_map_obj', {})
 
-            # 获取需要排除的变量
-            target_variable = get_dfm_state('dfm_target_variable', None)
-            var_industry_map = get_dfm_state('dfm_industry_map_filtered', None)
-            if var_industry_map is None:
-                var_industry_map = get_dfm_state('dfm_industry_map_obj', {})
+                # 构建排除集合（使用标准化名称）
+                excluded_vars = set()
+                excluded_vars_normalized = set()  # 标准化后的排除集合
 
-            # 构建排除集合
-            excluded_vars = set()
+                # 排除第一阶段已选择的所有预测变量（关键修复：使用标准化名称）
+                if first_stage_selected_indicators:
+                    excluded_vars.update(first_stage_selected_indicators)
+                    # 构建标准化版本的排除集合（去除所有空格）
+                    for var in first_stage_selected_indicators:
+                        normalized_var = unicodedata.normalize('NFKC', str(var)).strip().lower().replace(' ', '')
+                        excluded_vars_normalized.add(normalized_var)
 
-            # 遍历所有列，根据映射关系判断是否排除
-            for col in input_df.columns:
-                # 标准化列名
-                normalized_col = unicodedata.normalize('NFKC', str(col)).strip().lower()
+                # 遍历所有列，根据映射关系判断是否排除
+                for col in input_df.columns:
+                    # 标准化列名（用于映射查找）
+                    normalized_col = unicodedata.normalize('NFKC', str(col)).strip().lower()
+                    # 标准化列名（去除所有空格，用于第一阶段变量匹配）
+                    normalized_col_no_space = normalized_col.replace(' ', '')
 
-                # 检查是否在var_industry_map中
-                if var_industry_map and normalized_col in var_industry_map:
-                    industry = var_industry_map[normalized_col]
-                    # 在映射中：只保留"综合"类变量，排除其他行业的变量
-                    if industry != '综合':
+                    # 检查变量的行业归属
+                    industry = None
+                    if var_industry_map and normalized_col in var_industry_map:
+                        industry = var_industry_map[normalized_col]
+
+                    # 排除逻辑：
+                    # 1. 排除所有非"综合"的行业级变量（无论是否在第一阶段使用）
+                    if industry and industry != '综合':
                         excluded_vars.add(col)
-                else:
-                    # 不在映射中：排除包含"工业增加值"的变量（这些是未映射的行业目标变量）
+                        continue
+
+                    # 2. 如果是第一阶段选择的变量
+                    if normalized_col_no_space in excluded_vars_normalized:
+                        # 如果是"综合"类变量，保留（不排除）
+                        if industry == '综合':
+                            continue
+                        # 否则排除
+                        else:
+                            excluded_vars.add(col)
+                            continue
+
+                    # 3. 排除包含"工业增加值"的变量（未映射的行业目标变量）
                     if '工业增加值' in col:
                         excluded_vars.add(col)
 
-            # 排除第二阶段目标变量
-            if target_variable:
-                excluded_vars.add(target_variable)
+                # 排除第二阶段目标变量
+                if target_variable:
+                    excluded_vars.add(target_variable)
 
-            # 筛选可用的额外预测变量
-            available_extra_vars = [
-                col for col in input_df.columns
-                if col not in excluded_vars
-            ]
+                # 筛选可用的额外预测变量
+                available_extra_vars = [
+                    col for col in input_df.columns
+                    if col not in excluded_vars
+                ]
 
-            # 获取二阶段目标的默认变量
-            dfm_second_stage_target_map = get_dfm_state('dfm_second_stage_target_map', {})
+                # 获取二阶段目标的默认变量
+                dfm_second_stage_target_map = get_dfm_state('dfm_second_stage_target_map', {})
 
-            # 计算默认选中的变量
-            default_extra_vars = [
-                col for col in available_extra_vars
-                if unicodedata.normalize('NFKC', str(col)).strip().lower() in dfm_second_stage_target_map
-            ]
+                # 计算默认选中的变量
+                default_extra_vars = [
+                    col for col in available_extra_vars
+                    if unicodedata.normalize('NFKC', str(col)).strip().lower() in dfm_second_stage_target_map
+                ]
 
-            print(f"[调试] 第二阶段可用变量: {len(available_extra_vars)}")
-            print(f"[调试] 第二阶段默认选中: {len(default_extra_vars)}")
+                # multiselect key包含估计方法，确保切换时重新初始化
+                stage2_key = f'dfm_second_stage_extra_predictors_{current_estimation_method}'
 
-            # multiselect key包含估计方法，确保切换时重新初始化
-            stage2_key = f'dfm_second_stage_extra_predictors_{current_estimation_method}'
+                # 初始化默认值
+                if stage2_key not in st.session_state:
+                    st.session_state[stage2_key] = default_extra_vars
 
-            # 初始化默认值
-            if stage2_key not in st.session_state:
-                st.session_state[stage2_key] = default_extra_vars
+                extra_predictors = st_instance.multiselect(
+                    "第二阶段额外预测变量（可选）",
+                    options=available_extra_vars,
+                    key=stage2_key,
+                    help="在分行业nowcasting之外添加的宏观指标"
+                )
 
-            extra_predictors = st_instance.multiselect(
-                "第二阶段额外预测变量（可选）",
-                options=available_extra_vars,
-                key=stage2_key,
-                help="在分行业nowcasting之外添加的宏观指标"
-            )
-
-            set_dfm_state('dfm_second_stage_extra_predictors', extra_predictors)
+                set_dfm_state('dfm_second_stage_extra_predictors', extra_predictors)
 
     st_instance.markdown("--- ")
     st_instance.subheader("模型训练")
 
+    # 显示变量选择汇总信息
     current_target_var = get_dfm_state('dfm_target_variable', None)
     current_selected_indicators = get_dfm_state('dfm_selected_indicators', [])
+    current_selected_industries_for_display = get_dfm_state('dfm_selected_industries', [])
+    current_estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
+
+    # 计算总预测变量数（包含第二阶段额外变量）
+    total_predictor_count = len(current_selected_indicators)
+    if current_estimation_method == 'two_stage':
+        second_stage_extra_predictors = get_dfm_state('dfm_second_stage_extra_predictors', [])
+        total_predictor_count += len(second_stage_extra_predictors)
+
+    st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
+    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
+    st_instance.text(f" - 选定预测指标总数: {total_predictor_count}")
+    if current_estimation_method == 'two_stage':
+        second_stage_extra_count = len(get_dfm_state('dfm_second_stage_extra_predictors', []))
+        st_instance.text(f"   - 第一阶段预测指标: {len(current_selected_indicators)}")
+        st_instance.text(f"   - 第二阶段额外指标: {second_stage_extra_count}")
+
+    st_instance.markdown("---")
 
     # 日期验证
     training_start_value = get_dfm_state('dfm_training_start_date')
@@ -1467,6 +1585,13 @@ def render_dfm_model_training_page(st_instance):
                         current_industry_map = {}
                     print(f"[INFO] 行业映射包含 {len(current_industry_map)} 个变量")
 
+                    # 打印行业映射详细信息（调试用）
+                    if current_industry_map:
+                        print(f"[DEBUG] 行业映射类型: {type(current_industry_map)}")
+                        print(f"[DEBUG] 行业映射前5项: {dict(list(current_industry_map.items())[:5])}")
+                    else:
+                        print(f"[WARNING] 行业映射为空或None")
+
                     # 获取估计方法
                     estimation_method = get_dfm_state('dfm_estimation_method', 'single_stage')
 
@@ -1483,8 +1608,25 @@ def render_dfm_model_training_page(st_instance):
                             print("[ERROR] 二次估计法未设置行业因子数")
                             return
 
+                        # 验证行业映射（二次估计法必需）
+                        if not current_industry_map:
+                            st_instance.error("二次估计法需要提供行业映射文件，请先上传行业映射CSV文件")
+                            print("[ERROR] 二次估计法的行业映射为空")
+                            return
+
+                        if not isinstance(current_industry_map, dict):
+                            st_instance.error(f"行业映射数据类型错误：期望dict，实际{type(current_industry_map).__name__}")
+                            print(f"[ERROR] 行业映射类型错误: {type(current_industry_map)}")
+                            return
+
+                        if len(current_industry_map) == 0:
+                            st_instance.error("行业映射为空字典，请检查上传的行业映射CSV文件是否包含有效数据")
+                            print("[ERROR] 行业映射为空字典")
+                            return
+
                         print(f"[INFO] 二次估计法：{len(industry_k_factors_dict)} 个行业")
                         print(f"[INFO] 第二阶段额外变量数：{len(second_stage_extra_predictors)}")
+                        print(f"[INFO] 行业映射验证通过：{len(current_industry_map)} 个变量")
 
                     # 构建TrainingConfig
                     training_config = TrainingConfig(

@@ -73,7 +73,12 @@ def evaluate_single_variable_removal(
             target_variable=target_variable,
             full_data=full_data,
             k_factors=k_factors,
-            **evaluator_config
+            training_start=evaluator_config['training_start'],
+            train_end=evaluator_config['train_end'],
+            validation_start=evaluator_config['validation_start'],
+            validation_end=evaluator_config['validation_end'],
+            max_iterations=evaluator_config['max_iterations'],
+            tolerance=evaluator_config['tolerance']
         )
 
         if len(result_tuple) != 9:

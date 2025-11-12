@@ -36,48 +36,167 @@ from dashboard.models.DFM.prep.modules.input_adapters import (
 from dashboard.models.DFM.prep.utils.date_utils import standardize_date
 from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 
+
+def infer_target_sheet_from_mapping(
+    excel_file: pd.ExcelFile,
+    reference_sheet_name: str,
+    reference_column_name: str,
+    available_sheets: List[str]
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    从映射文件推断包含目标变量的工作表
+
+    策略：
+    1. 从映射文件的"二阶段目标"列识别目标变量（总量指标）
+    2. 遍历所有工作表，查找包含该目标变量的工作表
+    3. 返回匹配的工作表名称和目标变量名称
+
+    Args:
+        excel_file: Excel文件对象
+        reference_sheet_name: 映射表工作表名称
+        reference_column_name: 映射表的指标列名
+        available_sheets: 可用的工作表列表
+
+    Returns:
+        Tuple[Optional[str], Optional[str]]: (工作表名称, 目标变量名称)
+    """
+    print("\n--- [工作表推断] 开始自动推断目标工作表 ---")
+
+    try:
+        # 步骤1: 从映射文件加载目标变量
+        _, _, _, _, _, second_stage_target_map = load_mappings(
+            excel_path=excel_file,
+            sheet_name=reference_sheet_name,
+            indicator_col=reference_column_name,
+            type_col='类型',
+            industry_col='行业',
+            single_stage_col='一次估计',
+            first_stage_pred_col='一阶段预测',
+            first_stage_target_col='一阶段目标',
+            second_stage_target_col='二阶段目标'
+        )
+
+        if not second_stage_target_map:
+            print("  [工作表推断] 错误：映射文件'二阶段目标'列未标记任何目标变量")
+            return None, None
+
+        # 获取目标变量列表（应该只有一个）
+        target_variables = list(second_stage_target_map.keys())
+        print(f"  [工作表推断] 从映射文件识别到 {len(target_variables)} 个目标变量")
+        for var in target_variables:
+            print(f"    - {var}")
+
+        # 步骤2: 遍历所有工作表，查找包含目标变量的工作表
+        exclude_sheets = [reference_sheet_name]
+        candidate_sheets = [s for s in available_sheets if s not in exclude_sheets]
+
+        print(f"  [工作表推断] 在 {len(candidate_sheets)} 个工作表中搜索...")
+
+        matched_sheets = []
+        for sheet_name in candidate_sheets:
+            try:
+                # 读取工作表的第一行（列名）
+                df = pd.read_excel(excel_file, sheet_name=sheet_name, nrows=0)
+                sheet_columns = df.columns.tolist()
+
+                # 标准化列名进行匹配
+                normalized_columns = {normalize_text(col): col for col in sheet_columns}
+
+                # 检查是否包含目标变量
+                for target_var_norm in target_variables:
+                    if target_var_norm in normalized_columns:
+                        original_col_name = normalized_columns[target_var_norm]
+                        matched_sheets.append((sheet_name, original_col_name))
+                        print(f"  [工作表推断] 找到匹配：工作表'{sheet_name}' 包含目标变量 '{original_col_name}'")
+                        break
+
+            except Exception as e:
+                print(f"  [工作表推断] 跳过工作表 '{sheet_name}': {e}")
+                continue
+
+        # 步骤3: 选择最佳匹配
+        if len(matched_sheets) == 0:
+            print("  [工作表推断] 错误：未找到包含目标变量的工作表")
+            return None, None
+        elif len(matched_sheets) == 1:
+            sheet_name, target_var = matched_sheets[0]
+            print(f"  [工作表推断] 成功识别：工作表='{sheet_name}', 目标变量='{target_var}'")
+            return sheet_name, target_var
+        else:
+            # 多个匹配，选择第一个
+            sheet_name, target_var = matched_sheets[0]
+            print(f"  [工作表推断] 警告：找到 {len(matched_sheets)} 个匹配工作表，使用第一个：'{sheet_name}'")
+            return sheet_name, target_var
+
+    except Exception as e:
+        print(f"  [工作表推断] 推断过程失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None
+
+
 def prepare_data(
     excel_path: str,
     target_freq: str,
-    target_sheet_name: str,
-    target_variable_name: str,
+    target_sheet_name: Optional[str] = None,
+    target_variable_name: Optional[str] = None,
     consecutive_nan_threshold: Optional[int] = None,
     data_start_date: Optional[str] = None,
     data_end_date: Optional[str] = None,
     reference_sheet_name: str = '指标体系',
     reference_column_name: str = '指标名称'
-) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[Dict], Optional[List[Dict]]]:
+) -> Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[Dict], Optional[List[Dict]], Optional[Dict]]:
     """
     重构后的数据准备主函数
-    
+
     加载数据，执行平稳性检查，对齐所有数据到目标频率，执行NaN检查和最终平稳性检查
-    
+
     Args:
         excel_path: Excel文件路径
         target_freq: 目标频率（如'W-FRI'）
-        target_sheet_name: 目标表格名称
-        target_variable_name: 目标变量名称
+        target_sheet_name: 目标表格名称（可选，None时自动推断）
+        target_variable_name: 目标变量名称（可选，None时自动推断）
         consecutive_nan_threshold: 连续NaN阈值
         data_start_date: 数据开始日期
         data_end_date: 数据结束日期
         reference_sheet_name: 参考表格名称
         reference_column_name: 参考列名称
-        
+
     Returns:
-        Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[Dict], Optional[List[Dict]]]:
+        Tuple[Optional[pd.DataFrame], Optional[Dict], Optional[Dict], Optional[List[Dict]], Optional[Dict]]:
             - 最终对齐的周度数据 (DataFrame)
             - 变量到行业的映射 (Dict)
             - 合并的转换日志 (Dict)
             - 详细的移除日志 (List[Dict])
+            - 验证结果字典 (Dict) - 新增返回值
     """
     print(f"\n--- [Data Prep V3 ] 开始加载和处理数据 (目标频率: {target_freq}) ---")
 
     # 验证目标频率
     if not target_freq.upper().endswith('-FRI'):
         print(f"错误: [Data Prep] 当前目标对齐逻辑仅支持周五 (W-FRI)。提供的目标频率 '{target_freq}' 无效。")
-        return None, None, None, None
-    
-    print(f"  [Data Prep] 目标 Sheet: '{target_sheet_name}', 目标变量名(预期B列): '{target_variable_name}'")
+        return None, None, None, None, None
+
+    # 加载Excel文件用于自动推断
+    excel_file = pd.ExcelFile(excel_path)
+    available_sheets = excel_file.sheet_names
+    print(f"  [Data Prep] Excel 文件中可用的 Sheets: {available_sheets}")
+
+    # 自动推断目标工作表和目标变量（如果未提供）
+    if target_sheet_name is None or target_variable_name is None:
+        inferred_sheet, inferred_var = infer_target_sheet_from_mapping(
+            excel_file, reference_sheet_name, reference_column_name, available_sheets
+        )
+
+        if inferred_sheet is None or inferred_var is None:
+            print("错误: [Data Prep] 自动推断目标工作表失败")
+            return None, None, None, None, None
+
+        target_sheet_name = inferred_sheet
+        target_variable_name = inferred_var
+        print(f"  [Data Prep] 自动推断结果：目标 Sheet='{target_sheet_name}', 目标变量='{target_variable_name}'")
+    else:
+        print(f"  [Data Prep] 使用指定的目标 Sheet: '{target_sheet_name}', 目标变量名: '{target_variable_name}'")
     
     try:
         # 标准化日期参数
@@ -109,10 +228,8 @@ def prepare_data(
         removed_variables_detailed_log = []
         all_indices_for_range = []
 
-        # 加载Excel文件
-        excel_file = pd.ExcelFile(excel_path)
-        available_sheets = excel_file.sheet_names
-        print(f"  [Data Prep] Excel 文件中可用的 Sheets: {available_sheets}")
+        # 注意：excel_file已在前面加载用于自动推断，这里不需要重新加载
+        print(f"  [Data Prep] 使用已加载的Excel文件，可用的 Sheets: {available_sheets}")
 
         # 步骤1: 加载参考变量
         reference_predictor_variables = load_reference_variables(
@@ -128,7 +245,7 @@ def prepare_data(
         # 检查是否加载了必要数据
         if loaded_data.raw_target_values is None or loaded_data.raw_target_values.empty:
             print(f"错误：[Data Prep] 未能成功加载目标变量 '{target_variable_name}' 或其发布日期。")
-            return None, None, None, None
+            return None, None, None, None, None
 
         # 合并日志
         removed_variables_detailed_log.extend(loaded_data.removed_variables_log)
@@ -159,12 +276,12 @@ def prepare_data(
         
     except FileNotFoundError:
         print(f"错误: [Data Prep] Excel 数据文件 {excel_path} 未找到。")
-        return None, None, None, None
+        return None, None, None, None, None
     except Exception as err:
         print(f"错误: [Data Prep] 数据准备过程中发生意外错误: {err}")
         import traceback
         traceback.print_exc()
-        return None, None, None, None
+        return None, None, None, None, None
 
 def _finalize_data_processing(
     target_series_aligned, target_sheet_predictors_aligned, monthly_predictors_aligned,
@@ -185,7 +302,7 @@ def _finalize_data_processing(
 
     if not all_final_weekly_parts:
         print("错误：[Data Prep] 没有成功处理的数据部分可以合并。无法继续。")
-        return None, None, None, None
+        return None, None, None, None, None
 
     # 创建完整日期范围
     try:
@@ -195,14 +312,14 @@ def _finalize_data_processing(
         )
     except Exception as e:
         print(f"错误: 创建日期范围失败: {e}")
-        return None, None, None, None
+        return None, None, None, None, None
 
     # 合并并对齐所有数据部分
     combined_data_weekly_final = merge_and_align_parts(all_final_weekly_parts, full_date_range)
 
     if combined_data_weekly_final.empty:
         print("错误：[Data Prep] 没有有效的数据部分可以合并。")
-        return None, None, None, None
+        return None, None, None, None, None
 
     # 处理重复列
     data_cleaner = DataCleaner()
@@ -241,7 +358,7 @@ def _finalize_data_processing(
     if all_data_aligned_weekly is None or all_data_aligned_weekly.empty:
         print("错误: [Data Prep] 最终合并和对齐后的数据为空。")
         print(f"  [DEBUG] 最终清理移除了 {len(final_clean_log)} 个变量")
-        return None, None, None, None
+        return None, None, None, None, None
 
     # 步骤5: 行业映射校验和应用
     print("\n--- [Data Prep] 步骤 5: 行业映射校验和应用 ---")

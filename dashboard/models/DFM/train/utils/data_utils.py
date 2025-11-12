@@ -111,11 +111,18 @@ def load_and_validate_data(
     # 注意: 不再自动移除有效数据点少的变量，保留用户选择的所有变量
     logger.info(f"跳过数据质量自动过滤，保留所有用户选择的变量")
 
-    # 验证是否还有足够的预测变量
-    if len(predictor_vars) < 2:
+    # 验证是否还有足够的预测变量（允许单变量）
+    if len(predictor_vars) < 1:
         raise ValueError(
             f"有效预测变量不足({len(predictor_vars)}个), "
-            f"至少需要2个有效变量进行DFM建模"
+            f"至少需要1个有效变量进行DFM建模"
+        )
+
+    # 单变量警告
+    if len(predictor_vars) == 1:
+        logger.warning(
+            f"只有1个预测变量 {predictor_vars[0]}，"
+            f"模型预测能力可能有限，建议补充更多预测变量"
         )
 
     logger.info(

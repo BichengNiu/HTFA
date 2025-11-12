@@ -888,6 +888,154 @@ class TrainingResultExporter:
             logger.error(f"计算行业R²失败: {e}", exc_info=True)
             return None, None
 
+    def _export_first_stage_summary_excel(
+        self,
+        first_stage_results: Dict[str, Any],
+        output_dir: str,
+        config,
+        industry_nowcast_df: Optional[pd.DataFrame] = None
+    ) -> str:
+        """
+        导出第一阶段分行业汇总Excel
+
+        生成包含2个sheet的Excel文件：
+        - Sheet 1: 分行业Nowcasting（预测值vs真实值）
+        - Sheet 2: 分行业评估指标汇总表
+
+        Args:
+            first_stage_results: 第一阶段训练结果字典 {行业名: TrainingResult}
+            output_dir: 输出目录
+            config: 训练配置
+            industry_nowcast_df: 分行业nowcasting数据（可选）
+
+        Returns:
+            Excel文件路径
+        """
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        excel_path = os.path.join(output_dir, f'first_stage_summary_{timestamp}.xlsx')
+
+        logger.info(f"开始导出第一阶段分行业汇总Excel: {excel_path}")
+
+        try:
+            with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+                # Sheet 1: 分行业Nowcasting（预测值vs真实值）
+                nowcast_df = self._build_first_stage_nowcast_sheet(
+                    first_stage_results,
+                    industry_nowcast_df
+                )
+                if nowcast_df is not None:
+                    nowcast_df.to_excel(writer, sheet_name='分行业Nowcasting', index=True)
+                    logger.info(f"Sheet 1 '分行业Nowcasting' 已写入，形状: {nowcast_df.shape}")
+
+                # Sheet 2: 分行业评估指标汇总表
+                metrics_df = self._build_first_stage_metrics_sheet(first_stage_results, config)
+                if metrics_df is not None:
+                    metrics_df.to_excel(writer, sheet_name='分行业评估指标', index=False)
+                    logger.info(f"Sheet 2 '分行业评估指标' 已写入，形状: {metrics_df.shape}")
+
+            logger.info(f"第一阶段分行业汇总Excel导出成功: {excel_path}")
+            return excel_path
+
+        except Exception as e:
+            logger.error(f"导出第一阶段汇总Excel失败: {str(e)}", exc_info=True)
+            raise
+
+    def _build_first_stage_nowcast_sheet(
+        self,
+        first_stage_results: Dict[str, Any],
+        industry_nowcast_df: Optional[pd.DataFrame] = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        构建Sheet 1: 分行业Nowcasting表
+
+        列结构: 日期 | 行业1_预测值 | 行业1_真实值 | 行业2_预测值 | 行业2_真实值 | ...
+
+        Args:
+            first_stage_results: 第一阶段训练结果字典
+            industry_nowcast_df: 分行业nowcasting数据（可选）
+
+        Returns:
+            Nowcasting汇总DataFrame
+        """
+        logger.info("正在构建分行业Nowcasting表...")
+
+        # 如果已有industry_nowcast_df，直接使用它构建预测值+真实值表
+        if industry_nowcast_df is not None:
+            logger.info(f"使用已有的industry_nowcast_df构建Nowcasting表，形状: {industry_nowcast_df.shape}")
+
+            # industry_nowcast_df只包含预测值（nowcast_行业名），需要添加真实值
+            # 但我们无法从TrainingResult中获取真实值序列，因此仅展示预测值
+            # 重命名列为更友好的格式
+            renamed_df = industry_nowcast_df.copy()
+            renamed_df.columns = [col.replace('nowcast_', '') for col in renamed_df.columns]
+            renamed_df.index.name = '日期'
+
+            logger.info(f"分行业Nowcasting表构建完成（仅预测值），共 {renamed_df.shape[1]} 个行业，{renamed_df.shape[0]} 个时间点")
+            return renamed_df
+
+        # 如果没有industry_nowcast_df，尝试从first_stage_results重建（这部分逻辑需要data，暂时跳过）
+        logger.warning("没有提供industry_nowcast_df，跳过Sheet 1")
+        return None
+
+    def _build_first_stage_metrics_sheet(
+        self,
+        first_stage_results: Dict[str, Any],
+        config
+    ) -> Optional[pd.DataFrame]:
+        """
+        构建Sheet 2: 分行业评估指标汇总表
+
+        列: 行业名称 | 样本内RMSE | 样本外RMSE | 样本内MAE | 样本外MAE |
+            样本内命中率 | 样本外命中率 | 因子数 | 变量数
+
+        Args:
+            first_stage_results: 第一阶段训练结果字典
+            config: 训练配置
+
+        Returns:
+            评估指标汇总DataFrame
+        """
+        logger.info("正在构建分行业评估指标表...")
+
+        metrics_list = []
+
+        for industry, result in sorted(first_stage_results.items()):
+            try:
+                if result.metrics is None:
+                    logger.warning(f"行业 {industry} 没有评估指标，跳过")
+                    continue
+
+                # 获取因子数
+                k_factors = config.industry_k_factors.get(industry, 'N/A') if config.industry_k_factors else 'N/A'
+
+                # 获取变量数
+                n_variables = len(result.selected_variables) if result.selected_variables else 0
+
+                metrics_list.append({
+                    '行业名称': industry,
+                    '样本内RMSE': round(result.metrics.is_rmse, 4),
+                    '样本外RMSE': round(result.metrics.oos_rmse, 4),
+                    '样本内MAE': round(result.metrics.is_mae, 4),
+                    '样本外MAE': round(result.metrics.oos_mae, 4),
+                    '样本内命中率': round(result.metrics.is_hit_rate, 4),
+                    '样本外命中率': round(result.metrics.oos_hit_rate, 4),
+                    '因子数': k_factors,
+                    '变量数': n_variables
+                })
+
+            except Exception as e:
+                logger.warning(f"处理行业 {industry} 的评估指标失败: {str(e)}")
+                continue
+
+        if not metrics_list:
+            logger.warning("没有任何行业的评估指标可导出")
+            return None
+
+        metrics_df = pd.DataFrame(metrics_list)
+
+        logger.info(f"分行业评估指标表构建完成，共 {len(metrics_list)} 个行业")
+        return metrics_df
+
     def export_two_stage_results(
         self,
         result,  # TwoStageTrainingResult
@@ -899,15 +1047,15 @@ class TrainingResultExporter:
 
         目录结构:
         output_dir/
-        ├── first_stage_models/
+        ├── first_stage_models/               # 行业模型文件（不放入下载列表）
         │   ├── 农副食品加工业_model_xxxxxx.joblib
         │   ├── 农副食品加工业_metadata_xxxxxx.pkl
         │   ├── 专用设备制造业_model_xxxxxx.joblib
         │   ├── 专用设备制造业_metadata_xxxxxx.pkl
         │   └── ...
-        ├── industry_nowcasts.csv
-        ├── final_dfm_model_xxxxxx.joblib
-        └── final_dfm_metadata_xxxxxx.pkl
+        ├── first_stage_summary_xxxxxx.xlsx   # 分行业汇总Excel（用户下载）
+        ├── final_dfm_model_xxxxxx.joblib     # 第二阶段总量模型
+        └── final_dfm_metadata_xxxxxx.pkl     # 第二阶段元数据
 
         Args:
             result: 二次估计法训练结果
@@ -915,7 +1063,7 @@ class TrainingResultExporter:
             output_dir: 输出目录（None=创建临时目录）
 
         Returns:
-            文件路径字典
+            文件路径字典（仅包含用户可下载的文件）
         """
         logger.info("开始导出二次估计法结果")
 
@@ -984,14 +1132,21 @@ class TrainingResultExporter:
                 continue
 
         logger.info(f"成功导出 {industry_export_count}/{len(result.first_stage_results)} 个行业模型")
-        export_paths['first_stage_models_dir'] = first_stage_dir
+        # 注意：first_stage_models_dir不放入export_paths，不暴露给用户
 
-        # 步骤3: 导出分行业nowcasting汇总CSV
-        if result.industry_nowcast_df is not None:
-            nowcast_csv_path = os.path.join(output_dir, 'industry_nowcasts.csv')
-            result.industry_nowcast_df.to_csv(nowcast_csv_path, encoding='utf-8-sig')
-            export_paths['industry_nowcasts_csv'] = nowcast_csv_path
-            logger.info(f"导出分行业nowcasting汇总: {os.path.basename(nowcast_csv_path)}")
+        # 步骤3: 导出第一阶段分行业汇总Excel
+        logger.info("开始导出第一阶段分行业汇总Excel...")
+        try:
+            first_stage_excel_path = self._export_first_stage_summary_excel(
+                result.first_stage_results,
+                output_dir,
+                config,
+                result.industry_nowcast_df  # 传递已有的nowcast数据
+            )
+            export_paths['first_stage_summary'] = first_stage_excel_path
+            logger.info(f"分行业汇总Excel导出成功: {os.path.basename(first_stage_excel_path)}")
+        except Exception as e:
+            logger.error(f"导出第一阶段汇总Excel失败: {str(e)}")
 
         # 步骤4: 导出第二阶段模型（调用现有方法）
         if result.second_stage_result is not None:

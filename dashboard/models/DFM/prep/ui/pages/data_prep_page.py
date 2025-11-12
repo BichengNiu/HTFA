@@ -358,8 +358,6 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
     default_end_date = detected_end if detected_end else date(2025, 4, 30)
 
     param_defaults = {
-        'param_target_variable': '规模以上工业增加值:当月同比',
-        'param_target_sheet_name': '工业增加值同比增速_月度_同花顺',
         'param_target_freq': 'W-FRI',
         'param_remove_consecutive_nans': True,
         'param_consecutive_nan_threshold': 10,
@@ -405,27 +403,9 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state("param_data_end_date", end_date_value)
 
-    # 第2行：目标工作表和目标变量
+    # 第2行：NaN阈值和移除选项
     row2_col1, row2_col2 = st_obj.columns(2)
     with row2_col1:
-        target_sheet = st_obj.text_input(
-            "目标工作表名称",
-            value=_get_state('param_target_sheet_name'),
-            key="ss_dfm_target_sheet"
-        )
-        _set_state("param_target_sheet_name", target_sheet)
-
-    with row2_col2:
-        target_var = st_obj.text_input(
-            "目标变量",
-            value=_get_state('param_target_variable'),
-            key="ss_dfm_target_var"
-        )
-        _set_state("param_target_variable", target_var)
-
-    # 第3行：NaN阈值和移除选项
-    row3_col1, row3_col2 = st_obj.columns(2)
-    with row3_col1:
         nan_threshold = st_obj.number_input(
             "连续 NaN 阈值",
             min_value=0,
@@ -435,7 +415,7 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state("param_consecutive_nan_threshold", nan_threshold)
 
-    with row3_col2:
+    with row2_col2:
         remove_nans = st_obj.checkbox(
             "移除过多连续 NaN 的变量",
             value=_get_state('param_remove_consecutive_nans'),
@@ -444,9 +424,9 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state("param_remove_consecutive_nans", remove_nans)
 
-    # 第4行：目标频率和映射表名称
-    row4_col1, row4_col2 = st_obj.columns(2)
-    with row4_col1:
+    # 第3行：目标频率和映射表名称
+    row3_col1, row3_col2 = st_obj.columns(2)
+    with row3_col1:
         target_freq = st_obj.text_input(
             "目标频率",
             value=_get_state('param_target_freq'),
@@ -455,7 +435,7 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state("param_target_freq", target_freq)
 
-    with row4_col2:
+    with row3_col2:
         mapping_sheet = st_obj.text_input(
             "指标映射表名称",
             value=_get_state('param_type_mapping_sheet'),
@@ -598,8 +578,6 @@ def _execute_data_preparation(st_obj, uploaded_file):
 
             print(f"调用prepare_dfm_data参数:")
             print(f"  - target_freq: {_get_state('param_target_freq')}")
-            print(f"  - target_sheet_name: {_get_state('param_target_sheet_name')}")
-            print(f"  - target_variable_name: {_get_state('param_target_variable')}")
             print(f"  - consecutive_nan_threshold: {nan_threshold_int}")
             print(f"  - data_start_date: {start_date_str}")
             print(f"  - data_end_date: {end_date_str}")
@@ -607,8 +585,6 @@ def _execute_data_preparation(st_obj, uploaded_file):
             result = prepare_dfm_data(
                 uploaded_file=excel_file_like_object,
                 target_freq=_get_state('param_target_freq'),
-                target_sheet_name=_get_state('param_target_sheet_name'),
-                target_variable_name=_get_state('param_target_variable'),
                 consecutive_nan_threshold=nan_threshold_int,
                 data_start_date=start_date_str,
                 data_end_date=end_date_str,

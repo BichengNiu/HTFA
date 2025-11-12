@@ -159,8 +159,7 @@ class IndustryDataProcessor:
     def validate_industry_data(
         self,
         industry: str,
-        min_predictors: int = 3,
-        max_missing_rate: float = 0.5
+        min_predictors: int = 1
     ) -> Tuple[bool, Optional[str]]:
         """
         验证指定行业的数据完整性
@@ -168,7 +167,6 @@ class IndustryDataProcessor:
         Args:
             industry: 行业名称
             min_predictors: 最少预测变量数量
-            max_missing_rate: 最大缺失率
 
         Returns:
             (是否有效, 错误信息)
@@ -190,14 +188,9 @@ class IndustryDataProcessor:
 
         target_data = self.prepared_data[target_col]
         data_points = target_data.notna().sum()
-        total_points = len(target_data)
 
         if data_points == 0:
             return False, f"目标变量 {target_col} 无有效数据"
-
-        missing_rate = (total_points - data_points) / total_points
-        if missing_rate > max_missing_rate:
-            return False, f"目标变量缺失率过高（{missing_rate:.1%} > {max_missing_rate:.1%}）"
 
         return True, None
 
@@ -241,12 +234,42 @@ class IndustryDataProcessor:
         """根据var_industry_map构建行业→预测变量映射"""
         self._industry_to_predictors = {}
 
+        # 导入normalize_text函数，与行业映射文件保持一致的标准化方式
+        from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+
+        # 构建标准化列名到原始列名的映射
+        col_name_map = {
+            normalize_text(col): col
+            for col in self.prepared_data.columns
+        }
+
+        # 统计匹配情况
+        total_vars = len(self.var_industry_map)
+        matched_vars = 0
+        unmatched_vars = []
+
         for var_name, industry_name in self.var_industry_map.items():
             if industry_name not in self._industry_to_predictors:
                 self._industry_to_predictors[industry_name] = []
 
-            if var_name in self.prepared_data.columns:
-                self._industry_to_predictors[industry_name].append(var_name)
+            # var_name已经是标准化的形式，直接查找对应的原始列名
+            if var_name in col_name_map:
+                original_col_name = col_name_map[var_name]
+                self._industry_to_predictors[industry_name].append(original_col_name)
+                matched_vars += 1
+            else:
+                unmatched_vars.append((var_name, industry_name))
+
+        # 打印匹配统计
+        print(f"[行业映射匹配] 总变量数: {total_vars}, 成功匹配: {matched_vars}, 未匹配: {len(unmatched_vars)}")
+
+        if unmatched_vars and len(unmatched_vars) <= 10:
+            print(f"[行业映射匹配] 未匹配变量示例: {unmatched_vars[:5]}")
+
+        # 打印各行业变量统计
+        print(f"[行业映射匹配] 各行业变量数量:")
+        for industry, predictors in sorted(self._industry_to_predictors.items()):
+            print(f"  - {industry}: {len(predictors)} 个变量")
 
 
 def extract_industry_list(prepared_data: pd.DataFrame) -> List[str]:

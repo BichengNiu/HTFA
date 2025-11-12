@@ -114,11 +114,24 @@ def select_num_factors(
         'eigenvalues': pca.explained_variance_
     }
 
+    # 获取实际可用的主成分数量
+    max_components = len(explained_variance)
+    logger.info(f"实际可提取的主成分数量: {max_components}")
+
     # 方法1: 固定因子数
     if method == 'fixed':
         k = fixed_k
+        # 验证fixed_k是否超过实际可用的主成分数量
+        if k > max_components:
+            logger.warning(
+                f"固定因子数k={k}超过实际可提取的主成分数量{max_components}, "
+                f"自动调整为k={max_components}"
+            )
+            k = max_components
+
         logger.info(f"使用固定因子数: k={k}")
-        logger.info(f"对应累积方差: {cumsum_variance[k-1]:.1%}")
+        if k > 0:
+            logger.info(f"对应累积方差: {cumsum_variance[k-1]:.1%}")
         return k, pca_analysis
 
     # 方法2: 累积方差贡献率

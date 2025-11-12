@@ -161,19 +161,43 @@ class FileUploaderComponent:
             industry_map_file.seek(0)
             industry_map_df = pd.read_csv(industry_map_file)
 
+            # 打印CSV文件基本信息
+            print(f"[模型训练] 行业映射CSV文件形状: {industry_map_df.shape}")
+            print(f"[模型训练] 行业映射CSV列名: {list(industry_map_df.columns)}")
+
             if 'Indicator' not in industry_map_df.columns or 'Industry' not in industry_map_df.columns:
                 st_instance.error("映射文件格式错误：必须包含 'Indicator' 和 'Industry' 列")
+                print(f"[ERROR] 缺少必需列。当前列名: {list(industry_map_df.columns)}")
                 return {}, {}
 
-            # 加载行业映射
-            var_industry_map = {
-                unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                for k, v in zip(industry_map_df['Indicator'], industry_map_df['Industry'])
-                if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip()
-            }
+            # 统计原始数据行数
+            total_rows = len(industry_map_df)
+            print(f"[模型训练] 行业映射CSV总行数: {total_rows}")
+
+            # 加载行业映射（记录过滤信息）
+            filtered_count = 0
+            var_industry_map = {}
+
+            for idx, (k, v) in enumerate(zip(industry_map_df['Indicator'], industry_map_df['Industry'])):
+                if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip():
+                    normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
+                    var_industry_map[normalized_key] = str(v).strip()
+                else:
+                    filtered_count += 1
+                    if filtered_count <= 3:  # 只打印前3个被过滤的行
+                        print(f"[模型训练] 过滤第{idx+1}行: Indicator={k}, Industry={v}")
+
+            if filtered_count > 0:
+                print(f"[模型训练] 共过滤掉 {filtered_count} 行（Indicator或Industry为空）")
+
             self.state.set('dfm_industry_map_obj', var_industry_map)
             self.state.set('cached_map_file_id', current_file_id)
             print(f"[模型训练] 重新加载行业映射: {len(var_industry_map)} 个变量")
+
+            if len(var_industry_map) == 0:
+                st_instance.error("行业映射文件解析后为空：所有行的Indicator或Industry列都为空")
+                print(f"[ERROR] 行业映射为空字典，请检查CSV文件数据")
+                return {}, {}
 
             # 加载DFM默认变量（支持四列：一次估计、一阶段预测、一阶段目标、二阶段目标）
             dfm_default_single_stage = {}

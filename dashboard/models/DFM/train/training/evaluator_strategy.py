@@ -305,8 +305,7 @@ def create_variable_selection_evaluator(config: 'TrainingConfig') -> Callable:
             validation_start=config.validation_start,
             validation_end=config.validation_end,
             max_iterations=max_iterations,
-            tolerance=config.tolerance,
-            **kwargs
+            tolerance=config.tolerance
         )
 
     return evaluate

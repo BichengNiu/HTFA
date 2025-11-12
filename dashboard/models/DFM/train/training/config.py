@@ -65,6 +65,11 @@ class TrainingConfig:
     industry_k_factors: Dict[str, int] = field(default_factory=dict)  # 二次估计法中各行业因子数映射
     second_stage_extra_predictors: List[str] = field(default_factory=list)  # 二次估计法第二阶段额外预测变量
 
+    # 第一阶段并行配置（2025-11-12新增）
+    enable_first_stage_parallel: bool = True  # 是否启用第一阶段（分行业训练）并行计算
+    first_stage_n_jobs: int = -1  # 第一阶段并行任务数（-1=所有核心，1=串行）
+    min_industries_for_parallel: int = 3  # 启用第一阶段并行的最小行业数
+
     def __post_init__(self):
         """后初始化验证"""
         # 设置默认输出目录
@@ -132,6 +137,12 @@ class TrainingConfig:
             for industry, k in self.industry_k_factors.items():
                 if not isinstance(k, int) or k <= 0:
                     raise ValueError(f"行业 {industry} 的因子数必须为正整数，当前值: {k}")
+
+        # 验证第一阶段并行配置（2025-11-12）
+        if self.first_stage_n_jobs == 0:
+            raise ValueError("first_stage_n_jobs不能为0，使用-1表示所有核心，1表示串行")
+        if self.min_industries_for_parallel < 1:
+            raise ValueError(f"min_industries_for_parallel必须>=1，当前值: {self.min_industries_for_parallel}")
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':

@@ -8,9 +8,10 @@
 """
 
 import time
+import traceback
 import numpy as np
 import pandas as pd
-from typing import Optional, Callable, Dict, List
+from typing import Optional, Callable, Dict, List, Tuple, Any
 from pathlib import Path
 
 from dashboard.models.DFM.train.utils.logger import get_logger
@@ -21,6 +22,113 @@ from dashboard.models.DFM.train.training.config import TrainingConfig
 from dashboard.models.DFM.train.training.trainer import DFMTrainer
 
 logger = get_logger(__name__)
+
+
+def _train_single_industry(
+    industry: str,
+    data: pd.DataFrame,
+    industry_map: Dict[str, str],
+    industry_k_factors: Dict[str, int],
+    config_dict: Dict[str, Any],
+    idx: int,
+    total: int
+) -> Tuple[str, Optional[TrainingResult]]:
+    """
+    训练单个行业模型（顶层可序列化函数）
+
+    此函数设计为完全可序列化，所有参数均为基本类型或可序列化对象，
+    用于joblib并行执行。
+
+    Args:
+        industry: 行业名称
+        data: 完整数据DataFrame
+        industry_map: 行业映射字典（变量名 -> 行业名）
+        industry_k_factors: 各行业因子数映射
+        config_dict: 训练配置字典（可序列化）
+        idx: 当前行业索引（用于日志）
+        total: 总行业数（用于日志）
+
+    Returns:
+        (industry, TrainingResult): 行业名和训练结果的元组
+        如果训练失败，返回(industry, None)
+    """
+    import uuid
+    import os
+    from pathlib import Path
+
+    try:
+        # 1. 创建IndustryDataProcessor
+        processor = IndustryDataProcessor(data, industry_map)
+
+        # 2. 验证行业数据
+        is_valid, error_msg = processor.validate_industry_data(industry, min_predictors=1)
+        if not is_valid:
+            logger.warning(f"跳过行业 {industry}: {error_msg}")
+            return (industry, None)
+
+        # 3. 获取行业因子数
+        k_factors = industry_k_factors.get(industry)
+        if not k_factors:
+            logger.warning(f"跳过行业 {industry}: 未设置因子数")
+            return (industry, None)
+
+        # 4. 构建行业训练数据
+        industry_data = processor.build_industry_training_data(industry)
+        target_col = processor.get_industry_target_column(industry)
+        predictor_cols = processor.get_industry_predictors(industry, exclude_target=True)
+
+        if not predictor_cols:
+            logger.warning(f"跳过行业 {industry}: 没有有效的预测变量")
+            return (industry, None)
+
+        # 5. 创建唯一临时文件（避免并发冲突）
+        pid = os.getpid()
+        unique_id = uuid.uuid4().hex[:8]
+        output_dir = config_dict.get('output_dir', 'dfm_output')
+        temp_data_path = Path(output_dir) / f"temp_{industry}_{pid}_{unique_id}.csv"
+        temp_data_path.parent.mkdir(parents=True, exist_ok=True)
+        industry_data.to_csv(temp_data_path, encoding='utf-8-sig')
+
+        # 6. 创建行业训练配置
+        industry_config = TrainingConfig(
+            data_path=str(temp_data_path),
+            target_variable=target_col,
+            selected_indicators=predictor_cols,
+            target_freq=config_dict['target_freq'],
+            k_factors=k_factors,
+            max_iterations=config_dict['max_iterations'],
+            max_lags=config_dict['max_lags'],
+            tolerance=config_dict['tolerance'],
+            training_start=config_dict['training_start'],
+            train_end=config_dict['train_end'],
+            validation_start=config_dict['validation_start'],
+            validation_end=config_dict['validation_end'],
+            factor_selection_method='fixed',
+            enable_variable_selection=False,
+            enable_parallel=False,  # 禁用内层并行，避免嵌套并行
+            output_dir=str(Path(output_dir) / "first_stage_temp"),
+            industry_map={}
+        )
+
+        # 7. 训练行业模型
+        trainer = DFMTrainer(industry_config)
+        industry_result = trainer.train(
+            progress_callback=None,  # 避免子进程输出混乱
+            enable_export=False  # 第一阶段不导出
+        )
+
+        # 8. 清理临时文件
+        if temp_data_path.exists():
+            temp_data_path.unlink()
+
+        logger.info(f"行业 {industry} 训练完成，RMSE(oos)={industry_result.metrics.oos_rmse:.4f}")
+        return (industry, industry_result)
+
+    except Exception as e:
+        logger.error(f"行业 {industry} 训练失败: {str(e)}")
+        import traceback
+        logger.debug(f"详细错误信息:\n{traceback.format_exc()}")
+        return (industry, None)
 
 
 class TwoStageTrainer:
@@ -46,6 +154,18 @@ class TwoStageTrainer:
 
         if not config.industry_k_factors:
             raise ValueError("二次估计法需要设置各行业因子数（industry_k_factors不能为空）")
+
+        # 验证行业映射
+        if config.industry_map is None or (isinstance(config.industry_map, pd.DataFrame) and config.industry_map.empty):
+            raise ValueError("二次估计法需要提供行业映射（industry_map不能为空或None）")
+
+        if not isinstance(config.industry_map, dict):
+            raise ValueError(f"industry_map必须是字典类型，当前类型: {type(config.industry_map).__name__}")
+
+        if len(config.industry_map) == 0:
+            raise ValueError("industry_map不能为空字典，请确保已正确加载行业映射文件")
+
+        logger.info(f"行业映射验证通过: {len(config.industry_map)} 个变量")
 
         self.config = config
 
@@ -121,7 +241,7 @@ class TwoStageTrainer:
                 raise ValueError(f"第一阶段成功训练的行业模型不足3个（实际{len(first_stage_results)}个），无法进行第二阶段训练")
 
             # 提取分行业nowcasting序列
-            industry_nowcast_df = self._extract_industry_nowcasts(first_stage_results)
+            industry_nowcast_df = self._extract_industry_nowcasts(first_stage_results, data)
 
             logger.info(f"提取分行业nowcasting序列：{industry_nowcast_df.shape[0]}个时间点，{industry_nowcast_df.shape[1]}个行业")
 
@@ -189,7 +309,138 @@ class TwoStageTrainer:
         progress_callback: Optional[Callable[[str], None]]
     ) -> Dict[str, TrainingResult]:
         """
-        第一阶段：训练各行业DFM模型
+        第一阶段：训练各行业DFM模型（支持并行/串行）
+
+        Args:
+            processor: 行业数据处理器
+            industry_list: 行业列表
+            progress_callback: 进度回调
+
+        Returns:
+            行业名→训练结果的字典
+        """
+        # 打印行业映射总体信息
+        logger.info(f"var_industry_map总条目数: {len(self.config.industry_map)}")
+        logger.debug(f"var_industry_map前5项: {dict(list(self.config.industry_map.items())[:5])}")
+
+        # 判断是否使用并行
+        use_parallel = (
+            self.config.enable_first_stage_parallel
+            and len(industry_list) >= self.config.min_industries_for_parallel
+        )
+
+        if use_parallel:
+            logger.info(
+                f"第一阶段：启用并行训练 {len(industry_list)} 个行业模型 "
+                f"(n_jobs={self.config.first_stage_n_jobs}, "
+                f"min_threshold={self.config.min_industries_for_parallel})"
+            )
+            return self._train_industry_models_parallel(
+                processor, industry_list, progress_callback
+            )
+        else:
+            logger.info(
+                f"第一阶段：使用串行训练 {len(industry_list)} 个行业模型 "
+                f"(并行已禁用或行业数 < {self.config.min_industries_for_parallel})"
+            )
+            return self._train_industry_models_serial(
+                processor, industry_list, progress_callback
+            )
+
+    def _train_industry_models_parallel(
+        self,
+        processor: IndustryDataProcessor,
+        industry_list: List[str],
+        progress_callback: Optional[Callable[[str], None]]
+    ) -> Dict[str, TrainingResult]:
+        """
+        第一阶段：并行训练各行业DFM模型
+
+        Args:
+            processor: 行业数据处理器
+            industry_list: 行业列表
+            progress_callback: 进度回调
+
+        Returns:
+            行业名→训练结果的字典
+        """
+        from joblib import Parallel, delayed
+
+        # 主进程进度提示
+        if progress_callback:
+            n_jobs_display = self.config.first_stage_n_jobs if self.config.first_stage_n_jobs > 0 else 'max-1'
+            progress_callback(
+                f"第一阶段：并行训练 {len(industry_list)} 个行业模型 "
+                f"(使用 {n_jobs_display} 个核心)..."
+            )
+
+        # 准备可序列化的配置字典
+        config_dict = {
+            'target_freq': self.config.target_freq,
+            'max_iterations': self.config.max_iterations,
+            'max_lags': self.config.max_lags,
+            'tolerance': self.config.tolerance,
+            'training_start': self.config.training_start,
+            'train_end': self.config.train_end,
+            'validation_start': self.config.validation_start,
+            'validation_end': self.config.validation_end,
+            'output_dir': self.config.output_dir
+        }
+
+        try:
+            # 并行执行训练
+            results_list = Parallel(
+                n_jobs=self.config.first_stage_n_jobs,
+                backend=self.config.parallel_backend,
+                verbose=0,
+                prefer='processes'
+            )(
+                delayed(_train_single_industry)(
+                    industry,
+                    processor.data,  # 传递完整数据
+                    self.config.industry_map,
+                    self.config.industry_k_factors,
+                    config_dict,
+                    idx,
+                    len(industry_list)
+                )
+                for idx, industry in enumerate(industry_list, 1)
+            )
+
+            # 聚合结果
+            results = {}
+            failed_industries = []
+            for industry, result in results_list:
+                if result is not None:
+                    results[industry] = result
+                    if progress_callback:
+                        progress_callback(
+                            f"  [{len(results)}/{len(industry_list)}] {industry} 训练完成，"
+                            f"RMSE(oos)={result.metrics.oos_rmse:.4f}"
+                        )
+                else:
+                    failed_industries.append(industry)
+
+            if failed_industries:
+                logger.warning(f"以下 {len(failed_industries)} 个行业训练失败: {', '.join(failed_industries)}")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"并行训练失败: {str(e)}，自动降级到串行模式")
+            logger.debug(f"详细错误信息:\n{traceback.format_exc()}")
+            return self._train_industry_models_serial(
+                processor, industry_list, progress_callback
+            )
+
+    def _train_industry_models_serial(
+        self,
+        processor: IndustryDataProcessor,
+        industry_list: List[str],
+        progress_callback: Optional[Callable[[str], None]]
+    ) -> Dict[str, TrainingResult]:
+        """
+        第一阶段：串行训练各行业DFM模型（原实现）
 
         Args:
             processor: 行业数据处理器
@@ -209,12 +460,34 @@ class TwoStageTrainer:
 
                 logger.info(f"开始训练行业模型: {industry}")
 
-                # 验证行业数据
+                # 获取行业变量信息（调试前）
+                predictor_cols_with_target = processor.get_industry_predictors(industry, exclude_target=False)
+                predictor_cols_without_target = processor.get_industry_predictors(industry, exclude_target=True)
+                target_col = processor.get_industry_target_column(industry)
+
+                logger.info(f"[{industry}] 目标列: {target_col}")
+                logger.info(f"[{industry}] 预测变量(含目标): {len(predictor_cols_with_target)} 个")
+                logger.info(f"[{industry}] 预测变量(不含目标): {len(predictor_cols_without_target)} 个")
+
+                if len(predictor_cols_without_target) <= 5:
+                    logger.info(f"[{industry}] 预测变量列表: {predictor_cols_without_target}")
+
+                # 验证行业数据（允许单变量行业）
                 is_valid, error_msg = processor.validate_industry_data(industry, min_predictors=1)
                 if not is_valid:
                     logger.warning(f"跳过行业 {industry}: {error_msg}")
+                    logger.warning(f"  - 目标列: {target_col}")
+                    logger.warning(f"  - 预测变量数量: {len(predictor_cols_without_target)}")
+                    logger.warning(f"  - 预测变量: {predictor_cols_without_target[:5] if len(predictor_cols_without_target) > 5 else predictor_cols_without_target}")
                     failed_industries.append(industry)
                     continue
+
+                # 单变量行业警告提示
+                if len(predictor_cols_without_target) == 1:
+                    logger.warning(
+                        f"[{industry}] 只有1个预测变量 {predictor_cols_without_target[0]}，"
+                        f"模型预测能力可能有限，建议补充更多预测变量"
+                    )
 
                 # 获取行业因子数
                 k_factors = self.config.industry_k_factors.get(industry)
@@ -226,7 +499,11 @@ class TwoStageTrainer:
                 # 构建行业训练数据
                 industry_data = processor.build_industry_training_data(industry)
                 target_col = processor.get_industry_target_column(industry)
-                predictor_cols = processor.get_industry_predictors(industry)
+                # 重要：预测变量必须排除目标变量本身
+                predictor_cols = processor.get_industry_predictors(industry, exclude_target=True)
+
+                logger.info(f"[{industry}] 构建训练数据: {industry_data.shape[0]} 行, {industry_data.shape[1]} 列")
+                logger.info(f"[{industry}] 将使用 {len(predictor_cols)} 个预测变量训练模型")
 
                 # 创建临时CSV文件保存行业数据
                 temp_data_path = Path(self.config.output_dir) / f"temp_{industry}_data.csv"
@@ -280,26 +557,56 @@ class TwoStageTrainer:
 
     def _extract_industry_nowcasts(
         self,
-        first_stage_results: Dict[str, TrainingResult]
+        first_stage_results: Dict[str, TrainingResult],
+        data: pd.DataFrame
     ) -> pd.DataFrame:
         """
         从第一阶段结果中提取分行业nowcasting序列
 
         Args:
             first_stage_results: 第一阶段训练结果
+            data: 原始数据（用于获取时间索引）
 
         Returns:
             分行业nowcasting的DataFrame，索引为日期，列为行业名
         """
         nowcast_dict = {}
 
+        # 注意：卡尔曼滤波从t=1开始预测，所以预测序列比原始数据少一个时间点
+        # 使用data.index[1:]跳过第一个时间点（t=0是初始化状态，没有预测值）
+        date_index = data.index[1:]  # 跳过t=0时刻
+
         for industry, result in first_stage_results.items():
-            if result.model_result and result.model_result.forecast_oos is not None:
-                # 提取样本外预测序列
-                nowcast_series = result.model_result.forecast_oos
-                nowcast_dict[f"nowcast_{industry}"] = nowcast_series
+            if result.model_result is None:
+                logger.warning(f"行业 {industry} 没有模型结果，跳过")
+                continue
+
+            # 提取完整预测序列（样本内 + 样本外）
+            forecast_is = result.model_result.forecast_is
+            forecast_oos = result.model_result.forecast_oos
+
+            # 合并预测序列（都是numpy数组）
+            if forecast_is is not None and forecast_oos is not None:
+                full_forecast = np.concatenate([forecast_is, forecast_oos])
+            elif forecast_oos is not None:
+                full_forecast = forecast_oos
+            elif forecast_is is not None:
+                full_forecast = forecast_is
             else:
-                logger.warning(f"行业 {industry} 没有有效的nowcasting结果")
+                logger.warning(f"行业 {industry} 没有有效的预测序列，跳过")
+                continue
+
+            # 确保预测序列长度与时间索引一致
+            if len(full_forecast) != len(date_index):
+                logger.warning(f"行业 {industry} 预测序列长度({len(full_forecast)})与时间索引长度({len(date_index)})不一致，进行截断对齐")
+                min_len = min(len(full_forecast), len(date_index))
+                full_forecast = full_forecast[:min_len]
+                current_date_index = date_index[:min_len]
+            else:
+                current_date_index = date_index
+
+            # 创建带时间索引的Series
+            nowcast_dict[f"nowcast_{industry}"] = pd.Series(full_forecast, index=current_date_index)
 
         if not nowcast_dict:
             raise ValueError("没有任何行业生成有效的nowcasting序列")
@@ -307,6 +614,7 @@ class TwoStageTrainer:
         # 合并为DataFrame
         nowcast_df = pd.DataFrame(nowcast_dict)
 
+        logger.info(f"提取到 {len(nowcast_dict)} 个行业的nowcasting序列，时间跨度: {nowcast_df.index[0]} 至 {nowcast_df.index[-1]}")
         return nowcast_df
 
     def _build_second_stage_data(
