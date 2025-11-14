@@ -25,8 +25,8 @@ if dashboard_root not in sys.path:
 
 import logging
 
-# 导入文本标准化工具
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+# 导入文本标准化工具（从共享工具库）
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 # 导入组件化训练状态管理
 from dashboard.models.DFM.train.ui.components.training_status import TrainingStatusComponent
@@ -226,76 +226,8 @@ class TrainDefaults:
 
 
 
-def load_mappings_from_state(available_data_columns=None):
-    """
-    从会话状态中获取映射数据构建行业到指标的映射
-    优先使用数据准备模块已经加载好的映射，避免重复读取Excel文件
-
-    Args:
-        available_data_columns: 实际数据中可用的列名列表（用于过滤）
-
-    Returns:
-        tuple: (unique_industries, industry_to_indicators_map, all_indicators_flat, dfm_default_map)
-               如果没有找到映射数据，返回 (None, None, None, None)
-    """
-    try:
-        var_industry_map = get_dfm_state('dfm_industry_map_obj', None)
-        dfm_default_map = get_dfm_state('dfm_default_variables_map', {})
-
-        if var_industry_map is None:
-            print("[WARNING] [映射加载] 会话状态中未找到行业映射数据")
-            return None, None, None, None
-
-        if not var_industry_map:
-            print("[WARNING] [映射加载] 行业映射数据为空")
-            return None, None, None, None
-
-        # 如果提供了实际数据列名，进行过滤
-        if available_data_columns is not None:
-            # 标准化实际数据的列名（使用normalize_text确保与映射键一致）
-            normalized_data_columns = {}
-            for col in available_data_columns:
-                if col and pd.notna(col):
-                    norm_col = normalize_text(col)
-                    if norm_col:
-                        normalized_data_columns[norm_col] = col
-
-            # 过滤映射，只保留实际存在的变量
-            filtered_var_industry_map = {}
-            for indicator_norm, industry in var_industry_map.items():
-                if indicator_norm in normalized_data_columns:
-                    filtered_var_industry_map[indicator_norm] = industry
-
-            var_industry_map = filtered_var_industry_map
-            
-            # 修复：将过滤后的映射同步到状态管理器
-            set_dfm_state('dfm_industry_map_filtered', var_industry_map)
-
-            # 添加缓存机制避免重复打印
-            original_count = len(get_dfm_state('dfm_industry_map_obj', {}))
-            filtered_count = len(var_industry_map)
-            cache_key = f"mapping_filter_log_{original_count}_{filtered_count}"
-
-            if not get_dfm_state(cache_key, False):
-                print(f"[DATA] [映射过滤] 原始映射 {original_count} 个变量，过滤后 {filtered_count} 个变量")
-                set_dfm_state(cache_key, True)
-
-        # 构建行业到指标的映射
-        industry_to_indicators_temp = defaultdict(list)
-        for indicator, industry in var_industry_map.items():
-            if indicator and industry:
-                industry_to_indicators_temp[str(industry).strip()].append(str(indicator).strip())
-
-        # 排序并返回结果
-        unique_industries = sorted(list(industry_to_indicators_temp.keys()))
-        industry_to_indicators_map = {k: sorted(v) for k, v in industry_to_indicators_temp.items()}
-        all_indicators_flat = sorted(list(var_industry_map.keys()))
-
-        return unique_industries, industry_to_indicators_map, all_indicators_flat, dfm_default_map
-
-    except Exception as e:
-        print(f"[ERROR] [映射加载] 从状态管理加载映射数据失败: {e}")
-        return None, None, None, None
+# 已删除 load_mappings_from_state() 函数 - 移除与数据准备模块的耦合
+# 现在完全依赖文件上传器加载的映射数据
 
 
 def _reset_training_state():
@@ -660,26 +592,18 @@ def render_dfm_model_training_page(st_instance):
             st_instance.info(f"使用默认目标变量: {default_target}")
 
 
-    # 1. 首先尝试从会话状态中获取已经准备好的映射数据
-    available_data_columns = list(input_df.columns) if input_df is not None else None
+    # 直接使用文件上传器加载的映射数据（已由FileUploaderComponent处理）
+    # 完全解耦，不从其他模块的session_state读取数据
 
-    # 优先使用会话状态中的映射数据
-    map_data = load_mappings_from_state(available_data_columns)
+    # 构建行业到指标的映射
+    industry_to_indicators_temp = defaultdict(list)
+    if var_industry_map:
+        for indicator, industry in var_industry_map.items():
+            if indicator and industry:
+                industry_to_indicators_temp[str(industry).strip()].append(str(indicator).strip())
 
-    if map_data and all(x is not None for x in map_data[:3]):
-        unique_industries, var_to_indicators_map_by_industry, _, dfm_default_map = map_data
-
-        # 修复：显示实际可用的指标数量
-        actual_indicator_count = sum(len(v) for v in var_to_indicators_map_by_industry.values())
-        # st_instance.success(f"[SUCCESS] 已加载映射数据：{len(unique_industries)} 个行业，{actual_indicator_count} 个可用指标")
-        pass  # 已禁用映射数据加载成功提示
-    else:
-        # 不再回退到Excel文件，使用空映射继续（数据准备模块应该正确保存映射）
-
-        st_instance.warning("[WARNING] 未找到映射数据，请确保已在'数据准备'模块正确处理数据")
-        unique_industries = []
-        var_to_indicators_map_by_industry = {}
-        dfm_default_map = {}
+    unique_industries = sorted(list(industry_to_indicators_temp.keys()))
+    var_to_indicators_map_by_industry = {k: sorted(v) for k, v in industry_to_indicators_temp.items()}
 
     # 主布局：现在是上下结构，不再使用列
     # REMOVED: var_selection_col, param_col = st_instance.columns([1, 1.5])
@@ -991,12 +915,9 @@ def render_dfm_model_training_page(st_instance):
             static_defaults = UIConfig.get_date_defaults()
 
             try:
-                data_df = None
-                for key in ['dfm_prepared_data_df', 'data_prep.dfm_prepared_data_df', 'dfm.data_prep.dfm_prepared_data_df']:
-                    df_value = get_dfm_state(key)
-                    if df_value is not None:
-                        data_df = df_value
-                        break
+                # 仅从train_model模块获取数据（完全解耦）
+                data_df = get_dfm_state('dfm_prepared_data_df')
+
                 if data_df is not None and isinstance(data_df.index, pd.DatetimeIndex) and len(data_df.index) > 0:
                     # 从数据获取第一期和最后一期
                     data_first_date = data_df.index.min().date()  # 第一期数据
@@ -1027,13 +948,11 @@ def render_dfm_model_training_page(st_instance):
         date_defaults = get_data_based_date_defaults()
 
         has_data = False
-        data_df = None
-        for key in ['dfm_prepared_data_df', 'data_prep.dfm_prepared_data_df', 'dfm.data_prep.dfm_prepared_data_df']:
-            df_value = get_dfm_state(key)
-            if df_value is not None:
-                has_data = True
-                data_df = df_value
-                break
+        # 仅从train_model模块获取数据（完全解耦）
+        data_df = get_dfm_state('dfm_prepared_data_df')
+        if data_df is not None:
+            has_data = True
+
         if has_data:
             if isinstance(data_df.index, pd.DatetimeIndex) and len(data_df.index) > 0:
                 # 计算数据的实际日期范围用于比较
@@ -1173,7 +1092,8 @@ def render_dfm_model_training_page(st_instance):
         else:
             factor_strategy_options = {
                 'fixed_number': "固定因子数",
-                'cumulative_variance': "累积方差贡献"
+                'cumulative_variance': "累积方差贡献",
+                'kaiser': "Kaiser准则(特征值>1)"
             }
             default_strategy = 'fixed_number'
 
@@ -1237,6 +1157,25 @@ def render_dfm_model_training_page(st_instance):
             )
             set_dfm_state('dfm_cumulative_variance_threshold', cum_var_value)
 
+        elif strategy_value == 'kaiser':
+            # Kaiser准则特征值阈值
+            if CONFIG_AVAILABLE:
+                default_kaiser_threshold = getattr(TrainDefaults, 'KAISER_THRESHOLD', 1.0)
+            else:
+                default_kaiser_threshold = 1.0
+
+            kaiser_threshold_value = st_instance.number_input(
+                "特征值阈值",
+                min_value=0.5,
+                max_value=2.0,
+                value=get_dfm_state('dfm_kaiser_threshold', default_kaiser_threshold),
+                step=0.1,
+                format="%.1f",
+                key='dfm_kaiser_threshold_input',
+                help="选择特征值大于此阈值的因子（经典Kaiser准则使用1.0）"
+            )
+            set_dfm_state('dfm_kaiser_threshold', kaiser_threshold_value)
+
         # 因子自回归阶数
         if CONFIG_AVAILABLE:
             default_ar_order = TrainDefaults.FACTOR_AR_ORDER
@@ -1253,6 +1192,17 @@ def render_dfm_model_training_page(st_instance):
             help="因子的自回归阶数，通常设为1"
         )
         set_dfm_state('dfm_factor_ar_order', ar_order_value)
+
+    # 去趋势配置（左对齐）
+    detrend_col1, detrend_col2 = st_instance.columns([1, 3])
+    with detrend_col1:
+        enable_detrend_value = st_instance.checkbox(
+            "启用线性去趋势",
+            value=get_dfm_state('dfm_enable_detrend', True),
+            key='dfm_enable_detrend_checkbox',
+            help="对所有变量（包括目标变量）进行线性回归去趋势（y_t = α + β*t + ε），在残差空间训练模型。最终预测值会自动还原到原始值水平。"
+        )
+        set_dfm_state('dfm_enable_detrend', enable_detrend_value)
 
     # 二次估计法配置
     if estimation_method == 'two_stage':
@@ -1528,6 +1478,19 @@ def render_dfm_model_training_page(st_instance):
                         k_factors = 1  # 占位符，实际值由PCA确定
                         st.info(f"使用累积方差策略，阈值：{pca_threshold}")
 
+                    elif factor_strategy == 'kaiser':
+                        factor_selection_method = 'kaiser'
+                        kaiser_threshold = get_dfm_state('dfm_kaiser_threshold')
+
+                        if kaiser_threshold is None:
+                            st_instance.error("Kaiser阈值未设置，请先在'模型配置'中设置阈值")
+                            print("[ERROR] Kaiser阈值未设置")
+                            return
+
+                        # 将由Kaiser准则确定，传入None作为占位符
+                        k_factors = 1  # 占位符，实际值由Kaiser准则确定
+                        st.info(f"使用Kaiser准则，特征值阈值：{kaiser_threshold}")
+
                     else:
                         st_instance.error(f"未知的因子选择策略: {factor_strategy}")
                         print(f"[ERROR] 未知的因子选择策略: {factor_strategy}")
@@ -1655,12 +1618,18 @@ def render_dfm_model_training_page(st_instance):
                         # 因子数选择配置
                         factor_selection_method=factor_selection_method,
                         pca_threshold=pca_threshold if factor_strategy == 'cumulative_variance' else 0.9,
+                        kaiser_threshold=kaiser_threshold if factor_strategy == 'kaiser' else 1.0,
 
                         # 并行计算配置
                         enable_parallel=True,
                         n_jobs=-1,
                         parallel_backend='loky',
                         min_variables_for_parallel=5,
+
+                        # 去趋势配置
+                        enable_detrend=get_dfm_state('dfm_enable_detrend', True),
+                        detrend_method='linear',
+                        detrend_variables=None,  # None表示对所有变量去趋势
 
                         # 行业映射
                         industry_map=current_industry_map,
@@ -1675,6 +1644,7 @@ def render_dfm_model_training_page(st_instance):
                     print(f"[TRAIN_CONFIG] 因子选择策略: {factor_selection_method}")
                     print(f"[TRAIN_CONFIG] 因子数: {k_factors}")
                     print(f"[TRAIN_CONFIG] PCA阈值: {training_config.pca_threshold}")
+                    print(f"[TRAIN_CONFIG] Kaiser阈值: {training_config.kaiser_threshold}")
                     print(f"[TRAIN_CONFIG] 最大迭代次数: {training_config.max_iterations}")
                     print(f"[TRAIN_CONFIG] AR阶数: {training_config.max_lags}")
                     print(f"[TRAIN_CONFIG] 训练期: {training_config.training_start} 至 {training_config.train_end}")

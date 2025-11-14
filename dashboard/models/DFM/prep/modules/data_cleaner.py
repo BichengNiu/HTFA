@@ -102,6 +102,12 @@ class DataCleaner:
     ) -> pd.DataFrame:
         """基于用户选择时间范围的连续NaN处理"""
 
+        # 首先检查并处理原始DataFrame的重复列名
+        if df.columns.duplicated().any():
+            print(f"  {log_prefix}警告: 检测到重复列名，正在去重...")
+            df = df.loc[:, ~df.columns.duplicated(keep='first')]
+            print(f"  {log_prefix}去重后形状: {df.shape}")
+
         # 应用时间范围筛选
         df_filtered = self._apply_time_range_filter(df, data_start_date, data_end_date)
 
@@ -112,6 +118,14 @@ class DataCleaner:
         print(f"  {log_prefix}基于用户选择时间范围检查连续缺失值 (阈值 >= {threshold})...")
         print(f"  {log_prefix}时间范围: {data_start_date} 到 {data_end_date}")
         print(f"  {log_prefix}筛选后数据形状: {df_filtered.shape} (原始: {df.shape})")
+
+        # 确保df_filtered没有重复列名（防止时间筛选后产生重复）
+        if df_filtered.columns.duplicated().any():
+            print(f"  {log_prefix}警告: 筛选后发现重复列名，正在去重...")
+            df_filtered = df_filtered.loc[:, ~df_filtered.columns.duplicated(keep='first')]
+            # 同时更新原始df以保持一致
+            df = df.loc[:, ~df.columns.duplicated(keep='first')]
+            print(f"  {log_prefix}去重后形状: {df_filtered.shape}")
 
         cols_to_remove = []
 
@@ -175,6 +189,13 @@ class DataCleaner:
     ) -> pd.DataFrame:
         """原有的连续NaN处理逻辑"""
         print(f"  {log_prefix}开始检查连续缺失值 (阈值 >= {threshold})...")
+
+        # 检查并处理重复列名
+        if df.columns.duplicated().any():
+            print(f"  {log_prefix}警告: 检测到重复列名，正在去重...")
+            df = df.loc[:, ~df.columns.duplicated(keep='first')]
+            print(f"  {log_prefix}去重后形状: {df.shape}")
+
         cols_to_remove = []
 
         for col in df.columns:

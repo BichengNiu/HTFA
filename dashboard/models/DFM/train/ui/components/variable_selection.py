@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from collections import defaultdict
 
 from dashboard.models.DFM.ui import DFMComponent
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 
 logger = logging.getLogger(__name__)
@@ -130,7 +130,7 @@ class VariableSelectionComponent(DFMComponent):
             var_industry_map = self._get_state('dfm_industry_map_obj', {})
 
             actual_industries_set = set()
-            from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+            # normalize_text 已在顶部导入
             for indicator in selected_indicators:
                 indicator_norm = normalize_text(indicator)
                 if indicator_norm in var_industry_map:

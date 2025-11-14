@@ -16,13 +16,22 @@ from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT
 
 @dataclass
 class EvaluationMetrics:
-    """评估指标"""
+    """评估指标（残差空间和原始值空间）"""
+    # 残差空间指标（用于内部模型选择）
     is_rmse: float = np.inf
     oos_rmse: float = np.inf
     is_mae: float = np.inf
     oos_mae: float = np.inf
     is_hit_rate: float = -np.inf
     oos_hit_rate: float = -np.inf
+
+    # 原始值空间指标（用于对外展示）- 2025-11-14新增
+    is_rmse_original: Optional[float] = None
+    oos_rmse_original: Optional[float] = None
+    is_mae_original: Optional[float] = None
+    oos_mae_original: Optional[float] = None
+    is_hit_rate_original: Optional[float] = None
+    oos_hit_rate_original: Optional[float] = None
 
 
 @dataclass
@@ -64,8 +73,12 @@ class DFMModelResult:
     kalman_gains_history: Optional[List[np.ndarray]] = None  # 卡尔曼增益历史（用于新闻分解）
 
     # 预测结果
-    forecast_is: np.ndarray = None  # 样本内预测
-    forecast_oos: np.ndarray = None  # 样本外预测
+    forecast_is: np.ndarray = None  # 样本内预测（残差空间）
+    forecast_oos: np.ndarray = None  # 样本外预测（残差空间）
+
+    # 原始值空间预测（2025-11-14新增）
+    forecast_is_original: Optional[np.ndarray] = None  # 样本内预测（原始值）
+    forecast_oos_original: Optional[np.ndarray] = None  # 样本外预测（原始值）
 
     # 训练信息
     converged: bool = False

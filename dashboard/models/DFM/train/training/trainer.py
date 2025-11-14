@@ -93,6 +93,27 @@ class DFMTrainer:
                 progress_callback=progress_callback
             )
 
+            # 步骤1.5: 应用去趋势（如果启用）
+            detrend_handler = None
+            if self.config.enable_detrend:
+                from dashboard.models.DFM.train.preprocessing.detrend_handler import DetrendHandler
+
+                detrend_handler = DetrendHandler(method=self.config.detrend_method)
+
+                # 确定需要去趋势的变量（包括目标变量）
+                detrend_vars = self.config.detrend_variables
+                if detrend_vars is None:
+                    detrend_vars = [self.config.target_variable] + predictor_vars
+
+                # 对数据进行去趋势（基于完整数据拟合趋势）
+                data = detrend_handler.fit_and_transform(data, detrend_vars)
+                target_data = data[self.config.target_variable]  # 更新为残差
+
+                if progress_callback:
+                    progress_callback(f"已对 {len(detrend_vars)} 个变量进行线性去趋势")
+
+                logger.info(f"去趋势完成: {len(detrend_handler.trend_params)} 个变量")
+
             # 输出训练配置摘要
             # 根据training_start切分训练数据
             train_data = data.loc[self.config.training_start:self.config.train_end]
@@ -169,13 +190,14 @@ class DFMTrainer:
                 selection_history = []
 
             # 步骤3: 阶段2因子数选择
-            print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}")
+            print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}, kaiser_threshold={self.config.kaiser_threshold or 1.0}")
             k_factors, pca_analysis = select_num_factors(
                 data=data,
                 selected_vars=selected_vars,
                 method=self.config.factor_selection_method,
                 fixed_k=self.config.k_factors,
                 pca_threshold=self.config.pca_threshold or 0.9,
+                kaiser_threshold=self.config.kaiser_threshold or 1.0,
                 train_end=self.config.train_end,
                 progress_callback=progress_callback
             )
@@ -199,8 +221,7 @@ class DFMTrainer:
                 progress_callback=progress_callback
             )
 
-            # 步骤5: 模型评估（直接调用）
-
+            # 步骤5: 模型评估（残差空间，用于内部模型选择）
             metrics = evaluate_model_performance(
                 model_result=model_result,
                 target_data=target_data,
@@ -208,6 +229,71 @@ class DFMTrainer:
                 validation_start=self.config.validation_start,
                 validation_end=self.config.validation_end
             )
+
+            # 步骤5.5: 如果启用了去趋势，还原预测值并计算原始值指标
+            if detrend_handler and detrend_handler.has_params(self.config.target_variable):
+                logger.info("还原预测值到原始水平...")
+
+                # 还原样本内预测
+                if model_result.forecast_is is not None:
+                    train_dates = data.loc[self.config.training_start:self.config.train_end].index
+                    forecast_is_residual = pd.Series(model_result.forecast_is, index=train_dates)
+                    forecast_is_original = detrend_handler.inverse_transform(
+                        forecast_is_residual,
+                        self.config.target_variable
+                    )
+                    model_result.forecast_is_original = forecast_is_original.values
+
+                # 还原样本外预测
+                if model_result.forecast_oos is not None:
+                    val_dates = data.loc[self.config.validation_start:self.config.validation_end].index
+                    forecast_oos_residual = pd.Series(model_result.forecast_oos, index=val_dates)
+                    forecast_oos_original = detrend_handler.inverse_transform(
+                        forecast_oos_residual,
+                        self.config.target_variable
+                    )
+                    model_result.forecast_oos_original = forecast_oos_original.values
+
+                # 计算原始值空间的评估指标
+                from dashboard.models.DFM.train.evaluation.metrics import (
+                    calculate_next_month_rmse,
+                    calculate_next_month_mae,
+                    calculate_next_month_hit_rate
+                )
+
+                # 还原目标变量真实值（从残差还原）
+                # 注意：这里需要还原整个target_data序列
+                target_original_series = detrend_handler.inverse_transform(
+                    target_data,
+                    self.config.target_variable
+                )
+
+                # 计算IS指标
+                if model_result.forecast_is_original is not None:
+                    train_dates = data.loc[self.config.training_start:self.config.train_end].index
+                    forecast_is_series = pd.Series(model_result.forecast_is_original, index=train_dates)
+                    target_is = target_original_series.loc[:self.config.train_end]
+
+                    metrics.is_rmse_original = calculate_next_month_rmse(forecast_is_series, target_is)
+                    metrics.is_mae_original = calculate_next_month_mae(forecast_is_series, target_is)
+                    metrics.is_hit_rate_original = calculate_next_month_hit_rate(forecast_is_series, target_is)
+
+                    logger.debug(f"IS原始值指标: RMSE={metrics.is_rmse_original:.4f}, MAE={metrics.is_mae_original:.4f}, Hit Rate={metrics.is_hit_rate_original:.2f}%")
+
+                # 计算OOS指标
+                if model_result.forecast_oos_original is not None:
+                    val_dates = data.loc[self.config.validation_start:self.config.validation_end].index
+                    forecast_oos_series = pd.Series(model_result.forecast_oos_original, index=val_dates)
+                    target_oos = target_original_series.loc[self.config.validation_start:self.config.validation_end]
+
+                    metrics.oos_rmse_original = calculate_next_month_rmse(forecast_oos_series, target_oos)
+                    metrics.oos_mae_original = calculate_next_month_mae(forecast_oos_series, target_oos)
+                    metrics.oos_hit_rate_original = calculate_next_month_hit_rate(forecast_oos_series, target_oos)
+
+                    logger.debug(f"OOS原始值指标: RMSE={metrics.oos_rmse_original:.4f}, MAE={metrics.oos_mae_original:.4f}, Hit Rate={metrics.oos_hit_rate_original:.2f}%")
+
+                if progress_callback:
+                    progress_callback("预测值已还原到原始水平，并计算原始值空间评估指标")
 
             # 步骤6: 构建结果（直接调用）
             training_time = time.time() - start_time
@@ -237,7 +323,8 @@ class DFMTrainer:
                         result,
                         self.config,
                         output_dir=export_dir,
-                        prepared_data=data  # 传递完整观测数据用于新闻分析
+                        prepared_data=data,  # 传递完整观测数据用于新闻分析
+                        detrend_handler=detrend_handler  # 传递去趋势处理器
                     )
 
                     result.export_files = file_paths

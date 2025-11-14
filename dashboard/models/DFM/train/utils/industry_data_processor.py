@@ -235,7 +235,7 @@ class IndustryDataProcessor:
         self._industry_to_predictors = {}
 
         # 导入normalize_text函数，与行业映射文件保持一致的标准化方式
-        from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+        from dashboard.models.DFM.utils.text_utils import normalize_text
 
         # 构建标准化列名到原始列名的映射
         col_name_map = {

@@ -32,7 +32,8 @@ class TrainingResultExporter:
         result,  # TrainingResult
         config,  # TrainingConfig
         output_dir: Optional[str] = None,
-        prepared_data: Optional[pd.DataFrame] = None
+        prepared_data: Optional[pd.DataFrame] = None,
+        detrend_handler = None  # DetrendHandler实例（2025-11-14新增）
     ) -> Dict[str, str]:
         """
         导出所有结果文件
@@ -73,7 +74,7 @@ class TrainingResultExporter:
 
         # 导出元数据文件（不捕获异常，失败时直接抛出）
         metadata_path = os.path.join(output_dir, f'final_dfm_metadata_{timestamp}.pkl')
-        self._export_metadata(result, config, metadata_path, timestamp, prepared_data)
+        self._export_metadata(result, config, metadata_path, timestamp, prepared_data, detrend_handler)
         file_paths['metadata'] = metadata_path
         logger.info(f"元数据文件已导出: {os.path.basename(metadata_path)}")
 
@@ -101,9 +102,17 @@ class TrainingResultExporter:
         file_size = os.path.getsize(path) / (1024 * 1024)
         logger.debug(f"模型文件大小: {file_size:.2f} MB")
 
-    def _export_metadata(self, result, config, path: str, timestamp: str, prepared_data: Optional[pd.DataFrame] = None) -> None:
+    def _export_metadata(
+        self,
+        result,
+        config,
+        path: str,
+        timestamp: str,
+        prepared_data: Optional[pd.DataFrame] = None,
+        detrend_handler = None  # 2025-11-14新增
+    ) -> None:
         """导出元数据文件"""
-        metadata = self._build_metadata(result, config, timestamp, prepared_data)
+        metadata = self._build_metadata(result, config, timestamp, prepared_data, detrend_handler)
         self._validate_metadata(metadata)
 
         with open(path, 'wb') as f:
@@ -117,7 +126,14 @@ class TrainingResultExporter:
 
     # ========== 元数据构建方法 ==========
 
-    def _build_metadata(self, result, config, timestamp: str, prepared_data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+    def _build_metadata(
+        self,
+        result,
+        config,
+        timestamp: str,
+        prepared_data: Optional[pd.DataFrame] = None,
+        detrend_handler = None  # 2025-11-14新增
+    ) -> Dict[str, Any]:
         """构建元数据字典（与results模块格式一致）"""
         logger.debug("开始构建元数据")
 
@@ -166,6 +182,35 @@ class TrainingResultExporter:
             'is_mae': float(result.metrics.is_mae),
             'oos_mae': float(result.metrics.oos_mae),
         })
+
+        # 原始值空间评估指标（2025-11-14新增）
+        if result.metrics.is_rmse_original is not None:
+            metadata.update({
+                'is_rmse_original': float(result.metrics.is_rmse_original),
+                'oos_rmse_original': float(result.metrics.oos_rmse_original),
+                'is_mae_original': float(result.metrics.is_mae_original),
+                'oos_mae_original': float(result.metrics.oos_mae_original),
+                'is_hit_rate_original': float(result.metrics.is_hit_rate_original),
+                'oos_hit_rate_original': float(result.metrics.oos_hit_rate_original),
+            })
+            logger.info("保存原始值空间评估指标")
+
+        # 原始值预测序列（2025-11-14新增）
+        if result.model_result.forecast_is_original is not None:
+            metadata['forecast_is_original'] = result.model_result.forecast_is_original
+            metadata['forecast_oos_original'] = result.model_result.forecast_oos_original
+            logger.info("保存原始值空间预测序列")
+
+        # 去趋势参数（2025-11-14新增）
+        if detrend_handler:
+            metadata['detrend'] = {
+                'enabled': True,
+                'method': config.detrend_method,
+                'trend_params': detrend_handler.get_trend_params()
+            }
+            logger.info(f"保存去趋势参数: {len(detrend_handler.trend_params)} 个变量")
+        else:
+            metadata['detrend'] = {'enabled': False}
 
         # 因子载荷DataFrame（预测变量）
         metadata['factor_loadings_df'] = self._extract_factor_loadings(result, config)
@@ -427,13 +472,17 @@ class TrainingResultExporter:
         forecast_oos = None
 
         if result.model_result:
-            if hasattr(result.model_result, 'forecast_is'):
-                forecast_is = result.model_result.forecast_is
-                logger.info(f"forecast_is类型: {type(forecast_is)}, 长度: {len(forecast_is) if forecast_is is not None else None}")
+            if hasattr(result.model_result, 'forecast_is_original') and result.model_result.forecast_is_original is not None:
+                forecast_is = result.model_result.forecast_is_original
+                logger.info(f"使用原始值空间的forecast_is_original: 长度={len(forecast_is)}")
+            else:
+                logger.warning("未找到forecast_is_original")
 
-            if hasattr(result.model_result, 'forecast_oos'):
-                forecast_oos = result.model_result.forecast_oos
-                logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
+            if hasattr(result.model_result, 'forecast_oos_original') and result.model_result.forecast_oos_original is not None:
+                forecast_oos = result.model_result.forecast_oos_original
+                logger.info(f"使用原始值空间的forecast_oos_original: 长度={len(forecast_oos)}")
+            else:
+                logger.warning("未找到forecast_oos_original")
 
         is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
         oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
@@ -732,11 +781,11 @@ class TrainingResultExporter:
         var_industry_map: Dict[str, str]
     ) -> Optional[Dict[str, list]]:
         """
-        按行业分组变量
+        按行业分组变量（支持不区分大小写匹配）
 
         Args:
             result: 训练结果
-            var_industry_map: 变量到行业的映射字典
+            var_industry_map: 变量到行业的映射字典（键已标准化为小写）
 
         Returns:
             dict: {industry_name: [variable_names]} 或 None（如果失败）
@@ -745,14 +794,30 @@ class TrainingResultExporter:
             logger.warning("缺少选定变量，无法计算R²")
             return None
 
+        import unicodedata
+
         industry_groups = {}
+        matched_count = 0
+        unmatched_vars = []
+
         for var in result.selected_variables:
-            if var not in var_industry_map:
+            # 标准化变量名（与UI层加载映射时的逻辑一致）
+            normalized_var = unicodedata.normalize('NFKC', str(var)).strip().lower()
+
+            if normalized_var not in var_industry_map:
+                unmatched_vars.append(var)
                 continue
-            industry = var_industry_map[var]
+
+            industry = var_industry_map[normalized_var]
             if industry not in industry_groups:
                 industry_groups[industry] = []
-            industry_groups[industry].append(var)
+            industry_groups[industry].append(var)  # 保留原始变量名
+            matched_count += 1
+
+        # 输出匹配统计
+        logger.debug(f"行业分组匹配统计: {matched_count}/{len(result.selected_variables)} 个变量匹配成功")
+        if unmatched_vars:
+            logger.debug(f"未匹配变量（前5个）: {unmatched_vars[:5]}")
 
         if not industry_groups:
             logger.warning("没有有效的行业分组")

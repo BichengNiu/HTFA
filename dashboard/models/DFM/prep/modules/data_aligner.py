@@ -14,7 +14,6 @@ import numpy as np
 from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
 
-from dashboard.models.DFM.prep.modules.stationarity_processor import ensure_stationarity
 from dashboard.models.DFM.prep.modules.data_cleaner import DataCleaner
 
 class DataAligner:
@@ -31,27 +30,33 @@ class DataAligner:
     def align_target_to_nearest_friday(self, target_values: pd.Series) -> pd.Series:
         """
         将目标变量对齐到最近的周五
-        
+
         Args:
             target_values: 目标变量序列，索引为发布日期
-            
+
         Returns:
             pd.Series: 对齐到周五的目标变量序列
         """
         if target_values is None or target_values.empty:
-            return pd.Series(dtype=float)
+            raise ValueError("目标变量数据为空，无法对齐到周五")
         
         print(f"  目标变量对齐到最近周五...")
         
         temp_target_df = pd.DataFrame({'value': target_values})
         
         # 计算每个发布日期的最近周五
-        # 如果是周一、周二、周三 -> 去到即将到来的周五 (4 - weekday)
-        # 如果是周四、周五、周六、周日 -> 去到之前的周五 (4 - weekday)
+        # 周一到周五: 对齐到本周五 (days=0 to 4)
+        # 周六日: 对齐到本周五 (days=-1, -2)
         # 注意: Python的weekday()是 周一=0, 周二=1, ..., 周五=4, 周六=5, 周日=6
-        temp_target_df['nearest_friday'] = temp_target_df.index.map(
-            lambda dt: dt + pd.Timedelta(days=4 - dt.weekday())
-        )
+        def get_nearest_friday(dt):
+            weekday = dt.weekday()
+            if weekday <= 4:  # 周一到周五
+                days_to_friday = 4 - weekday
+            else:  # 周六日
+                days_to_friday = -(weekday - 4)
+            return dt + pd.Timedelta(days=days_to_friday)
+
+        temp_target_df['nearest_friday'] = temp_target_df.index.map(get_nearest_friday)
         
         # 处理同一个目标周五的重复：保留最新发布日期的数据
         # 我们先按原始发布日期索引排序，然后分组并取最后一个
@@ -66,15 +71,15 @@ class DataAligner:
     def align_target_sheet_predictors_to_nearest_friday(self, predictors_df: pd.DataFrame) -> pd.DataFrame:
         """
         将目标表格的预测变量对齐到最近的周五
-        
+
         Args:
             predictors_df: 预测变量DataFrame，索引为发布日期
-            
+
         Returns:
             pd.DataFrame: 对齐到周五的预测变量DataFrame
         """
         if predictors_df is None or predictors_df.empty:
-            return pd.DataFrame()
+            raise ValueError("预测变量数据为空，无法对齐到周五")
         
         print(f"  目标 Sheet 预测变量对齐到最近周五...")
         
@@ -82,10 +87,16 @@ class DataAligner:
         predictors_df = self.cleaner.remove_duplicate_columns(predictors_df, "[目标Sheet预测变量对齐] ")
         
         # 应用与目标变量相同的最近周五逻辑
+        def get_nearest_friday(dt):
+            weekday = dt.weekday()
+            if weekday <= 4:  # 周一到周五
+                days_to_friday = 4 - weekday
+            else:  # 周六日
+                days_to_friday = -(weekday - 4)
+            return dt + pd.Timedelta(days=days_to_friday)
+
         temp_df = predictors_df.copy()
-        temp_df['nearest_friday'] = temp_df.index.map(
-            lambda dt: dt + pd.Timedelta(days=4 - dt.weekday())
-        )
+        temp_df['nearest_friday'] = temp_df.index.map(get_nearest_friday)
         
         # 处理同一个目标周五的重复：保留最新发布日期的数据
         aligned_predictors = temp_df.sort_index(ascending=True).groupby('nearest_friday').last()
@@ -96,93 +107,64 @@ class DataAligner:
         return aligned_predictors
     
     def align_monthly_to_last_friday(
-        self, 
-        monthly_data: pd.DataFrame,
-        apply_stationarity: bool = True,
-        skip_cols: Optional[set] = None
-    ) -> Tuple[pd.DataFrame, Dict, Dict]:
+        self,
+        monthly_data: pd.DataFrame
+    ) -> pd.DataFrame:
         """
-        将月度数据对齐到月末最后周五
-        
+        将月度数据对齐到发布日最近的周五（与周度数据对齐逻辑一致）
+
         Args:
             monthly_data: 月度数据DataFrame，索引为发布日期
-            apply_stationarity: 是否应用平稳性检查
-            skip_cols: 跳过平稳性检查的列
-            
+
         Returns:
-            Tuple[pd.DataFrame, Dict, Dict]: (对齐后的数据, 转换日志, 移除列信息)
+            pd.DataFrame: 对齐后的数据
         """
         if monthly_data is None or monthly_data.empty:
-            return pd.DataFrame(), {}, {}
-        
-        print(f"  聚合月度预测变量到月末 (取当月最后有效值)...")
-        
+            raise ValueError("月度数据为空，无法对齐到最近周五")
+
+        print(f"  对齐月度预测变量到发布日最近的周五...")
+
         # 确保没有重复列
         monthly_data = self.cleaner.remove_duplicate_columns(monthly_data, "[月度对齐] ")
-        
-        # 聚合到月末
-        df_monthly_for_stat = monthly_data.copy()
-        df_monthly_for_stat = df_monthly_for_stat.resample('M').last()
-        
-        print(f"    聚合到月末完成。Shape: {df_monthly_for_stat.shape}")
-        
-        # 移除连续NaN检查（这里可以根据需要添加）
-        # df_monthly_for_stat = self.cleaner.handle_consecutive_nans(df_monthly_for_stat, threshold)
-        
-        # 平稳性检查
-        transform_log = {}
-        removed_cols_info = {}
-        
-        if apply_stationarity and not df_monthly_for_stat.empty:
-            print(f"  对月度预测变量进行平稳性检查...")
-            df_monthly_stationary, transform_log, removed_cols_info = ensure_stationarity(
-                df_monthly_for_stat,
-                skip_cols=skip_cols,
-                adf_p_threshold=0.05
-            )
-            print(f"    月度预测变量平稳性处理完成。处理后 Shape: {df_monthly_stationary.shape}")
-        else:
-            df_monthly_stationary = df_monthly_for_stat
-        
-        # 对齐到当月最后周五
-        if not df_monthly_stationary.empty:
-            print("  对齐处理后的月度预测变量到当月最后周五...")
-            
-            # 计算月末的最后周五
-            df_monthly_stationary['last_friday'] = df_monthly_stationary.index.map(
-                lambda dt: dt - pd.Timedelta(days=(dt.weekday() - 4 + 7) % 7)  # 回到最后一个周五
-            )
-            
-            monthly_aligned = df_monthly_stationary.set_index('last_friday', drop=True)
-            monthly_aligned.index.name = 'Date'
-            
-            # 处理潜在的重复（如果多个月末映射到同一个最后周五）
-            # 保留最新月份的数据
-            monthly_aligned = monthly_aligned[~monthly_aligned.index.duplicated(keep='last')]
-            monthly_aligned = monthly_aligned.sort_index()
-            
-            print(f"    对齐到最后周五完成。 Shape: {monthly_aligned.shape}")
-            
-            return monthly_aligned, transform_log, removed_cols_info
-        else:
-            print("  没有月度预测变量可供对齐。")
-            return pd.DataFrame(), transform_log, removed_cols_info
+
+        # 使用与周度数据相同的最近周五对齐逻辑
+        def get_nearest_friday(dt):
+            weekday = dt.weekday()
+            if weekday <= 4:  # 周一到周五
+                days_to_friday = 4 - weekday
+            else:  # 周六日
+                days_to_friday = -(weekday - 4)
+            return dt + pd.Timedelta(days=days_to_friday)
+
+        temp_df = monthly_data.copy()
+        temp_df['nearest_friday'] = temp_df.index.map(get_nearest_friday)
+
+        # 处理同一个目标周五的重复：保留最新发布日期的数据
+        monthly_aligned = temp_df.sort_index(ascending=True).groupby('nearest_friday').last()
+        monthly_aligned.index.name = 'Date'
+
+        print(f"    对齐到最近周五完成。Shape: {monthly_aligned.shape}")
+
+        return monthly_aligned
     
-    def convert_daily_to_weekly(self, daily_data_list: List[pd.DataFrame]) -> pd.DataFrame:
+    def convert_daily_to_weekly(
+        self,
+        daily_data_list: List[pd.DataFrame]
+    ) -> pd.DataFrame:
         """
         将日度数据转换为周度数据（使用均值）
-        
+
         Args:
             daily_data_list: 日度数据DataFrame列表
-            
+
         Returns:
             pd.DataFrame: 转换后的周度数据
         """
         if not daily_data_list:
             return pd.DataFrame()
-        
-        print("  处理日度数据 -> 周度 (均值)...")
-        
+
+        print("  处理日度数据...")
+
         # 首先确保每个DataFrame的索引是唯一的
         cleaned_daily_list = []
         for i, df in enumerate(daily_data_list):
@@ -191,23 +173,27 @@ class DataAligner:
                 print(f"    警告：日度数据 {i} 有重复索引，正在清理...")
                 df = df[~df.index.duplicated(keep='first')]
             cleaned_daily_list.append(df)
-        
+
         # 合并所有日度数据
         df_daily_full = pd.concat(cleaned_daily_list, axis=1, join='outer', sort=True)
-        
+
         # 处理重复列
-        df_daily_full = self.cleaner.remove_duplicate_columns(df_daily_full, "[日度转周度] ")
-        
-        if not df_daily_full.empty:
-            # 转换为周度
-            df_daily_weekly = df_daily_full.resample(self.target_freq).mean()
-            print(f"    日度->周度(均值) 完成. Shape: {df_daily_weekly.shape}")
-            return df_daily_weekly
-        else:
-            print("    合并后的日度数据为空，无法进行周度转换。")
+        df_daily_full = self.cleaner.remove_duplicate_columns(df_daily_full, "[日度合并] ")
+
+        if df_daily_full.empty:
+            print("    合并后的日度数据为空。")
             return pd.DataFrame()
+
+        # 转换为周度（均值聚合）
+        print("  转换日度数据为周度（均值聚合）...")
+        df_daily_weekly = df_daily_full.resample(self.target_freq).mean()
+        print(f"    日度->周度(均值) 完成. Shape: {df_daily_weekly.shape}")
+        return df_daily_weekly
     
-    def align_weekly_data(self, weekly_data_list: List[pd.DataFrame]) -> pd.DataFrame:
+    def align_weekly_data(
+        self,
+        weekly_data_list: List[pd.DataFrame]
+    ) -> pd.DataFrame:
         """
         对齐周度数据（使用最后值）
 
@@ -220,7 +206,7 @@ class DataAligner:
         if not weekly_data_list:
             return pd.DataFrame()
 
-        print("  处理周度数据 -> 周度 (最后值)...")
+        print("  处理周度数据...")
 
         # 首先确保每个DataFrame的索引是唯一的
         cleaned_weekly_list = []
@@ -235,18 +221,30 @@ class DataAligner:
         df_weekly_full = pd.concat(cleaned_weekly_list, axis=1, join='outer', sort=True)
 
         # 处理重复列
-        df_weekly_full = self.cleaner.remove_duplicate_columns(df_weekly_full, "[周度对齐] ")
+        df_weekly_full = self.cleaner.remove_duplicate_columns(df_weekly_full, "[周度合并] ")
 
-        if not df_weekly_full.empty:
-            # 对齐到目标频率
-            df_weekly_aligned = df_weekly_full.resample(self.target_freq).last()
-            print(f"    周度->周度(对齐) 完成. Shape: {df_weekly_aligned.shape}")
-            return df_weekly_aligned
-        else:
-            print("    合并后的周度数据为空，无法进行周度转换。")
+        if df_weekly_full.empty:
+            print("    合并后的周度数据为空。")
             return pd.DataFrame()
 
-    def convert_dekad_to_weekly(self, dekad_data_list: List[pd.DataFrame]) -> pd.DataFrame:
+        # 对齐到目标频率（周五）
+        print("  对齐周度数据到周五...")
+
+        # 关键修复：将0值替换为NaN，避免0值覆盖有效数据
+        # 对于开工率、利用率等比率类指标，0表示有意义的停工状态
+        # 但在周度对齐时，如果周三有非零数据，周五有0值
+        # resample().last()会错误地用0覆盖有效数据
+        # 因此先将0替换为NaN，让last()跳过NaN取到真实的非零值
+        df_weekly_for_resample = df_weekly_full.replace(0, np.nan)
+
+        df_weekly_aligned = df_weekly_for_resample.resample(self.target_freq).last()
+        print(f"    周度->周度(对齐) 完成. Shape: {df_weekly_aligned.shape}")
+        return df_weekly_aligned
+
+    def convert_dekad_to_weekly(
+        self,
+        dekad_data_list: List[pd.DataFrame]
+    ) -> pd.DataFrame:
         """
         将旬度数据转换为周度数据（旬日：10、20、30日对应到所在周的周五）
 
@@ -259,7 +257,7 @@ class DataAligner:
         if not dekad_data_list:
             return pd.DataFrame()
 
-        print("  处理旬度数据 -> 周度 (旬日合并到所在周的周五)...")
+        print("  处理旬度数据...")
 
         # 首先确保每个DataFrame的索引是唯一的
         cleaned_dekad_list = []
@@ -274,55 +272,53 @@ class DataAligner:
         df_dekad_full = pd.concat(cleaned_dekad_list, axis=1, join='outer', sort=True)
 
         # 处理重复列
-        df_dekad_full = self.cleaner.remove_duplicate_columns(df_dekad_full, "[旬度转周度] ")
+        df_dekad_full = self.cleaner.remove_duplicate_columns(df_dekad_full, "[旬度合并] ")
 
-        if not df_dekad_full.empty:
-            # 过滤出旬日（10、20、30日）的数据
-            # 添加调试信息
-            print(f"    旬度数据原始索引范围: {df_dekad_full.index.min()} 到 {df_dekad_full.index.max()}")
-            print(f"    旬度数据原始行数: {len(df_dekad_full)}")
-
-            # 检查是否是旬日（10、20、30）
-            dekad_days = df_dekad_full.index.day
-            is_dekad_day = dekad_days.isin([10, 20, 30])
-
-            if not is_dekad_day.any():
-                print(f"    警告：数据中没有旬日（10、20、30日），将使用所有数据点")
-                df_dekad_filtered = df_dekad_full
-            else:
-                df_dekad_filtered = df_dekad_full[is_dekad_day]
-                print(f"    过滤后旬日数据行数: {len(df_dekad_filtered)}")
-
-            # 将旬日映射到所在周的周五
-            # 对于每个旬日，找到它所在周的周五
-            df_temp = df_dekad_filtered.copy()
-
-            # 计算每个日期对应的周五
-            # 如果当前日期是周一到周五，对应到本周的周五
-            # 如果是周六日，对应到下周的周五
-            def get_week_friday(date):
-                weekday = date.weekday()  # 周一=0, ..., 周五=4, 周六=5, 周日=6
-                if weekday <= 4:  # 周一到周五
-                    days_to_friday = 4 - weekday
-                else:  # 周六日
-                    days_to_friday = (7 - weekday) + 4
-                return date + pd.Timedelta(days=days_to_friday)
-
-            df_temp['target_friday'] = df_temp.index.map(get_week_friday)
-
-            # 按目标周五分组，保留最后一个值（如果一周内有多个旬日）
-            df_dekad_weekly = df_temp.groupby('target_friday').last()
-            df_dekad_weekly.index.name = 'Date'
-
-            # 对齐到目标频率
-            df_dekad_weekly = df_dekad_weekly.resample(self.target_freq).last()
-
-            print(f"    旬度->周度 完成. Shape: {df_dekad_weekly.shape}")
-            print(f"    转换后周度数据索引范围: {df_dekad_weekly.index.min()} 到 {df_dekad_weekly.index.max()}")
-            return df_dekad_weekly
-        else:
-            print("    合并后的旬度数据为空，无法进行周度转换。")
+        if df_dekad_full.empty:
+            print("    合并后的旬度数据为空。")
             return pd.DataFrame()
+
+        # 过滤出旬日（10、20、30日）的数据
+        print(f"    旬度数据原始索引范围: {df_dekad_full.index.min()} 到 {df_dekad_full.index.max()}")
+        print(f"    旬度数据原始行数: {len(df_dekad_full)}")
+
+        # 检查是否是旬日（10、20、30）
+        dekad_days = df_dekad_full.index.day
+        is_dekad_day = dekad_days.isin([10, 20, 30])
+
+        if not is_dekad_day.any():
+            raise ValueError("旬度数据中没有旬日（10、20、30日），数据格式不正确")
+
+        df_dekad_filtered = df_dekad_full[is_dekad_day]
+        print(f"    过滤后旬日数据行数: {len(df_dekad_filtered)}")
+
+        # 将旬日映射到所在周的周五
+        print("  映射旬度数据到所在周的周五...")
+        df_temp = df_dekad_filtered.copy()
+
+        # 计算每个日期对应的周五
+        # 周一到周五: 对应到本周的周五
+        # 周六日: 对应到本周的周五（而非下周）
+        def get_week_friday(date):
+            weekday = date.weekday()  # 周一=0, ..., 周五=4, 周六=5, 周日=6
+            if weekday <= 4:  # 周一到周五
+                days_to_friday = 4 - weekday
+            else:  # 周六日
+                days_to_friday = -(weekday - 4)
+            return date + pd.Timedelta(days=days_to_friday)
+
+        df_temp['target_friday'] = df_temp.index.map(get_week_friday)
+
+        # 按目标周五分组，保留最后一个值（如果一周内有多个旬日）
+        df_dekad_weekly = df_temp.groupby('target_friday').last()
+        df_dekad_weekly.index.name = 'Date'
+
+        # 对齐到目标频率
+        df_dekad_weekly = df_dekad_weekly.resample(self.target_freq).last()
+
+        print(f"    旬度->周度 完成. Shape: {df_dekad_weekly.shape}")
+        print(f"    转换后周度数据索引范围: {df_dekad_weekly.index.min()} 到 {df_dekad_weekly.index.max()}")
+        return df_dekad_weekly
     
     def create_full_date_range(self, all_indices: List[pd.DatetimeIndex], start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DatetimeIndex:
         """
@@ -338,13 +334,9 @@ class DataAligner:
         """
         # 过滤出有效的索引
         valid_indices = [idx for idx in all_indices if idx is not None and not idx.empty]
-        
+
         if not valid_indices:
-            # 提供默认的日期范围而不是抛出异常
-            print("  警告：所有收集到的索引都为空，使用默认日期范围。")
-            default_start = pd.to_datetime('2010-01-01')
-            default_end = pd.to_datetime('2025-12-31')
-            return pd.date_range(start=default_start, end=default_end, freq=self.target_freq)
+            raise ValueError("所有收集到的索引都为空，无法创建日期范围")
         
         min_date_orig = min(idx.min() for idx in valid_indices)
         max_date_orig = max(idx.max() for idx in valid_indices)

@@ -94,8 +94,11 @@ class DFMModel:
 
         if len(valid_vars) < len(data.columns):
             dropped_vars = set(data.columns) - set(valid_vars)
-            logger.warning(f"过滤掉{len(dropped_vars)}个数据不足的变量（需要至少{min_required_points}个有效点）")
-            logger.debug(f"过滤掉的变量: {list(dropped_vars)[:5]}...")  # 只显示前5个
+            dropped_list = sorted(list(dropped_vars))
+            if len(dropped_list) <= 5:
+                logger.info(f"过滤掉{len(dropped_vars)}个数据不足的变量（需要至少{min_required_points}个有效点）: {dropped_list}")
+            else:
+                logger.info(f"过滤掉{len(dropped_vars)}个数据不足的变量（需要至少{min_required_points}个有效点）: {dropped_list[:5]}... 等")
             data = data[valid_vars]
 
         if len(valid_vars) < self.n_factors:

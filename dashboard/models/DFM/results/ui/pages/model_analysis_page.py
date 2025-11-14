@@ -28,24 +28,10 @@ print("[DFM Model Analysis] [SUCCESS] 模块导入成功")
 
 
 def get_dfm_state(key, default=None):
-    """获取DFM状态值"""
+    """获取DFM状态值（完全解耦，仅从model_analysis命名空间读取）"""
     try:
         import streamlit as st
-
-        # 简化：数据相关的键从data_prep命名空间获取，其他从model_analysis获取
-        data_keys = [
-            'dfm_prepared_data_df',
-            'dfm_transform_log_obj',
-            'dfm_industry_map_obj',
-            'dfm_removed_vars_log_obj',
-            'dfm_var_type_map_obj'
-        ]
-
-        if key in data_keys:
-            full_key = f'data_prep.{key}'
-        else:
-            full_key = f'model_analysis.{key}'
-
+        full_key = f'model_analysis.{key}'
         return st.session_state.get(full_key, default)
     except Exception as e:
         print(f"[DFM Model Analysis] [ERROR] 获取状态失败: {key}, 错误: {e}")
@@ -564,6 +550,46 @@ def render_dfm_tab(st):
         st.metric("样本内 MAE", format_value(is_mae))
     with row2_col4:
         st.metric("样本外 MAE", format_value(oos_mae))
+
+    # 原始值空间指标（如果存在）
+    is_rmse_original = metadata.get('is_rmse_original')
+    oos_rmse_original = metadata.get('oos_rmse_original')
+    is_mae_original = metadata.get('is_mae_original')
+    oos_mae_original = metadata.get('oos_mae_original')
+    is_hr_original = metadata.get('is_hit_rate_original')
+    oos_hr_original = metadata.get('oos_hit_rate_original')
+
+    # 检查是否有原始值指标（去趋势模型才会有）
+    has_original_metrics = any([
+        is_rmse_original is not None,
+        oos_rmse_original is not None,
+        is_mae_original is not None,
+        oos_mae_original is not None,
+        is_hr_original is not None,
+        oos_hr_original is not None
+    ])
+
+    if has_original_metrics:
+        with st.expander("原始值空间评估指标（去趋势模型）", expanded=False):
+            st.caption("以下指标是在原始值水平上计算的（已还原趋势），用于业务解释。上方残差空间指标用于内部模型选择。")
+
+            # 第一排：胜率
+            orig_row1_col1, orig_row1_col2, orig_row1_col3, orig_row1_col4 = st.columns(4)
+            with orig_row1_col1:
+                st.metric("样本内胜率（原始值）", format_value(is_hr_original, is_percent=True))
+            with orig_row1_col2:
+                st.metric("样本外胜率（原始值）", format_value(oos_hr_original, is_percent=True))
+
+            # 第二排：RMSE和MAE
+            orig_row2_col1, orig_row2_col2, orig_row2_col3, orig_row2_col4 = st.columns(4)
+            with orig_row2_col1:
+                st.metric("样本内 RMSE（原始值）", format_value(is_rmse_original))
+            with orig_row2_col2:
+                st.metric("样本外 RMSE（原始值）", format_value(oos_rmse_original))
+            with orig_row2_col3:
+                st.metric("样本内 MAE（原始值）", format_value(is_mae_original))
+            with orig_row2_col4:
+                st.metric("样本外 MAE（原始值）", format_value(oos_mae_original))
 
     # 修复：直接使用pickle文件中的complete_aligned_table数据
     complete_aligned_table = metadata.get('complete_aligned_table')

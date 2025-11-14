@@ -39,14 +39,20 @@ class TrainingConfig:
     max_lags: int = 1
     tolerance: float = 1e-6
 
+    # 去趋势配置（2025-11-14新增，默认启用）
+    enable_detrend: bool = True  # 是否启用线性去趋势（默认启用）
+    detrend_method: str = 'linear'  # 去趋势方法：'linear'（线性回归）
+    detrend_variables: Optional[List[str]] = None  # 需要去趋势的变量（None=全部变量）
+
     # 变量选择配置
     enable_variable_selection: bool = False
     variable_selection_method: str = 'backward'
     min_variables_after_selection: Optional[int] = None
 
     # 因子数选择配置
-    factor_selection_method: str = 'fixed'  # fixed, cumulative
+    factor_selection_method: str = 'fixed'  # fixed, cumulative, kaiser
     pca_threshold: Optional[float] = 0.9  # cumulative方法的阈值
+    kaiser_threshold: Optional[float] = 1.0  # kaiser方法的特征值阈值
 
     # 并行计算配置（2025-11-08重构后默认启用）
     enable_parallel: bool = True  # 是否启用并行计算（重构后已解决序列化问题）
@@ -96,7 +102,7 @@ class TrainingConfig:
             raise ValueError(f"max_lags必须>=1,当前值: {self.max_lags}")
 
         # 验证因子选择方法
-        valid_methods = ['fixed', 'cumulative']
+        valid_methods = ['fixed', 'cumulative', 'kaiser']
         if self.factor_selection_method not in valid_methods:
             raise ValueError(
                 f"factor_selection_method必须是{valid_methods}之一,"

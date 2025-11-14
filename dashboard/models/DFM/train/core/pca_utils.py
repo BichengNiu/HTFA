@@ -21,24 +21,27 @@ def select_num_factors(
     fixed_k: int,
     pca_threshold: float = 0.9,
     elbow_threshold: float = 0.1,
+    kaiser_threshold: float = 1.0,
     train_end: Optional[str] = None,
     progress_callback: Optional[Callable] = None
 ) -> Tuple[int, Optional[Dict]]:
     """
     因子数选择
 
-    支持三种方法：
+    支持四种方法：
     1. fixed: 固定因子数
     2. cumulative: PCA累积方差贡献率
-    3. elbow: Elbow方法（边际方差阈值）
+    3. kaiser: Kaiser准则（特征值阈值法）
+    4. elbow: Elbow方法（边际方差阈值）
 
     Args:
         data: 完整数据 (DataFrame)
         selected_vars: 选中的变量列表
-        method: 选择方法 ('fixed', 'cumulative', 'elbow')
+        method: 选择方法 ('fixed', 'cumulative', 'kaiser', 'elbow')
         fixed_k: 固定因子数（method='fixed'时使用）
         pca_threshold: PCA累积方差阈值（method='cumulative'时使用，默认0.9）
         elbow_threshold: Elbow边际方差阈值（method='elbow'时使用，默认0.1）
+        kaiser_threshold: Kaiser准则的特征值阈值（method='kaiser'时使用，默认1.0）
         train_end: 训练集结束日期（用于标准化参数计算，避免数据泄露）
         progress_callback: 进度回调函数
 
@@ -147,6 +150,27 @@ def select_num_factors(
         marginal_variance = np.diff(explained_variance)
         k = np.argmax(marginal_variance < elbow_threshold) + 1
         logger.info(f"Elbow方法: 阈值={elbow_threshold:.1%}, k={k}")
+
+    # 方法4: Kaiser准则（特征值阈值法）
+    elif method == 'kaiser':
+        eigenvalues = pca.explained_variance_
+        k = np.sum(eigenvalues > kaiser_threshold)
+
+        # 确保至少有1个因子
+        if k == 0:
+            logger.warning(
+                f"Kaiser准则: 没有特征值>{kaiser_threshold}的因子，"
+                f"自动设置k=1"
+            )
+            k = 1
+
+        logger.info(
+            f"Kaiser准则: 阈值={kaiser_threshold}, k={k}, "
+            f"特征值>{kaiser_threshold}的数量={k}"
+        )
+        # 记录前几个特征值用于调试
+        top_eigenvalues = eigenvalues[:min(10, len(eigenvalues))]
+        logger.info(f"前{len(top_eigenvalues)}个特征值: {top_eigenvalues}")
 
     else:
         raise ValueError(f"未知的因子选择方法: {method}")
