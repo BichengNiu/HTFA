@@ -43,3 +43,14 @@ SVD_FALLBACK_MIN_VALUE = 1e-6
 
 # R矩阵最小方差
 R_MATRIX_MIN_VARIANCE = 1e-6
+
+# ==================== EM算法收敛控制常量 ====================
+
+# 最少迭代次数（确保充分优化）
+EM_MIN_ITERATIONS = 10
+
+# 默认最大迭代次数（实际通常会提前收敛）
+EM_MAX_ITERATIONS = 100
+
+# 似然变化收敛阈值
+EM_TOLERANCE = 1e-6

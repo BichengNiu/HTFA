@@ -160,6 +160,9 @@ class TrainingResultExporter:
             'validation_start_date': self._calculate_validation_start(config),
             'validation_end_date': config.validation_end,
 
+            # 观察期起始日期（2025-11-15新增，用于UI背景色标识）
+            'observation_period_start': config.validation_end if hasattr(result.model_result, 'forecast_observation_original') and result.model_result.forecast_observation_original is not None else None,
+
             # 标准化参数
             'target_mean_original': target_mean,
             'target_std_original': target_std,
@@ -194,6 +197,15 @@ class TrainingResultExporter:
                 'oos_hit_rate_original': float(result.metrics.oos_hit_rate_original),
             })
             logger.info("保存原始值空间评估指标")
+
+        # 观察期评估指标（2025-11-15新增）
+        if result.metrics.obs_rmse_original is not None:
+            metadata.update({
+                'obs_rmse_original': float(result.metrics.obs_rmse_original),
+                'obs_mae_original': float(result.metrics.obs_mae_original),
+                'obs_hit_rate_original': float(result.metrics.obs_hit_rate_original),
+            })
+            logger.info("保存观察期评估指标")
 
         # 原始值预测序列（2025-11-14新增）
         if result.model_result.forecast_is_original is not None:
@@ -459,7 +471,7 @@ class TrainingResultExporter:
 
     def _collect_nowcast_data(self, result, config) -> Optional[pd.Series]:
         """
-        收集并合并训练期和验证期的Nowcast数据
+        收集并合并训练期、验证期和观察期的Nowcast数据（2025-11-15更新）
 
         Args:
             result: 训练结果
@@ -470,6 +482,7 @@ class TrainingResultExporter:
         """
         forecast_is = None
         forecast_oos = None
+        forecast_observation = None
 
         if result.model_result:
             if hasattr(result.model_result, 'forecast_is_original') and result.model_result.forecast_is_original is not None:
@@ -483,6 +496,13 @@ class TrainingResultExporter:
                 logger.info(f"使用原始值空间的forecast_oos_original: 长度={len(forecast_oos)}")
             else:
                 logger.warning("未找到forecast_oos_original")
+
+            # 2025-11-15新增：收集观察期数据
+            if hasattr(result.model_result, 'forecast_observation_original') and result.model_result.forecast_observation_original is not None:
+                forecast_observation = result.model_result.forecast_observation_original
+                logger.info(f"使用原始值空间的forecast_observation_original: 长度={len(forecast_observation)}")
+            else:
+                logger.debug("未找到forecast_observation_original，无观察期数据")
 
         is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
         oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
@@ -502,6 +522,16 @@ class TrainingResultExporter:
             logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
         else:
             logger.warning("无法生成验证期Nowcast序列")
+
+        # 2025-11-15新增：收集观察期数据
+        if forecast_observation is not None:
+            observation_index = self._get_observation_date_index(config)
+            if observation_index is not None and len(observation_index) == len(forecast_observation):
+                observation_series = pd.Series(forecast_observation, index=observation_index, name='Nowcast')
+                nowcast_series_list.append(observation_series)
+                logger.info(f"观察期数据: {len(observation_series)} 个点，时间范围 {observation_index.min()} 到 {observation_index.max()}")
+            else:
+                logger.warning(f"无法生成观察期Nowcast序列: observation_index长度={len(observation_index) if observation_index is not None else 0}, forecast_observation长度={len(forecast_observation)}")
 
         if len(nowcast_series_list) == 0:
             logger.warning("无法获取Nowcast数据")
@@ -717,25 +747,76 @@ class TrainingResultExporter:
             logger.error(f"获取{period_name}日期索引失败: {e}")
             return None
 
+    def _get_observation_date_index(self, config) -> Optional[pd.DatetimeIndex]:
+        """
+        获取观察期的日期索引（validation_end之后到数据实际结束日期）
+        2025-11-15新增
+
+        Args:
+            config: 训练配置
+
+        Returns:
+            观察期的日期索引，如果失败则返回None
+        """
+        try:
+            if not hasattr(config, 'data_path') or not config.data_path:
+                return None
+
+            if not hasattr(config, 'validation_end') or not getattr(config, 'validation_end'):
+                logger.warning("config缺少validation_end字段")
+                return None
+
+            data = self._read_data_file(config.data_path)
+
+            if not isinstance(data.index, pd.DatetimeIndex):
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception:
+                    logger.warning("无法将数据索引转换为DatetimeIndex")
+                    return None
+
+            validation_end_date = pd.to_datetime(getattr(config, 'validation_end'))
+            data_end_date = data.index.max()
+
+            # 观察期：validation_end之后到数据结束
+            observation_index = data.index[(data.index > validation_end_date) & (data.index <= data_end_date)]
+
+            if len(observation_index) == 0:
+                logger.debug(f"观察期没有数据（validation_end={validation_end_date}, data_end={data_end_date}）")
+                return None
+
+            logger.debug(f"获取观察期日期索引成功: {len(observation_index)} 个日期，范围 {observation_index.min()} 到 {observation_index.max()}")
+            return observation_index
+
+        except Exception as e:
+            logger.error(f"获取观察期日期索引失败: {e}")
+            return None
+
     def _prepare_r2_calculation_data(
         self,
         result,
         config
     ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
         """
-        准备R²计算所需的因子和变量数据
+        准备R²计算所需的因子和拟合数据
+
+        使用H @ factors计算所有变量的拟合值，而不是使用原始数据（带缺失值）。
+        这样可以避免因缺失值导致行业R²计算时有效样本不足的问题。
 
         Args:
             result: 训练结果
             config: 训练配置
 
         Returns:
-            tuple: (factors_train, train_data) 或 None（如果失败）
+            tuple: (factors_train, fitted_data_train) 或 None（如果失败）
+                - factors_train: 训练期因子数据
+                - fitted_data_train: 训练期所有变量的拟合值（无缺失值）
         """
         if not result.model_result or not hasattr(result.model_result, 'factors'):
             logger.warning("缺少模型结果或因子数据，无法计算R²")
             return None
 
+        # 获取因子数据
         factors_data = result.model_result.factors
         if isinstance(factors_data, np.ndarray):
             if factors_data.ndim == 2:
@@ -752,8 +833,31 @@ class TrainingResultExporter:
             logger.warning(f"因子数据类型不支持: {type(factors_data)}")
             return None
 
-        data = self._read_data_file(config.data_path)
+        # 获取H矩阵（观测矩阵/因子载荷）
+        if not hasattr(result.model_result, 'H') or result.model_result.H is None:
+            logger.warning("缺少H矩阵，无法计算变量拟合值")
+            return None
 
+        H = result.model_result.H  # (n_vars, n_factors)
+        factors = result.model_result.factors  # (n_factors, n_timepoints)
+
+        # 计算所有变量的拟合值: X_fitted = H @ factors
+        X_fitted = H @ factors  # (n_vars, n_timepoints)
+
+        # 获取变量名（selected_variables中排除目标变量）
+        var_names = result.selected_variables
+        if config and hasattr(config, 'target_variable'):
+            var_names = [v for v in var_names if v != config.target_variable]
+
+        # 验证维度匹配
+        if len(var_names) != X_fitted.shape[0]:
+            logger.warning(
+                f"变量数量不匹配: var_names={len(var_names)}, X_fitted.shape[0]={X_fitted.shape[0]}"
+            )
+            return None
+
+        # 读取原始数据以获取时间索引
+        data = self._read_data_file(config.data_path)
         if not isinstance(data.index, pd.DatetimeIndex):
             try:
                 data.index = pd.to_datetime(data.index)
@@ -761,19 +865,37 @@ class TrainingResultExporter:
                 logger.warning("无法将数据索引转换为DatetimeIndex")
                 return None
 
-        if len(factors_df) != len(data):
-            logger.warning(f"因子数据长度({len(factors_df)})与完整数据长度({len(data)})不匹配")
-            min_len = min(len(factors_df), len(data))
-            factors_df = factors_df.iloc[:min_len].copy()
-            data = data.iloc[:min_len].copy()
+        # 验证时间点数量匹配
+        if len(data) != X_fitted.shape[1]:
+            logger.warning(
+                f"时间点数量不匹配: data length={len(data)}, X_fitted.shape[1]={X_fitted.shape[1]}"
+            )
+            min_len = min(len(data), X_fitted.shape[1])
+            data = data.iloc[:min_len]
+            X_fitted = X_fitted[:, :min_len]
+            factors_df = factors_df.iloc[:min_len]
 
+        # 创建拟合数据的DataFrame（转置X_fitted）
+        fitted_data = pd.DataFrame(
+            X_fitted.T,
+            index=data.index,
+            columns=var_names
+        )
+
+        # 设置因子数据的索引
         factors_df.index = data.index
 
+        # 截取训练期数据
         train_end = pd.to_datetime(config.train_end) if hasattr(config, 'train_end') else data.index.max()
-        train_data = data[data.index <= train_end]
+        fitted_data_train = fitted_data[fitted_data.index <= train_end]
         factors_train = factors_df[factors_df.index <= train_end]
 
-        return factors_train, train_data
+        logger.info(
+            f"行业R²计算数据准备完成: 使用H@factors拟合值 (无缺失值), "
+            f"形状={fitted_data_train.shape}, 时间范围={fitted_data_train.index.min()} 到 {fitted_data_train.index.max()}"
+        )
+
+        return factors_train, fitted_data_train
 
     def _group_variables_by_industry(
         self,
@@ -830,7 +952,7 @@ class TrainingResultExporter:
         self,
         industry_groups: Dict[str, list],
         factors_train: pd.DataFrame,
-        train_data: pd.DataFrame
+        fitted_data_train: pd.DataFrame
     ) -> Tuple[Optional[pd.Series], Optional[Dict]]:
         """
         计算每个行业的R²得分
@@ -838,7 +960,7 @@ class TrainingResultExporter:
         Args:
             industry_groups: 行业分组
             factors_train: 训练期因子数据
-            train_data: 训练期变量数据
+            fitted_data_train: 训练期变量拟合数据（H@factors，无缺失值）
 
         Returns:
             tuple: (industry_r2_series, factor_industry_r2_dict)
@@ -847,12 +969,12 @@ class TrainingResultExporter:
         factor_industry_r2_results = {f'Factor_{i+1}': {} for i in range(len(factors_train.columns))}
 
         for industry, variables in industry_groups.items():
-            industry_vars = [v for v in variables if v in train_data.columns]
+            industry_vars = [v for v in variables if v in fitted_data_train.columns]
             if not industry_vars:
                 logger.warning(f"行业 '{industry}' 没有有效变量")
                 continue
 
-            industry_data = train_data[industry_vars].dropna(how='all')
+            industry_data = fitted_data_train[industry_vars].dropna(how='all')
 
             common_index = factors_train.index.intersection(industry_data.index)
             if len(common_index) == 0:
@@ -941,13 +1063,13 @@ class TrainingResultExporter:
             if data_result is None:
                 return None, None
 
-            factors_train, train_data = data_result
+            factors_train, fitted_data_train = data_result
 
             industry_groups = self._group_variables_by_industry(result, var_industry_map)
             if industry_groups is None:
                 return None, None
 
-            return self._compute_industry_r2_scores(industry_groups, factors_train, train_data)
+            return self._compute_industry_r2_scores(industry_groups, factors_train, fitted_data_train)
 
         except Exception as e:
             logger.error(f"计算行业R²失败: {e}", exc_info=True)

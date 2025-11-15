@@ -50,7 +50,7 @@ class DFMModel:
         self,
         n_factors: int,
         max_lags: int = 1,
-        max_iter: int = 30,
+        max_iter: int = 100,  # 最大迭代次数上限（通常会提前收敛）
         tolerance: float = 1e-6
     ):
         self.n_factors = n_factors
@@ -380,11 +380,11 @@ class DFMModel:
                 loglik_diff = loglik_current - loglik_prev
                 logger.debug(f"  LogLik: {loglik_current:.2f} (增量: {loglik_diff:.4f})")
 
-                # [TEMPORARY] 禁用收敛检查以匹配老代码的固定30次迭代
-                # if abs(loglik_diff) < self.tolerance:
-                #     # logger.info(f"EM算法收敛于迭代{iteration + 1}")
-                #     converged = True
-                #     break
+                # 收敛检查：至少10次迭代后启用（确保充分优化）
+                if iteration >= 9 and abs(loglik_diff) < self.tolerance:
+                    logger.info(f"EM算法收敛于迭代{iteration + 1}，似然变化: {loglik_diff:.6f}")
+                    converged = True
+                    break
 
             loglik_prev = loglik_current
 
@@ -454,6 +454,14 @@ class DFMModel:
         # 添加调试信息
         logger.debug(f"[EM结束] 最终因子标准差: {factors_smoothed_final.std(axis=1)}")
         logger.debug(f"[EM结束] 最终载荷范围: [{Lambda.min():.2f}, {Lambda.max():.2f}]")
+
+        # 未收敛警告
+        if not converged:
+            logger.warning(
+                f"EM算法达到最大迭代次数（{self.max_iter}）未收敛。"
+                f"最终似然值: {loglik_current:.2f}。"
+                f"建议检查数据质量或增加max_iterations上限。"
+            )
 
         # 返回统一的DFMModelResult
         return DFMModelResult(

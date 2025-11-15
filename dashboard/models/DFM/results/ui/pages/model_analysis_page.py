@@ -509,87 +509,71 @@ def render_dfm_tab(st):
             n_vars = 'N/A'
             logger.warning("无法获取变量数量，将显示N/A")
 
-    is_hr = metadata.get('is_hit_rate')
-    oos_hr = metadata.get('oos_hit_rate')
-    is_rmse = metadata.get('is_rmse')
-    oos_rmse = metadata.get('oos_rmse')
-    is_mae = metadata.get('is_mae')
-    oos_mae = metadata.get('oos_mae')
+    # 读取原始值空间指标
+    # 训练期原始值指标
+    is_mae_original = metadata.get('is_mae_original')
+    is_rmse_original = metadata.get('is_rmse_original')
+    is_hr_original = metadata.get('is_hit_rate_original')
+
+    # 验证期原始值指标
+    oos_mae_original = metadata.get('oos_mae_original')
+    oos_rmse_original = metadata.get('oos_rmse_original')
+    oos_hr_original = metadata.get('oos_hit_rate_original')
+
+    # 观察期原始值指标
+    obs_mae_original = metadata.get('obs_mae_original')
+    obs_rmse_original = metadata.get('obs_rmse_original')
+    obs_hr_original = metadata.get('obs_hit_rate_original')
 
     def format_value(val, is_percent=False, precision=2):
         if isinstance(val, (int, float)) and pd.notna(val):
             if is_percent:
-                # MODIFIED: Assume val is already the percentage value if is_percent is True
-                # e.g., if val is 72.3, it represents 72.3%
-                return f"{val:.{precision}f}%" 
+                return f"{val:.{precision}f}%"
             return f"{val:.{precision}f}"
         return 'N/A' if val == 'N/A' or pd.isna(val) else str(val)
 
-    # 第一排：4个指标
-    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+    # 第1行：2列 - 最终变量数、最终因子数
+    row1_col1, row1_col2 = st.columns(2)
     with row1_col1:
-        # 兼容numpy整数类型和Python整数类型
-        display_k = int(k_factors) if isinstance(k_factors, (int, np.integer)) else 'N/A'
-        st.metric("最终因子数 (k)", display_k)
-    with row1_col2:
-        # 兼容numpy整数类型和Python整数类型
         display_n = int(n_vars) if isinstance(n_vars, (int, np.integer)) else 'N/A'
-        st.metric("最终变量数 (N)", display_n)
-    with row1_col3:
-        st.metric("训练期胜率", format_value(is_hr, is_percent=True))
-    with row1_col4:
-        st.metric("验证期胜率", format_value(oos_hr, is_percent=True))
+        st.metric("最终变量数", display_n)
+    with row1_col2:
+        display_k = int(k_factors) if isinstance(k_factors, (int, np.integer)) else 'N/A'
+        st.metric("最终因子数", display_k)
 
-    # 第二排：4个指标
-    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
+    # 第2行：3列 - 训练期MAE、RMSE、胜率
+    row2_col1, row2_col2, row2_col3 = st.columns(3)
     with row2_col1:
-        st.metric("样本内 RMSE", format_value(is_rmse))
+        st.metric("训练期MAE", format_value(is_mae_original))
     with row2_col2:
-        st.metric("样本外 RMSE", format_value(oos_rmse))
+        st.metric("训练期RMSE", format_value(is_rmse_original))
     with row2_col3:
-        st.metric("样本内 MAE", format_value(is_mae))
-    with row2_col4:
-        st.metric("样本外 MAE", format_value(oos_mae))
+        st.metric("训练期胜率", format_value(is_hr_original, is_percent=True))
 
-    # 原始值空间指标（如果存在）
-    is_rmse_original = metadata.get('is_rmse_original')
-    oos_rmse_original = metadata.get('oos_rmse_original')
-    is_mae_original = metadata.get('is_mae_original')
-    oos_mae_original = metadata.get('oos_mae_original')
-    is_hr_original = metadata.get('is_hit_rate_original')
-    oos_hr_original = metadata.get('oos_hit_rate_original')
+    # 第3行：3列 - 验证期MAE、RMSE、胜率
+    row3_col1, row3_col2, row3_col3 = st.columns(3)
+    with row3_col1:
+        st.metric("验证期MAE", format_value(oos_mae_original))
+    with row3_col2:
+        st.metric("验证期RMSE", format_value(oos_rmse_original))
+    with row3_col3:
+        st.metric("验证期胜率", format_value(oos_hr_original, is_percent=True))
 
-    # 检查是否有原始值指标（去趋势模型才会有）
-    has_original_metrics = any([
-        is_rmse_original is not None,
-        oos_rmse_original is not None,
-        is_mae_original is not None,
-        oos_mae_original is not None,
-        is_hr_original is not None,
-        oos_hr_original is not None
+    # 第4行：3列 - 观察期MAE、RMSE、胜率（条件显示）
+    has_observation_metrics = any([
+        obs_rmse_original is not None,
+        obs_mae_original is not None,
+        obs_hr_original is not None
     ])
 
-    if has_original_metrics:
-        with st.expander("原始值空间评估指标（去趋势模型）", expanded=False):
-            st.caption("以下指标是在原始值水平上计算的（已还原趋势），用于业务解释。上方残差空间指标用于内部模型选择。")
-
-            # 第一排：胜率
-            orig_row1_col1, orig_row1_col2, orig_row1_col3, orig_row1_col4 = st.columns(4)
-            with orig_row1_col1:
-                st.metric("样本内胜率（原始值）", format_value(is_hr_original, is_percent=True))
-            with orig_row1_col2:
-                st.metric("样本外胜率（原始值）", format_value(oos_hr_original, is_percent=True))
-
-            # 第二排：RMSE和MAE
-            orig_row2_col1, orig_row2_col2, orig_row2_col3, orig_row2_col4 = st.columns(4)
-            with orig_row2_col1:
-                st.metric("样本内 RMSE（原始值）", format_value(is_rmse_original))
-            with orig_row2_col2:
-                st.metric("样本外 RMSE（原始值）", format_value(oos_rmse_original))
-            with orig_row2_col3:
-                st.metric("样本内 MAE（原始值）", format_value(is_mae_original))
-            with orig_row2_col4:
-                st.metric("样本外 MAE（原始值）", format_value(oos_mae_original))
+    if has_observation_metrics:
+        row4_col1, row4_col2, row4_col3 = st.columns(3)
+        with row4_col1:
+            st.metric("观察期MAE", format_value(obs_mae_original))
+        with row4_col2:
+            st.metric("观察期RMSE", format_value(obs_rmse_original))
+        with row4_col3:
+            st.metric("观察期胜率", format_value(obs_hr_original, is_percent=True))
 
     # 修复：直接使用pickle文件中的complete_aligned_table数据
     complete_aligned_table = metadata.get('complete_aligned_table')
@@ -682,6 +666,34 @@ def render_dfm_tab(st):
                     f'<b>{target_display_name}</b>: %{{y:.2f}}<extra></extra>'
                 ))
 
+        # 添加训练期淡绿色背景标记（2025-11-15新增）
+        try:
+            # 从metadata获取训练期日期
+            training_start = metadata.get('training_start_date')
+            train_end = metadata.get('train_end_date')
+
+            if training_start and train_end and training_start != 'N/A' and train_end != 'N/A':
+                # 转换为datetime对象
+                train_start_dt = pd.to_datetime(training_start)
+                train_end_dt = pd.to_datetime(train_end)
+
+                # 添加淡绿色半透明背景区域
+                fig.add_vrect(
+                    x0=train_start_dt,
+                    x1=train_end_dt,
+                    fillcolor="rgba(200, 255, 200, 0.3)",
+                    opacity=0.3,
+                    layer="below",
+                    line_width=0,
+                    annotation_text="训练期",
+                    annotation_position="top left",
+                    annotation_font_size=10,
+                    annotation_font_color="gray"
+                )
+                logger.info(f"已添加训练期标记: {train_start_dt} 到 {train_end_dt}")
+        except Exception as e:
+            logger.warning(f"添加训练期标记失败: {e}")
+
         # 添加验证期黄色背景标记
         try:
             # 从metadata获取验证期日期
@@ -709,6 +721,36 @@ def render_dfm_tab(st):
                 logger.info(f"已添加验证期标记: {val_start_dt} 到 {val_end_dt}")
         except Exception as e:
             logger.warning(f"添加验证期标记失败: {e}")
+
+        # 添加观察期背景色标记（2025-11-15新增）
+        try:
+            # 从metadata获取观察期起始日期
+            observation_period_start = metadata.get('observation_period_start')
+
+            if observation_period_start and observation_period_start != 'N/A':
+                # 转换为datetime对象
+                observation_start_dt = pd.to_datetime(observation_period_start)
+
+                # 获取图表数据的结束日期
+                if not comparison_df.empty and comparison_df.index.max() > observation_start_dt:
+                    data_end_dt = comparison_df.index.max()
+
+                    # 添加淡蓝色半透明背景区域标识观察期
+                    fig.add_vrect(
+                        x0=observation_start_dt,
+                        x1=data_end_dt,
+                        fillcolor="rgba(200, 230, 255, 0.3)",
+                        opacity=0.3,
+                        layer="below",
+                        line_width=0,
+                        annotation_text="观察期",
+                        annotation_position="top right",
+                        annotation_font_size=10,
+                        annotation_font_color="gray"
+                    )
+                    logger.info(f"已添加观察期标记: {observation_start_dt} 到 {data_end_dt}")
+        except Exception as e:
+            logger.warning(f"添加观察期标记失败: {e}")
 
         # 设置图表布局
         fig.update_layout(

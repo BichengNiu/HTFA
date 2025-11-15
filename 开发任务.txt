@@ -1,13 +1,6 @@
 
 短期：
-
-
-
-1.所有变量进行趋势检测，如果存在显著趋势则进行去趋势操作
-
-
 5. 重构model_training_page
-6. 验证期外还有观察期，训练期和验证期训练模型
 
 
 长期：
@@ -15,9 +8,3 @@
 2. 经济数据库相同数据源和频率的数据放在一个sheet中
 3. 恢复和重构分析工具模块
 
-setx ANTHROPIC_AUTH_TOKEN "sk-97kf2OjzjP5kAQagm9F2qX7mGN2dg9Tw3QpnDD4OBnJQsjkk"
-setx ANTHROPIC_BASE_URL "https://cc.zhihuiapi.top/"
-
-
-1. 频率识别不用基于sheet的名称推断，指标的频率直接从映射数据表的“频率”列读取
-2. 对齐目标变量中，如果发布日期是周六或周日，仍然要对齐到本周五（days_to_friday = -1 或 -2），这个原则也适用于旬日对齐

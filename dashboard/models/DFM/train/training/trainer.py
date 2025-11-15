@@ -254,6 +254,32 @@ class DFMTrainer:
                     )
                     model_result.forecast_oos_original = forecast_oos_original.values
 
+                # 还原观察期预测（2025-11-15新增）
+                if model_result.forecast_observation is not None:
+                    val_end_date = pd.to_datetime(self.config.validation_end)
+                    data_end_date = data.index.max()
+
+                    if data_end_date > val_end_date:
+                        # 获取观察期日期范围（validation_end之后到数据结束）
+                        observation_dates = data.loc[val_end_date + pd.Timedelta(days=1):data_end_date].index
+
+                        if len(observation_dates) == len(model_result.forecast_observation):
+                            forecast_observation_residual = pd.Series(
+                                model_result.forecast_observation,
+                                index=observation_dates
+                            )
+                            forecast_observation_original = detrend_handler.inverse_transform(
+                                forecast_observation_residual,
+                                self.config.target_variable
+                            )
+                            model_result.forecast_observation_original = forecast_observation_original.values
+
+                            logger.info(f"观察期预测值已还原: {len(forecast_observation_original)} 个数据点，范围 {observation_dates.min()} 到 {observation_dates.max()}")
+                        else:
+                            logger.warning(f"观察期日期数量不匹配: observation_dates={len(observation_dates)}, forecast_observation={len(model_result.forecast_observation)}")
+                    else:
+                        logger.debug("数据结束日期未超出validation_end，无需还原观察期数据")
+
                 # 计算原始值空间的评估指标
                 from dashboard.models.DFM.train.evaluation.metrics import (
                     calculate_next_month_rmse,
@@ -291,6 +317,25 @@ class DFMTrainer:
                     metrics.oos_hit_rate_original = calculate_next_month_hit_rate(forecast_oos_series, target_oos)
 
                     logger.debug(f"OOS原始值指标: RMSE={metrics.oos_rmse_original:.4f}, MAE={metrics.oos_mae_original:.4f}, Hit Rate={metrics.oos_hit_rate_original:.2f}%")
+
+                # 计算观察期指标（2025-11-15新增）
+                if model_result.forecast_observation_original is not None:
+                    val_end_date = pd.to_datetime(self.config.validation_end)
+                    data_end_date = data.index.max()
+
+                    if data_end_date > val_end_date:
+                        observation_dates = data.loc[val_end_date + pd.Timedelta(days=1):data_end_date].index
+                        forecast_obs_series = pd.Series(model_result.forecast_observation_original, index=observation_dates)
+                        target_obs = target_original_series.loc[val_end_date + pd.Timedelta(days=1):data_end_date]
+
+                        if len(target_obs) > 0:
+                            metrics.obs_rmse_original = calculate_next_month_rmse(forecast_obs_series, target_obs)
+                            metrics.obs_mae_original = calculate_next_month_mae(forecast_obs_series, target_obs)
+                            metrics.obs_hit_rate_original = calculate_next_month_hit_rate(forecast_obs_series, target_obs)
+
+                            logger.info(f"观察期评估指标计算完成: RMSE={metrics.obs_rmse_original:.4f}, MAE={metrics.obs_mae_original:.4f}, 胜率={metrics.obs_hit_rate_original:.2f}%")
+                        else:
+                            logger.warning("观察期没有目标变量真实值，无法计算评估指标")
 
                 if progress_callback:
                     progress_callback("预测值已还原到原始水平，并计算原始值空间评估指标")

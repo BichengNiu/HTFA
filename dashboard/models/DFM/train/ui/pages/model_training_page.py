@@ -454,90 +454,9 @@ def render_dfm_model_training_page(st_instance):
     debug_log(f"UI状态检查 - 强制刷新标志: {force_ui_refresh}", "DEBUG")
     debug_log(f"UI状态检查 - 训练刚完成标志: {training_just_completed}", "DEBUG")
 
-    if force_ui_refresh or training_just_completed:
-        # 防止连续刷新的保护机制
-        last_forced_refresh = get_dfm_state('last_forced_refresh_time', 0)
-        import time
-        current_time = time.time()
-        
-        # 至少间隔3秒才允许强制刷新
-        if current_time - last_forced_refresh > 3:
-            print("[HOT] [UI更新] 检测到强制刷新标志，清除标志并刷新UI")
-            set_dfm_state('last_forced_refresh_time', current_time)
-
-            # 清除刷新标志
-            set_dfm_state('ui_refresh_needed', False)
-            if training_completion_timestamp:
-                set_dfm_state('last_processed_completion_timestamp', training_completion_timestamp)
-
-            if training_status == '训练完成':
-                set_dfm_state('training_completed_refreshed', True)
-
-            # 保持当前导航状态，避免跳转
-            if 'navigation.selected_sub_module' in st.session_state:
-                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
-            if 'navigation.selected_detail_module' in st.session_state:
-                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
-
-            st_instance.rerun()
-        else:
-            print(f"[HOT] [UI更新] 强制刷新被跳过，距离上次刷新仅 {current_time - last_forced_refresh:.1f} 秒")
-
-    elif training_status == '正在训练...':
-        # 检查是否需要定期刷新以显示训练进度
-        import time
-        current_time = time.time()
-        last_refresh_time = get_dfm_state('last_training_refresh_time', 0)
-        
-        # 增加防止循环的检查：只在真正需要时刷新，并增加最小间隔
-        min_refresh_interval = 10  # 增加到10秒，减少刷新频率
-        refresh_count = get_dfm_state('training_refresh_count', 0)
-        max_refresh_count = 10  # 最大刷新次数限制
-        
-        if (current_time - last_refresh_time > min_refresh_interval and
-            refresh_count < max_refresh_count):
-            set_dfm_state('last_training_refresh_time', current_time)
-            set_dfm_state('training_refresh_count', refresh_count + 1)
-            print(f"[HOT] [定期检查] 训练中，刷新UI以显示最新状态 (第{refresh_count + 1}次)")
-
-            # 保持当前导航状态，避免跳转
-            if 'navigation.selected_sub_module' in st.session_state:
-                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
-            if 'navigation.selected_detail_module' in st.session_state:
-                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
-
-            st_instance.rerun()
-
-    elif training_status == '训练完成':
-        training_completed_refreshed = get_dfm_state('training_completed_refreshed')
-        print(f"[HOT] [备用检查] 训练完成状态检查 - 已刷新标志: {training_completed_refreshed}")
-
-        if training_completed_refreshed is None:
-            print("[HOT] [备用检查] 检测到训练完成但未刷新，执行备用刷新")
-            set_dfm_state('training_completed_refreshed', True)
-
-            # 清除刷新计数器，防止后续循环
-            set_dfm_state('training_refresh_count', 0)
-            set_dfm_state('last_training_refresh_time', 0)
-
-            try:
-                st_instance.cache_resource.clear()
-                print("[HOT] [缓存清除] Streamlit资源缓存已清除")
-            except Exception as e:
-                print(f"[HOT] [缓存清除] 清除Streamlit缓存失败: {e}")
-
-            # 保持当前导航状态，避免跳转
-            if 'navigation.selected_sub_module' in st.session_state:
-                st.session_state['navigation.temp_selected_sub_module'] = st.session_state['navigation.selected_sub_module']
-            if 'navigation.selected_detail_module' in st.session_state:
-                st.session_state['navigation.temp_selected_detail_module'] = st.session_state['navigation.selected_detail_module']
-
-            debug_training_state("备用检查触发UI刷新", show_in_ui=True)
-            st_instance.rerun()
-        else:
-            print("[HOT] [备用检查] 训练完成状态已处理，继续显示结果")
-            # 确保刷新计数器已清除
-            set_dfm_state('training_refresh_count', 0)
+    # 删除强制刷新逻辑：训练是同步的，完成后自然显示结果，无需强制刷新UI
+    # 删除训练中刷新逻辑：训练同步执行时页面不会重新渲染，该逻辑永远不会触发
+    # 删除备用检查逻辑：同步训练完成后自然显示结果，无需备用刷新检查
 
     # 使用组件化的文件上传器
     state_manager = StateManager('train_model')
@@ -1067,23 +986,6 @@ def render_dfm_model_training_page(st_instance):
 
         # 后向剔除基于性能比较（HR和RMSE），不使用统计显著性阈值
 
-        # 最大迭代次数
-        if CONFIG_AVAILABLE:
-            default_max_iter = TrainDefaults.EM_MAX_ITER
-        else:
-            default_max_iter = 30
-
-        max_iter_value = st_instance.number_input(
-            "最大迭代次数",
-            min_value=10,
-            max_value=1000,
-            value=get_dfm_state('dfm_max_iter', default_max_iter),
-            step=10,
-            key='dfm_max_iter_input',
-            help="EM算法的最大迭代次数"
-        )
-        set_dfm_state('dfm_max_iter', max_iter_value)
-
     with col3_factor_specific:
         # 因子选择策略
         if CONFIG_AVAILABLE:
@@ -1362,8 +1264,6 @@ def render_dfm_model_training_page(st_instance):
         st_instance.text(f"   - 第一阶段预测指标: {len(current_selected_indicators)}")
         st_instance.text(f"   - 第二阶段额外指标: {second_stage_extra_count}")
 
-    st_instance.markdown("---")
-
     # 日期验证
     training_start_value = get_dfm_state('dfm_training_start_date')
     validation_start_value = get_dfm_state('dfm_validation_start_date')
@@ -1378,7 +1278,7 @@ def render_dfm_model_training_page(st_instance):
             st_instance.error("[ERROR] 验证期开始日期必须早于验证期结束日期")
             date_validation_passed = False
         else:
-            st_instance.success("[SUCCESS] 日期设置验证通过")
+            pass
     else:
         st_instance.warning("[WARNING] 请设置完整的日期范围")
         date_validation_passed = False
@@ -1394,16 +1294,12 @@ def render_dfm_model_training_page(st_instance):
     if not training_ready:
         st_instance.warning("[WARNING] 训练条件未满足，请检查上述设置")
 
-    # 训练按钮
-    col_train_btn, col_reset_btn = st_instance.columns([1, 1])
-
-    with col_train_btn:
-        # 开始训练按钮
-        if training_ready:
-            if st_instance.button("[START] 开始训练",
-                                key="dfm_start_training",
-                                help="开始DFM模型训练",
-                                use_container_width=True):
+    # 开始训练按钮
+    if training_ready:
+        if st_instance.button("开始训练",
+                            key="dfm_start_training",
+                            help="开始DFM模型训练",
+                            type="primary"):
 
 
                 current_status = get_dfm_state('dfm_training_status', '等待开始')
@@ -1462,8 +1358,6 @@ def render_dfm_model_training_page(st_instance):
                             st_instance.error("固定因子数未设置，请先在'模型配置'中设置因子数")
                             print("[ERROR] 固定因子数未设置")
                             return
-
-                        st.info(f"使用固定因子数策略，因子数：{k_factors}")
 
                     elif factor_strategy == 'cumulative_variance':
                         factor_selection_method = 'cumulative'
@@ -1607,7 +1501,6 @@ def render_dfm_model_training_page(st_instance):
 
                         # 模型参数
                         k_factors=k_factors,
-                        max_iterations=get_dfm_state('dfm_max_iter') or 30,  # 允许30作为合理默认值
                         max_lags=get_dfm_state('dfm_factor_ar_order') or 1,  # 允许1作为合理默认值
                         tolerance=1e-6,
 
@@ -1667,7 +1560,6 @@ def render_dfm_model_training_page(st_instance):
 
                     # 根据估计方法选择训练器并训练（同步执行）
                     if estimation_method == 'single_stage':
-                        st_instance.info("[LOADING] 正在训练模型（一次估计法），请稍候...")
                         trainer = DFMTrainer(training_config)
                         result = trainer.train(
                             progress_callback=progress_callback,
@@ -1745,7 +1637,7 @@ def render_dfm_model_training_page(st_instance):
                         training_log.append(f"[STAGE1] 成功训练 {len(result.first_stage_results)} 个行业模型")
                         training_log.append(f"[STAGE2] 总量模型训练完成")
                     else:
-                        training_log.append(f"[SUCCESS] 训练完成！耗时: {training_time_display:.2f}秒")
+                        pass
 
                     training_log.append(f"[RESULT] 选中变量数: {len(selected_variables)}")
                     training_log.append(f"[RESULT] 因子数: {k_factors_display}")
@@ -1770,7 +1662,7 @@ def render_dfm_model_training_page(st_instance):
                         pass
 
                     st_instance.success("[SUCCESS] 训练完成！")
-                    st_instance.rerun()
+                    # 删除rerun：训练是同步的，完成后自然显示结果，无需刷新
 
                 except Exception as e:
                     import traceback
@@ -1779,50 +1671,24 @@ def render_dfm_model_training_page(st_instance):
                     set_dfm_state('dfm_training_status', f'训练失败: {str(e)}')
                     set_dfm_state('dfm_training_error', error_msg)
                     st_instance.error(f"[ERROR] {error_msg}")
-        else:
-            st_instance.button("[START] 开始训练",
-                             disabled=True,
-                             key="dfm_start_training_disabled",
-                             help="请先满足所有训练条件",
-                             use_container_width=True)
+    else:
+        st_instance.button("开始训练",
+                         disabled=True,
+                         key="dfm_start_training_disabled",
+                         help="请先满足所有训练条件",
+                         type="primary")
 
-    with col_reset_btn:
-        # 重置训练按钮
-        if st_instance.button("[LOADING] 重置训练",
-                            key="dfm_reset_training_state",
-                            help="重置所有训练状态",
-                            use_container_width=True):
-            set_dfm_state('dfm_force_reset_training_state', True)
-            _reset_training_state()
+    st_instance.markdown("---")
 
-    # 训练日志和结果显示（左右布局）
-    col_log_left, col_result_right = st_instance.columns([2, 1])
+    # 训练日志
+    st_instance.markdown("**训练日志**")
 
-    with col_log_left:
-        st_instance.markdown("**训练日志**")
+    training_log = get_dfm_state('dfm_training_log', [])
+    current_training_status = get_dfm_state('dfm_training_status', '等待开始')
 
-        training_log = get_dfm_state('dfm_training_log', [])
-        current_training_status = get_dfm_state('dfm_training_status', '等待开始')
-
-        if current_training_status == '正在训练...':
-            if training_log:
-                # 显示最近的日志条目
-                log_text = "\n".join(training_log[-20:])  # 只显示最近20条
-                st_instance.text_area(
-                    "训练日志",
-                    value=log_text,
-                    height=300,
-                    key="dfm_training_log_display",
-                    help="显示最近20条训练日志",
-                    label_visibility="hidden"
-                )
-                # 显示训练进度提示
-                st_instance.info("[LOADING] 训练正在进行中，日志实时更新...")
-            else:
-                st_instance.info("[LOADING] 训练正在启动，请稍候...")
-        elif training_log:
-            # 显示最近的日志条目
-            log_text = "\n".join(training_log[-20:])  # 只显示最近20条
+    if current_training_status == '正在训练...':
+        if training_log:
+            log_text = "\n".join(training_log[-20:])
             st_instance.text_area(
                 "训练日志",
                 value=log_text,
@@ -1831,104 +1697,100 @@ def render_dfm_model_training_page(st_instance):
                 help="显示最近20条训练日志",
                 label_visibility="hidden"
             )
+            st_instance.info("[LOADING] 训练正在进行中，日志实时更新...")
         else:
-            st_instance.info("[NONE] 无日志")
+            st_instance.info("[LOADING] 训练正在启动，请稍候...")
+    elif training_log:
+        log_text = "\n".join(training_log[-20:])
+        st_instance.text_area(
+            "训练日志",
+            value=log_text,
+            height=300,
+            key="dfm_training_log_display",
+            help="显示最近20条训练日志",
+            label_visibility="hidden"
+        )
+    else:
+        st_instance.info("[NONE] 无日志")
 
-    with col_result_right:
-        st_instance.markdown("**文件下载**")
+    # 文件下载按钮
+    training_status = get_dfm_state('dfm_training_status') or '等待开始'
+    training_results = get_dfm_state('dfm_model_results_paths')
 
-        training_status = get_dfm_state('dfm_training_status') or '等待开始'
-        training_results = get_dfm_state('dfm_model_results_paths')
-        
-        if not training_results and training_status == '训练完成':
-            # 尝试从session_state获取
-            training_results = st_instance.session_state.get('dfm_model_results_paths')
-            if training_results:
-                debug_log("UI状态检查 - 从session_state获取到训练结果", "DEBUG")
-                # 同步回状态管理器
-                set_dfm_state('dfm_model_results_paths', training_results)
+    if not training_results and training_status == '训练完成':
+        training_results = st_instance.session_state.get('dfm_model_results_paths')
+        if training_results:
+            debug_log("UI状态检查 - 从session_state获取到训练结果", "DEBUG")
+            set_dfm_state('dfm_model_results_paths', training_results)
 
-        from dashboard.core.ui.utils.debug_helpers import debug_log
-        debug_log(f"UI状态检查 - 当前训练状态: {training_status}", "DEBUG")
-        debug_log(f"UI状态检查 - 结果文件数量: {len(training_results) if training_results else 0}", "DEBUG")
+    from dashboard.core.ui.utils.debug_helpers import debug_log
+    debug_log(f"UI状态检查 - 当前训练状态: {training_status}", "DEBUG")
+    debug_log(f"UI状态检查 - 结果文件数量: {len(training_results) if training_results else 0}", "DEBUG")
 
-        if training_status == '正在训练...':
-            st_instance.info("[LOADING] 模型正在训练中，请耐心等待...")
+    if training_status == '训练完成':
+        print(f"[HOT] [UI状态检查] 检测到训练完成状态")
+        debug_training_state("训练完成，显示最终结果", show_in_ui=False)
 
-        elif training_status == '训练完成':
-            print(f"[HOT] [UI状态检查] 检测到训练完成状态")
-            debug_training_state("训练完成，显示最终结果", show_in_ui=False)
+        if training_results:
+            print(f"[HOT] [UI状态检查] 开始处理训练结果，类型: {type(training_results)}")
+            print(f"[HOT] [UI状态检查] 训练结果内容: {training_results}")
 
-            # 显示训练结果文件（如果有）
-            if training_results:
-                print(f"[HOT] [UI状态检查] 开始处理训练结果，类型: {type(training_results)}")
-                print(f"[HOT] [UI状态检查] 训练结果内容: {training_results}")
+            if isinstance(training_results, dict) and training_results:
+                print(f"[HOT] [UI状态检查] 处理字典格式结果，包含 {len(training_results)} 个条目")
 
-                if isinstance(training_results, dict) and training_results:
-                    print(f"[HOT] [UI状态检查] 处理字典格式结果，包含 {len(training_results)} 个条目")
+                target_files = ['final_model_joblib', 'metadata']
+                available_files = []
 
-                    # 只处理joblib和pkl(metadata)文件
-                    target_files = ['final_model_joblib', 'metadata']
-                    available_files = []
-
-                    for file_key in target_files:
-                        file_path = training_results.get(file_key)
-                        if file_path and os.path.exists(file_path):
-                            file_name = os.path.basename(file_path)
-                            available_files.append((file_key, file_path, file_name))
-                            print(f"[HOT] [UI状态检查] 文件存在: {file_name}")
-                        else:
-                            print(f"[HOT] [UI状态检查] 文件不存在或路径为空: {file_key}")
-
-                    if available_files:
-                        # 创建两列布局，将下载按钮放在同一排
-                        download_col1, download_col2 = st_instance.columns(2)
-
-                        # 为每个文件创建下载按钮
-                        for idx, (file_key, file_path, file_name) in enumerate(available_files):
-                            try:
-                                # 读取文件数据
-                                with open(file_path, 'rb') as f:
-                                    file_data = f.read()
-
-                                # 确定显示名称
-                                if file_key == 'final_model_joblib':
-                                    display_name = "模型文件 (joblib)"
-                                    col = download_col1
-                                elif file_key == 'metadata':
-                                    display_name = "元数据文件 (pkl)"
-                                    col = download_col2
-                                else:
-                                    display_name = file_name
-                                    col = download_col1 if idx % 2 == 0 else download_col2
-
-                                # 在对应列中创建下载按钮（使用primary样式）
-                                with col:
-                                    st_instance.download_button(
-                                        label=display_name,
-                                        data=file_data,
-                                        file_name=file_name,
-                                        mime="application/octet-stream",
-                                        key=f"dfm_download_{file_key}",
-                                        type="primary",
-                                        use_container_width=True
-                                    )
-
-                            except Exception as e:
-                                st_instance.warning(f"[WARNING] {file_name} 文件读取失败: {e}")
+                for file_key in target_files:
+                    file_path = training_results.get(file_key)
+                    if file_path and os.path.exists(file_path):
+                        file_name = os.path.basename(file_path)
+                        available_files.append((file_key, file_path, file_name))
+                        print(f"[HOT] [UI状态检查] 文件存在: {file_name}")
                     else:
-                        st_instance.warning("[WARNING] 未找到可用的结果文件")
+                        print(f"[HOT] [UI状态检查] 文件不存在或路径为空: {file_key}")
+
+                if available_files:
+                    download_col1, download_col2, _ = st_instance.columns([1, 1, 8])
+
+                    for idx, (file_key, file_path, file_name) in enumerate(available_files):
+                        try:
+                            with open(file_path, 'rb') as f:
+                                file_data = f.read()
+
+                            if file_key == 'final_model_joblib':
+                                display_name = "模型文件"
+                                col = download_col1
+                            elif file_key == 'metadata':
+                                display_name = "元数据文件"
+                                col = download_col2
+                            else:
+                                display_name = file_name
+                                col = download_col1 if idx % 2 == 0 else download_col2
+
+                            with col:
+                                st_instance.download_button(
+                                    label=display_name,
+                                    data=file_data,
+                                    file_name=file_name,
+                                    mime="application/octet-stream",
+                                    key=f"dfm_download_{file_key}",
+                                    type="primary"
+                                )
+
+                        except Exception as e:
+                            st_instance.warning(f"[WARNING] {file_name} 文件读取失败: {e}")
                 else:
-                    st_instance.warning("[WARNING] 训练完成但未找到结果文件")
+                    st_instance.warning("[WARNING] 未找到可用的结果文件")
+            else:
+                st_instance.warning("[WARNING] 训练完成但未找到结果文件")
 
-        elif training_status.startswith('训练失败'):
-            training_error = get_dfm_state('dfm_training_error')
-            st_instance.error(f"[ERROR] {training_status}")
-            if training_error:
-                st_instance.error(f"错误详情: {training_error}")
+    elif training_status.startswith('训练失败'):
+        training_error = get_dfm_state('dfm_training_error')
+        st_instance.error(f"[ERROR] {training_status}")
+        if training_error:
+            st_instance.error(f"错误详情: {training_error}")
 
-        elif training_status == '等待开始':
-            st_instance.info("[NONE] 无结果")
 
 def _get_file_size(file_path: str) -> str:
     """获取文件大小的可读格式"""

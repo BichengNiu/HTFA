@@ -35,7 +35,7 @@ class TrainingConfig:
 
     # 模型参数
     k_factors: int = 4
-    max_iterations: int = 30
+    max_iterations: int = 100  # 最大迭代次数上限（通常会提前收敛）
     max_lags: int = 1
     tolerance: float = 1e-6
 
@@ -96,8 +96,10 @@ class TrainingConfig:
         # 验证模型参数
         if self.k_factors <= 0:
             raise ValueError(f"k_factors必须为正数,当前值: {self.k_factors}")
-        if self.max_iterations <= 0:
-            raise ValueError(f"max_iterations必须为正数,当前值: {self.max_iterations}")
+        if self.max_iterations < 10:
+            raise ValueError(f"max_iterations必须>=10，当前值: {self.max_iterations}")
+        if self.max_iterations > 1000:
+            raise ValueError(f"max_iterations不应超过1000，当前值: {self.max_iterations}")
         if self.max_lags < 1:
             raise ValueError(f"max_lags必须>=1,当前值: {self.max_lags}")
 

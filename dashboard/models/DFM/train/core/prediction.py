@@ -155,6 +155,39 @@ def generate_target_forecast(
         model_result.forecast_is = forecast_is
         model_result.forecast_oos = forecast_oos if forecast_oos is not None and len(forecast_oos) > 0 else None
 
+        # 步骤9: 生成观察期数据（validation_end之后到数据实际结束日期，2025-11-15新增）
+        data_end_date = target_data.index.max()
+        logger.debug(f"数据实际结束日期: {data_end_date}, validation_end: {val_end_date}")
+
+        if data_end_date > val_end_date:
+            # 提取观察期数据范围
+            observation_data_filtered = target_data[val_end_date + pd.Timedelta(days=1):data_end_date]
+
+            if len(observation_data_filtered) > 0:
+                observation_start_idx = target_data.index.get_loc(observation_data_filtered.index[0])
+                observation_end_idx = target_data.index.get_loc(observation_data_filtered.index[-1])
+
+                # 检查forecast_full是否包含观察期范围
+                if observation_end_idx < len(forecast_full):
+                    # 提取观察期预测值（标准化尺度）
+                    # 注意：原始值空间的转换（去趋势还原）在trainer.py中进行
+                    forecast_observation_standardized = forecast_standardized[observation_start_idx:observation_end_idx + 1]
+                    model_result.forecast_observation = forecast_observation_standardized
+
+                    logger.info(f"观察期数据生成完成: 从 {observation_data_filtered.index[0]} 到 {observation_data_filtered.index[-1]}, 共 {len(forecast_observation_standardized)} 个点（标准化空间）")
+                else:
+                    logger.warning(f"观察期索引超出forecast_full范围: observation_end_idx={observation_end_idx}, len(forecast_full)={len(forecast_full)}")
+                    model_result.forecast_observation_original = None
+                    model_result.forecast_observation = None
+            else:
+                logger.debug("validation_end之后没有数据点，不生成观察期数据")
+                model_result.forecast_observation_original = None
+                model_result.forecast_observation = None
+        else:
+            logger.debug("数据结束日期未超出validation_end，不生成观察期数据")
+            model_result.forecast_observation_original = None
+            model_result.forecast_observation = None
+
     except Exception as e:
         logger.error(f"生成目标变量预测时出错: {e}")
         import traceback

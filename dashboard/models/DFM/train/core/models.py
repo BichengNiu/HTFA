@@ -33,6 +33,11 @@ class EvaluationMetrics:
     is_hit_rate_original: Optional[float] = None
     oos_hit_rate_original: Optional[float] = None
 
+    # 观察期评估指标（2025-11-15新增）
+    obs_rmse_original: Optional[float] = None
+    obs_mae_original: Optional[float] = None
+    obs_hit_rate_original: Optional[float] = None
+
 
 @dataclass
 class MetricsResult:
@@ -79,6 +84,10 @@ class DFMModelResult:
     # 原始值空间预测（2025-11-14新增）
     forecast_is_original: Optional[np.ndarray] = None  # 样本内预测（原始值）
     forecast_oos_original: Optional[np.ndarray] = None  # 样本外预测（原始值）
+
+    # 观察期数据（validation_end之后，2025-11-15新增）
+    forecast_observation: Optional[np.ndarray] = None  # 观察期数据（残差空间）
+    forecast_observation_original: Optional[np.ndarray] = None  # 观察期数据（原始值）
 
     # 训练信息
     converged: bool = False
