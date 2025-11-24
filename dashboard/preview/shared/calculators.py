@@ -157,9 +157,9 @@ def _calculate_reference_values(
         }
 
     elif frequency == 'ten_day':
-        last_ten_day_date = current_date - pd.Timedelta(days=10)
+        # 智能查找上旬值：根据当前日期所在旬，查找前一旬范围内的最新数据
         return {
-            '上旬值': _get_value_at_date(df, series.name, last_ten_day_date)
+            '上旬值': _find_previous_ten_day_value(series, current_date)
         }
 
     elif frequency == 'yearly':
@@ -245,6 +245,63 @@ def _calculate_growth_rates(
 
 
 # 辅助函数
+
+
+def _find_previous_ten_day_value(series: pd.Series, current_date: pd.Timestamp) -> Any:
+    """智能查找上旬值
+
+    根据当前日期所在旬，查找前一旬范围内的最新数据点
+    - 第三旬(21-31日) -> 查找当月11-20日范围内的最新数据
+    - 第二旬(11-20日) -> 查找当月1-10日范围内的最新数据
+    - 第一旬(1-10日) -> 查找上月21日-月末范围内的最新数据
+
+    Args:
+        series: 数据序列
+        current_date: 当前日期
+
+    Returns:
+        上旬值，如果找不到则返回np.nan
+    """
+    day = current_date.day
+    year = current_date.year
+    month = current_date.month
+
+    if day > 20:
+        # 第三旬：查找当月11-20日
+        start_date = pd.Timestamp(year=year, month=month, day=11)
+        end_date = pd.Timestamp(year=year, month=month, day=20)
+    elif day > 10:
+        # 第二旬：查找当月1-10日
+        start_date = pd.Timestamp(year=year, month=month, day=1)
+        end_date = pd.Timestamp(year=year, month=month, day=10)
+    else:
+        # 第一旬：查找上月21日-月末
+        if month == 1:
+            prev_year = year - 1
+            prev_month = 12
+        else:
+            prev_year = year
+            prev_month = month - 1
+
+        # 计算上月的最后一天
+        if prev_month in [1, 3, 5, 7, 8, 10, 12]:
+            last_day = 31
+        elif prev_month in [4, 6, 9, 11]:
+            last_day = 30
+        else:  # 2月
+            if (prev_year % 4 == 0 and prev_year % 100 != 0) or (prev_year % 400 == 0):
+                last_day = 29
+            else:
+                last_day = 28
+
+        start_date = pd.Timestamp(year=prev_year, month=prev_month, day=21)
+        end_date = pd.Timestamp(year=prev_year, month=prev_month, day=last_day)
+
+    # 在指定范围内查找最新数据
+    mask = (series.index >= start_date) & (series.index <= end_date)
+    data = series[mask]
+
+    return data.iloc[-1] if not data.empty else np.nan
 
 
 def _get_value_at_date(df: pd.DataFrame, indicator: str, date: pd.Timestamp) -> Any:

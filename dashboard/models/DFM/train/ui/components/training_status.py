@@ -600,17 +600,9 @@ class TrainingStatusComponent(DFMComponent):
         params['enable_variable_selection'] = training_config.get('enable_variable_selection', False)
 
         try:
-            # 从统一状态管理器获取变量类型映射
-            # 先尝试从train_model模块获取，如果没有则从data_prep模块获取
+            # 仅从train_model模块获取变量类型映射（完全解耦）
             var_type_map = self._get_state('dfm_var_type_map_obj', None)
-            if var_type_map is None:
-                # 尝试从data_prep模块获取
-                    var_type_map = st.session_state.get('data_prep.dfm_var_type_map_obj', None)
-                    if var_type_map is not None:
-                        # 将数据复制到train_model模块，方便后续使用
-                        st.session_state['train_model.dfm_var_type_map_obj'] = var_type_map
-                        logger.info("从data_prep模块成功获取类型映射数据并复制到train_model模块")
-            
+
             if var_type_map and isinstance(var_type_map, dict):
                 params['var_type_map'] = var_type_map
                 logger.info(f"成功获取变量类型映射，包含 {len(var_type_map)} 个变量")
@@ -618,17 +610,9 @@ class TrainingStatusComponent(DFMComponent):
                 logger.info("变量类型映射未配置（可选功能，不影响模型训练）")
                 params['var_type_map'] = {}
 
-            # 从统一状态管理器获取变量行业映射
-            # 先尝试从train_model模块获取，如果没有则从data_prep模块获取
+            # 仅从train_model模块获取变量行业映射（完全解耦）
             var_industry_map = self._get_state('dfm_industry_map_obj', None)
-            if var_industry_map is None:
-                # 尝试从data_prep模块获取
-                    var_industry_map = st.session_state.get('data_prep.dfm_industry_map_obj', None)
-                    if var_industry_map is not None:
-                        # 将数据复制到train_model模块，方便后续使用
-                        st.session_state['train_model.dfm_industry_map_obj'] = var_industry_map
-                        logger.info("从data_prep模块成功获取行业映射数据并复制到train_model模块")
-            
+
             if var_industry_map and isinstance(var_industry_map, dict):
                 params['var_industry_map'] = var_industry_map
                 logger.info(f"成功获取变量行业映射，包含 {len(var_industry_map)} 个变量")

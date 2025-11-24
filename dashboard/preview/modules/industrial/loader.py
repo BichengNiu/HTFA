@@ -91,79 +91,36 @@ def standardize_timestamps(df_input: pd.DataFrame, data_type: str) -> pd.DataFra
     if df_input.empty or not isinstance(df_input.index, pd.DatetimeIndex):
         return df_input
 
-    # 仅对需要处理的频率进行操作
-    if data_type not in ["weekly", "ten_day"]:
+    # 仅对周度数据进行时间戳标准化，旬度数据保留原始时间戳
+    if data_type != "weekly":
         return df_input
 
-    # 延迟copy：只在确定需要修改时才copy
+    # 周度数据：将所有时间戳统一到当周的周五（向量化操作）
+    logger.debug("统一周度数据时间戳到周五")
     dates = df_input.index
 
-    if data_type == "weekly":
-        # 将所有时间戳统一到当周的周五（向量化操作）
-        logger.debug("统一周度数据时间戳到周五")
+    # 使用向量化操作计算周五日期
+    weekdays = dates.weekday  # 0=Monday, ..., 6=Sunday
 
-        # 使用向量化操作计算周五日期
-        weekdays = dates.weekday  # 0=Monday, ..., 6=Sunday
+    # 计算到周五的天数（向量化）
+    # 修正逻辑：周六、周日应该回到上周五，而不是下周五
+    days_to_friday = np.where(
+        weekdays <= 4,  # Monday to Friday
+        4 - weekdays,   # 到当周周五的天数
+        -(weekdays - 4)  # 周六、周日向前偏移到上周五
+    )
 
-        # 计算到周五的天数（向量化）
-        # 修正逻辑：周六、周日应该回到上周五，而不是下周五
-        days_to_friday = np.where(
-            weekdays <= 4,  # Monday to Friday
-            4 - weekdays,   # 到当周周五的天数
-            -(weekdays - 4)  # 周六、周日向前偏移到上周五
-        )
+    # 使用向量化操作计算新索引
+    new_index = dates + pd.to_timedelta(days_to_friday, unit='D')
 
-        # 使用向量化操作计算新索引
-        new_index = dates + pd.to_timedelta(days_to_friday, unit='D')
+    df_result = df_input.copy()
+    df_result.index = new_index
 
-        # 只在确实需要修改时才copy
-        df_result = df_input.copy()
-        df_result.index = new_index
+    logger.debug(f"周度数据时间戳统一完成，数据范围: {df_result.index.min().strftime('%Y-%m-%d')} 至 {df_result.index.max().strftime('%Y-%m-%d')}")
+    if not df_result.index.is_unique:
+        logger.debug(f"时间戳统一后存在 {df_result.index.duplicated().sum()} 个重复时间戳，将在借调后处理")
 
-        logger.debug(f"周度数据时间戳统一完成，数据范围: {df_result.index.min().strftime('%Y-%m-%d')} 至 {df_result.index.max().strftime('%Y-%m-%d')}")
-        if not df_result.index.is_unique:
-            logger.debug(f"时间戳统一后存在 {df_result.index.duplicated().sum()} 个重复时间戳，将在借调后处理")
-
-    elif data_type == "ten_day":
-        # 将时间戳统一到每月的10日、20日、30日(月末)（向量化操作）
-        logger.debug("统一旬度数据时间戳到旬日")
-
-        # 提取年、月、日（向量化）
-        years = dates.year
-        months = dates.month
-        days = dates.day
-
-        # 使用向量化操作确定目标日期
-        # 创建条件掩码
-        mask_first_ten = days <= 10
-        mask_second_ten = (days > 10) & (days <= 20)
-        mask_third_ten = days > 20
-
-        # 计算月末日期（向量化）
-        month_ends = (dates + pd.offsets.MonthEnd(0)).day
-
-        # 根据条件确定目标日期
-        target_days = np.where(
-            mask_first_ten, 10,
-            np.where(mask_second_ten, 20, month_ends)
-        )
-
-        # 构造新的时间戳（向量化）
-        new_index = pd.to_datetime({
-            'year': years,
-            'month': months,
-            'day': target_days
-        })
-
-        # 只在确实需要修改时才copy
-        df_result = df_input.copy()
-        df_result.index = new_index
-
-        logger.debug(f"旬度数据时间戳统一完成，数据范围: {df_result.index.min().strftime('%Y-%m-%d')} 至 {df_result.index.max().strftime('%Y-%m-%d')}")
-        if not df_result.index.is_unique:
-            logger.debug(f"时间戳统一后存在 {df_result.index.duplicated().sum()} 个重复时间戳，将在借调后处理")
-
-    # 重新排序（使用inplace=True减少内存分配）
+    # 重新排序
     df_result.sort_index(inplace=True)
 
     return df_result

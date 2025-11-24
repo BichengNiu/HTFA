@@ -7,15 +7,10 @@ DTW分析组件
 import streamlit as st
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
+import plotly.graph_objects as go
 import logging
 import io
 from typing import List, Dict, Any, Optional, Tuple
-
-# 配置matplotlib中文字体
-matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans', 'Arial Unicode MS', 'sans-serif']
-matplotlib.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 
 from dashboard.explore.ui.base import TimeSeriesAnalysisComponent
 from dashboard.explore import perform_batch_dtw_calculation
@@ -530,7 +525,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
     def render_comparison_selection_and_plot(self, st_obj, data: pd.DataFrame, results: list, target_series: str, comparison_series: list, data_name: str):
         """
         渲染比较序列选择和DTW对比图
-        
+
         Args:
             st_obj: Streamlit对象
             data: 原始数据
@@ -541,7 +536,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         """
         if not results or not comparison_series:
             return
-            
+
         st_obj.markdown("---")
         st_obj.markdown("#### DTW对比图")
         
@@ -556,7 +551,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 dtw_distance = result.get('DTW距离')
                 if var_name and dtw_distance != 'Error' and isinstance(dtw_distance, (int, float)):
                     valid_comparison_series.append(var_name)
-            
+
             if valid_comparison_series:
                 selected_comparison = st_obj.selectbox(
                     "选择比较序列:",
@@ -653,42 +648,159 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             s1_data = path_data.get('target_np')
             s2_data = path_data.get('compare_np')
             path = path_data.get('path', [])
+            target_time_index = path_data.get('target_index')
+            compare_time_index = path_data.get('compare_index')
 
             if s1_data is not None and s2_data is not None and path:
-                st_obj.markdown(f"**{target_series} vs {selected_comparison} DTW对齐路径图:**")
                 # 显示当前使用的参数设置
                 constraint_info = "启用" if enable_constraint else "禁用"
                 radius_info = f"Radius={radius}" if enable_constraint else "无限制"
                 st_obj.caption(f"当前参数: 窗口约束={constraint_info}, {radius_info}")
-                self.plot_dtw_path(st_obj, s1_data, s2_data, path, target_series, selected_comparison)
+
+                # 使用DTW计算时实际使用的时间索引
+                self.plot_dtw_path(st_obj, s1_data, s2_data, path, target_series, selected_comparison,
+                                 target_time_index, compare_time_index)
             else:
+                warning_msg = f"路径数据不完整 - s1_data存在: {s1_data is not None}, s2_data存在: {s2_data is not None}, path长度: {len(path) if path else 0}"
+                logger.warning(f"[DTW图表] {warning_msg}")
                 st_obj.warning(f"无法获取 {selected_comparison} 的DTW路径数据")
         else:
+            logger.warning(f"[DTW图表] 在paths_dict中未找到 {selected_comparison}")
             st_obj.warning(f"无法找到 {selected_comparison} 的DTW计算结果")
 
-    def plot_dtw_path(self, st_obj, s1_np, s2_np, path, s1_name, s2_name):
-        """绘制DTW路径图"""
-        logger.info(f"[DTW绘图] {s1_name} 长度={len(s1_np)}, {s2_name} 长度={len(s2_np)}, 路径长度={len(path)}")
+    def plot_dtw_path(self, st_obj, s1_np, s2_np, path, s1_name, s2_name, s1_time_index=None, s2_time_index=None):
+        """绘制DTW路径图（使用Plotly）
 
-        fig, ax = plt.subplots(figsize=(10, 5))
+        Args:
+            st_obj: Streamlit对象
+            s1_np: 目标序列数据
+            s2_np: 比较序列数据
+            path: DTW对齐路径
+            s1_name: 目标序列名称
+            s2_name: 比较序列名称
+            s1_time_index: 目标序列的时间索引（pd.Index或None）
+            s2_time_index: 比较序列的时间索引（pd.Index或None）
+        """
+        try:
+            # 创建Plotly图表
+            fig = go.Figure()
 
-        ax.plot(np.arange(len(s1_np)), s1_np, "o-", label=s1_name, markersize=4, linewidth=1.5)
-        ax.plot(np.arange(len(s2_np)), s2_np, "s-", label=s2_name, markersize=4, linewidth=1.5)
+            # 创建X轴索引（使用真实时间或数字索引）
+            # 优先使用传入的时间索引
+            if s1_time_index is not None and len(s1_time_index) == len(s1_np):
+                # 将月末日期转换为月初日期，解决hover时间与x轴刻度不对齐问题
+                if hasattr(s1_time_index, 'to_period'):
+                    # pandas DatetimeIndex: 转换为月初
+                    s1_x = s1_time_index.to_period('M').to_timestamp()
+                else:
+                    s1_x = s1_time_index
+                use_time_axis = True
+            else:
+                s1_x = np.arange(len(s1_np))
+                use_time_axis = False
 
-        for idx1, idx2 in path:
-            if idx1 < len(s1_np) and idx2 < len(s2_np):
-                ax.plot([idx1, idx2], [s1_np[idx1], s2_np[idx2]],
-                       color='grey', linestyle='--', linewidth=0.8, alpha=0.7)
+            if s2_time_index is not None and len(s2_time_index) == len(s2_np):
+                # 同样转换为月初
+                if hasattr(s2_time_index, 'to_period'):
+                    s2_x = s2_time_index.to_period('M').to_timestamp()
+                else:
+                    s2_x = s2_time_index
+            else:
+                s2_x = np.arange(len(s2_np))
+                use_time_axis = False
 
-        ax.set_xlabel("时间索引")
-        ax.set_ylabel("数值")
-        ax.set_title(f"DTW对齐路径: {s1_name} vs {s2_name}")
-        ax.legend()
-        ax.grid(True, alpha=0.3)
+            # 格式化时间用于hover显示
+            if use_time_axis:
+                s1_hover_times = [t.strftime('%Y-%m') if hasattr(t, 'strftime') else str(t) for t in s1_x]
+                s2_hover_times = [t.strftime('%Y-%m') if hasattr(t, 'strftime') else str(t) for t in s2_x]
+            else:
+                s1_hover_times = [str(t) for t in s1_x]
+                s2_hover_times = [str(t) for t in s2_x]
 
-        plt.tight_layout()
-        st_obj.pyplot(fig)
-        plt.close(fig)
+            # 添加目标序列（序列1）- 实线
+            fig.add_trace(go.Scatter(
+                x=s1_x,
+                y=s1_np,
+                mode='lines+markers',
+                name=s1_name,
+                line=dict(color='#1f77b4', width=3, dash='solid'),  # 实线
+                marker=dict(size=8, symbol='circle'),  # 从6加大到8
+                customdata=s1_hover_times,
+                hovertemplate='<b>%{fullData.name}</b><br>时间: %{customdata}<br>数值: %{y:.4f}<extra></extra>'
+            ))
+
+            # 添加比较序列（序列2）- 虚线
+            fig.add_trace(go.Scatter(
+                x=s2_x,
+                y=s2_np,
+                mode='lines+markers',
+                name=s2_name,
+                line=dict(color='#ff7f0e', width=3, dash='dash'),  # 虚线
+                marker=dict(size=8, symbol='square'),  # 从6加大到8
+                customdata=s2_hover_times,
+                hovertemplate='<b>%{fullData.name}</b><br>时间: %{customdata}<br>数值: %{y:.4f}<extra></extra>'
+            ))
+
+            # 添加DTW对齐路径（灰色虚线）
+            for idx1, idx2 in path:
+                if idx1 < len(s1_np) and idx2 < len(s2_np):
+                    fig.add_trace(go.Scatter(
+                        x=[s1_x[idx1], s2_x[idx2]],
+                        y=[s1_np[idx1], s2_np[idx2]],
+                        mode='lines',
+                        line=dict(color='grey', width=1, dash='dash'),
+                        opacity=0.3,
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+            # 更新布局
+            fig.update_layout(
+                title=dict(
+                    text=f"DTW对齐路径: {s1_name} vs {s2_name}",
+                    font=dict(size=16, family='Microsoft YaHei, SimHei, sans-serif'),
+                    x=0.5,  # 标题居中
+                    xanchor='center'
+                ),
+                xaxis=dict(
+                    title=None,  # 取消X轴标题
+                    gridcolor='rgba(128, 128, 128, 0.2)',
+                    showgrid=True,
+                    tickfont=dict(size=13, family='Microsoft YaHei, SimHei, sans-serif'),  # X轴刻度字体加大
+                    tickformat='%Y-%m' if use_time_axis else None  # 时间格式：年-月
+                ),
+                yaxis=dict(
+                    title=dict(
+                        text='Z值',
+                        font=dict(size=12, family='Microsoft YaHei, SimHei, sans-serif')
+                    ),
+                    gridcolor='rgba(128, 128, 128, 0.2)',
+                    showgrid=True
+                ),
+                hovermode='closest',
+                plot_bgcolor='white',
+                height=500,
+                margin=dict(l=60, r=40, t=80, b=100),  # 增加底部边距以容纳图例
+                legend=dict(
+                    orientation='h',
+                    yanchor='top',
+                    y=-0.15,  # 放在图表下方
+                    xanchor='center',
+                    x=0.5,
+                    font=dict(size=12, family='Microsoft YaHei, SimHei, sans-serif'),  # 字体从11号加大到12号
+                    itemwidth=50  # 增加图例项宽度，使色块和文字更大
+                )
+            )
+
+            # 显示图表
+            st_obj.plotly_chart(fig, use_container_width=True)
+
+        except Exception as e:
+            error_msg = f"绘制DTW路径图失败: {str(e)}"
+            logger.error(f"[DTW绘图] {error_msg}", exc_info=True)
+            st_obj.error(error_msg)
+            import traceback
+            st_obj.code(traceback.format_exc())
     
     
     def render_analysis_interface(self, st_obj, data: pd.DataFrame, data_name: str) -> Any:

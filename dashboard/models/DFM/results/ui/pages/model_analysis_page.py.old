@@ -61,12 +61,128 @@ from dashboard.models.DFM.results.dfm_backend import (
     perform_loadings_clustering
 )
 
-# Import new components
-from dashboard.models.DFM.results.ui.pages.domain import DFMMetadataAccessor
-from dashboard.models.DFM.results.ui.pages.components import MetricsPanel
-from dashboard.models.DFM.results.ui.pages.utils import generate_r2_excel
-
 logger = logging.getLogger(__name__)
+
+
+def generate_r2_excel(industry_r2: pd.Series, factor_industry_r2: dict) -> bytes:
+    """
+    生成R²分析数据的Excel文件
+    
+    Args:
+        industry_r2: 整体R²数据(按行业)
+        factor_industry_r2: 因子对行业Pooled R²数据
+        
+    Returns:
+        bytes: Excel文件的字节数据
+    """
+    try:
+        # 创建Excel工作簿
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "R2_Analysis"
+        
+        current_row = 1
+        
+        # 添加标题
+        ws.cell(row=current_row, column=1, value="R² 分析数据报告")
+        ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True, size=14)
+        current_row += 2
+        
+        ws.cell(row=current_row, column=1, value=f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        current_row += 3
+        
+        # 第一个表：整体 R² (按行业)
+        if industry_r2 is not None and isinstance(industry_r2, pd.Series) and not industry_r2.empty:
+            ws.cell(row=current_row, column=1, value="整体 R² (按行业)")
+            ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True, size=12)
+            current_row += 2
+            
+            # 添加表头
+            ws.cell(row=current_row, column=1, value="行业")
+            ws.cell(row=current_row, column=2, value="Industry R2 (All Factors)")
+            ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True)
+            ws.cell(row=current_row, column=2).font = ws.cell(row=current_row, column=2).font.copy(bold=True)
+            current_row += 1
+            
+            # 添加数据
+            for index, value in industry_r2.items():
+                ws.cell(row=current_row, column=1, value=str(index))
+                ws.cell(row=current_row, column=2, value=float(value) if pd.notna(value) else None)
+                current_row += 1
+            
+            # 添加附注
+            current_row += 1
+            ws.cell(row=current_row, column=1, value="附注：")
+            ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True)
+            current_row += 1
+            ws.cell(row=current_row, column=1, value="衡量所有因子共同解释该行业内所有变量整体变动的百分比。")
+            current_row += 1
+            ws.cell(row=current_row, column=1, value="计算方式为对行业内各变量分别对所有因子进行OLS回归后，")
+            current_row += 1
+            ws.cell(row=current_row, column=1, value="汇总各变量的总平方和(TSS)与残差平方和(RSS)，")
+            current_row += 1
+            ws.cell(row=current_row, column=1, value="计算 Pooled R² = 1 - (Sum(RSS) / Sum(TSS))。")
+            current_row += 3
+        
+        # 第二个表：因子对行业 Pooled R²
+        if factor_industry_r2 and isinstance(factor_industry_r2, dict) and len(factor_industry_r2) > 0:
+            try:
+                factor_industry_df = pd.DataFrame(factor_industry_r2)
+                
+                ws.cell(row=current_row, column=1, value="因子对行业 Pooled R²")
+                ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True, size=12)
+                current_row += 2
+                
+                # 添加表头
+                col_offset = 0
+                for col_idx, column in enumerate(['行业/因子'] + list(factor_industry_df.columns)):
+                    ws.cell(row=current_row, column=col_idx + 1, value=column)
+                    ws.cell(row=current_row, column=col_idx + 1).font = ws.cell(row=current_row, column=col_idx + 1).font.copy(bold=True)
+                current_row += 1
+                
+                # 添加数据
+                for row_idx, (index, row_data) in enumerate(factor_industry_df.iterrows()):
+                    ws.cell(row=current_row, column=1, value=str(index))
+                    for col_idx, value in enumerate(row_data):
+                        ws.cell(row=current_row, column=col_idx + 2, value=float(value) if pd.notna(value) else None)
+                    current_row += 1
+                
+                # 添加附注
+                current_row += 1
+                ws.cell(row=current_row, column=1, value="附注：")
+                ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True)
+                current_row += 1
+                ws.cell(row=current_row, column=1, value="衡量单个因子解释该行业内所有变量整体变动的百分比。")
+                current_row += 1
+                ws.cell(row=current_row, column=1, value="计算方式为对行业内各变量分别对单个因子进行OLS回归后，")
+                current_row += 1
+                ws.cell(row=current_row, column=1, value="汇总TSS与RSS，计算 Pooled R² = 1 - (Sum(RSS) / Sum(TSS))。")
+                
+            except Exception as e:
+                logger.error(f"Error processing factor_industry_r2 data for Excel: {e}")
+        
+        # 调整列宽
+        for column in ws.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+        
+        # 保存到字节流
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
+        
+    except Exception as e:
+        logger.error(f"Error generating R2 Excel file: {e}")
+        return None
 
 
 def load_dfm_data() -> tuple[Optional[Any], Optional[Dict]]:
@@ -365,11 +481,99 @@ def render_dfm_tab(st):
     logger.info(f"[CHART DEBUG]   val_start={val_start}")
     logger.info(f"[CHART DEBUG]   val_end={val_end}")
 
-    # 创建元数据访问器
-    accessor = DFMMetadataAccessor(metadata)
+    # 从元数据获取指标
+    # 获取因子数量（优先从标准键名，如未找到则从factor_loadings推断）
+    k_factors = metadata.get('n_factors')
+    if k_factors is None:
+        factor_loadings = metadata.get('factor_loadings_df')
+        if factor_loadings is not None and hasattr(factor_loadings, 'columns'):
+            k_factors = len(factor_loadings.columns)
+            logger.info(f"从factor_loadings推断k_factors: {k_factors}")
+        else:
+            k_factors = 'N/A'
+            logger.warning("无法获取因子数量，将显示N/A")
+    else:
+        logger.info(f"从元数据获取k_factors: {k_factors}")
 
-    # 使用MetricsPanel显示所有指标
-    MetricsPanel.render_all_metrics(accessor)
+    # 获取变量数量（优先从best_variables，如未找到则从factor_loadings推断）
+    best_variables = metadata.get('best_variables', [])
+    if isinstance(best_variables, list) and len(best_variables) > 0:
+        n_vars = len(best_variables)
+        logger.info(f"从best_variables获取变量数量: {n_vars}")
+    else:
+        factor_loadings = metadata.get('factor_loadings_df')
+        if factor_loadings is not None and hasattr(factor_loadings, 'index'):
+            n_vars = len(factor_loadings.index)
+            logger.info(f"从factor_loadings推断变量数量: {n_vars}")
+        else:
+            n_vars = 'N/A'
+            logger.warning("无法获取变量数量，将显示N/A")
+
+    # 读取原始值空间指标
+    # 训练期原始值指标
+    is_mae_original = metadata.get('is_mae_original')
+    is_rmse_original = metadata.get('is_rmse_original')
+    is_hr_original = metadata.get('is_hit_rate_original')
+
+    # 验证期原始值指标
+    oos_mae_original = metadata.get('oos_mae_original')
+    oos_rmse_original = metadata.get('oos_rmse_original')
+    oos_hr_original = metadata.get('oos_hit_rate_original')
+
+    # 观察期原始值指标
+    obs_mae_original = metadata.get('obs_mae_original')
+    obs_rmse_original = metadata.get('obs_rmse_original')
+    obs_hr_original = metadata.get('obs_hit_rate_original')
+
+    def format_value(val, is_percent=False, precision=2):
+        if isinstance(val, (int, float)) and pd.notna(val):
+            if is_percent:
+                return f"{val:.{precision}f}%"
+            return f"{val:.{precision}f}"
+        return 'N/A' if val == 'N/A' or pd.isna(val) else str(val)
+
+    # 第1行：2列 - 最终变量数、最终因子数
+    row1_col1, row1_col2 = st.columns(2)
+    with row1_col1:
+        display_n = int(n_vars) if isinstance(n_vars, (int, np.integer)) else 'N/A'
+        st.metric("最终变量数", display_n)
+    with row1_col2:
+        display_k = int(k_factors) if isinstance(k_factors, (int, np.integer)) else 'N/A'
+        st.metric("最终因子数", display_k)
+
+    # 第2行：3列 - 训练期MAE、RMSE、胜率
+    row2_col1, row2_col2, row2_col3 = st.columns(3)
+    with row2_col1:
+        st.metric("训练期MAE", format_value(is_mae_original))
+    with row2_col2:
+        st.metric("训练期RMSE", format_value(is_rmse_original))
+    with row2_col3:
+        st.metric("训练期胜率", format_value(is_hr_original, is_percent=True))
+
+    # 第3行：3列 - 验证期MAE、RMSE、胜率
+    row3_col1, row3_col2, row3_col3 = st.columns(3)
+    with row3_col1:
+        st.metric("验证期MAE", format_value(oos_mae_original))
+    with row3_col2:
+        st.metric("验证期RMSE", format_value(oos_rmse_original))
+    with row3_col3:
+        st.metric("验证期胜率", format_value(oos_hr_original, is_percent=True))
+
+    # 第4行：3列 - 观察期MAE、RMSE、胜率（条件显示）
+    has_observation_metrics = any([
+        obs_rmse_original is not None,
+        obs_mae_original is not None,
+        obs_hr_original is not None
+    ])
+
+    if has_observation_metrics:
+        row4_col1, row4_col2, row4_col3 = st.columns(3)
+        with row4_col1:
+            st.metric("观察期MAE", format_value(obs_mae_original))
+        with row4_col2:
+            st.metric("观察期RMSE", format_value(obs_rmse_original))
+        with row4_col3:
+            st.metric("观察期胜率", format_value(obs_hr_original, is_percent=True))
 
     # 修复：直接使用pickle文件中的complete_aligned_table数据
     complete_aligned_table = metadata.get('complete_aligned_table')

@@ -201,8 +201,8 @@ class IndustrialConfig(BasePreviewConfig):
             'ten_day': {
                 'x_range': range(1, 37),
                 'x_label_func': lambda x: f"第{x}旬",
-                'x_tick_vals': list(range(2, 37, 3)),
-                'x_tick_labels': [f"{i}月" for i in range(1, 13)],
+                'x_tick_vals': [i - 0.5 for i in range(1, 38, 3)],  # 标签在月初位置：0.5, 3.5, 6.5, ...
+                'x_tick_labels': [f"{i}月" for i in range(1, 13)] + [''],  # 13个标签位置
                 'historical_years': 5,
                 'layout': {
                     'margin': {'l': 50, 'r': 30, 't': 60, 'b': 120},

@@ -393,10 +393,11 @@ def display_time_series_tab(st_module, frequency):
             download_prefix=config['summary_config']['download_prefix']
         )
 
-    # 6. 绘制图表
+    # 6. 绑制图表
     current_year = datetime.now().year
     previous_year = current_year - 1
     indicator_unit_map = get_preview_state('indicator_unit_map', {})
+    indicator_type_map = get_preview_state('indicator_type_map', {})
 
     # 创建两列布局
     col1, col2 = st_module.columns(2)
@@ -410,13 +411,15 @@ def display_time_series_tab(st_module, frequency):
                 with st_module.spinner(UI_TEXT['loading_message'].format(indicator)):
                     try:
                         unit = indicator_unit_map.get(indicator, None)
+                        indicator_type = indicator_type_map.get(indicator, None)
                         fig = plot_indicator(
                             series=series,
                             name=indicator,
                             frequency=frequency,
                             current_year=current_year,
                             previous_year=previous_year,
-                            unit=unit
+                            unit=unit,
+                            indicator_type=indicator_type
                         )
                         st_module.plotly_chart(fig, use_container_width=True)
                     except Exception as e:

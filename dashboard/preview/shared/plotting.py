@@ -12,10 +12,10 @@ from typing import Optional
 from dashboard.preview.modules.industrial.config import PLOT_CONFIGS, COLORS
 
 
-def plot_indicator(series, name, frequency, current_year, previous_year=None, unit=None):
-    """通用绘图函数
+def plot_indicator(series, name, frequency, current_year, previous_year=None, unit=None, indicator_type=None):
+    """通用绑图函数
 
-    根据频率自动选择合适的绘图策略,保持与原始函数完全相同的功能
+    根据频率自动选择合适的绑图策略,保持与原始函数完全相同的功能
 
     Args:
         series: 数据序列
@@ -24,6 +24,7 @@ def plot_indicator(series, name, frequency, current_year, previous_year=None, un
         current_year: 当前年份
         previous_year: 去年年份(yearly不需要)
         unit: 单位(可选)
+        indicator_type: 指标类型(可选，如'用电量')
 
     Returns:
         plotly.graph_objects.Figure
@@ -35,14 +36,19 @@ def plot_indicator(series, name, frequency, current_year, previous_year=None, un
     if frequency == 'yearly':
         return _plot_yearly(series, name, unit)
 
-    # 其他频率使用统一的时间序列绘图逻辑
-    return _plot_time_series(series, name, frequency, current_year, previous_year or current_year - 1, unit)
+    # 其他频率使用统一的时间序列绑图逻辑
+    return _plot_time_series(series, name, frequency, current_year, previous_year or current_year - 1, unit, indicator_type)
 
 
-def _plot_time_series(series, name, frequency, current_year, previous_year, unit):
-    """绘制时间序列图表(周/月/日/旬),保持与原始逻辑完全一致"""
+def _plot_time_series(series, name, frequency, current_year, previous_year, unit, indicator_type=None):
+    """绑制时间序列图表(周/月/日/旬),保持与原始逻辑完全一致"""
     series.index = pd.to_datetime(series.index)
     series_clean = series.replace(0.0, np.nan)
+
+    # 用电量类型数据：将值乘以100转换为百分比显示
+    is_percentage_type = indicator_type == '用电量'
+    if is_percentage_type:
+        series_clean = series_clean * 100
 
     # 获取配置
     config = PLOT_CONFIGS[frequency]
@@ -54,6 +60,9 @@ def _plot_time_series(series, name, frequency, current_year, previous_year, unit
     # 2. 根据频率对齐数据和计算历史统计
     plot_data = _prepare_plot_data(series_clean, frequency, current_year, previous_year, config)
 
+    # 传递百分比类型标记
+    plot_data['is_percentage_type'] = is_percentage_type
+
     # 3. 创建图表
     fig = go.Figure()
 
@@ -64,7 +73,7 @@ def _plot_time_series(series, name, frequency, current_year, previous_year, unit
     _add_current_year(fig, plot_data, current_year, frequency)
 
     # 5. 应用布局
-    _apply_layout(fig, name, unit, config, plot_data)
+    _apply_layout(fig, name, unit, config, plot_data, is_percentage_type)
 
     return fig
 
@@ -380,7 +389,7 @@ def _add_year_data(fig, plot_data, year, frequency, color_key, x_key=None, y_key
 
     Args:
         fig: plotly图表对象
-        plot_data: 绘图数据字典
+        plot_data: 绑图数据字典
         year: 年份
         frequency: 频率
         color_key: 颜色配置键（'previous_year'或'current_year'）
@@ -389,6 +398,7 @@ def _add_year_data(fig, plot_data, year, frequency, color_key, x_key=None, y_key
         dates_key: 日期数据键（日度数据专用）
     """
     year_key = f'{year}年'
+    is_percentage = plot_data.get('is_percentage_type', False)
 
     # 日度数据使用不同的键
     if frequency == 'daily':
@@ -416,6 +426,21 @@ def _add_year_data(fig, plot_data, year, frequency, color_key, x_key=None, y_key
                 line=dict(color=COLORS[color_key]),
                 customdata=plot_data[dates_key],
                 hovertemplate=f'{year}年 (%{{customdata}}): %{{y:.2f}}<extra></extra>'
+            ))
+        elif frequency == 'ten_day' and dates_key in plot_data:
+            # 旬度数据：使用日期作为hover信息，格式为"年-月-日：XXX"
+            if is_percentage:
+                hover_fmt = '%{customdata}: %{y:.1f}%<extra></extra>'
+            else:
+                hover_fmt = '%{customdata}: %{y:.2f}<extra></extra>'
+            fig.add_trace(go.Scatter(
+                x=plot_data['x'],
+                y=plot_data[year_key],
+                mode='lines+markers',
+                name=year_key,
+                line=dict(color=COLORS[color_key]),
+                customdata=plot_data[dates_key],
+                hovertemplate=hover_fmt
             ))
         else:
             # 其他频率保持原样
@@ -448,7 +473,7 @@ def _add_current_year(fig, plot_data, year, frequency):
                        dates_key='current_dates')
 
 
-def _apply_layout(fig, name, unit, config, plot_data):
+def _apply_layout(fig, name, unit, config, plot_data, is_percentage_type=False):
     """应用图表布局,保持与原始代码完全一致"""
     y_axis_title = unit if unit and unit.strip() else "数值"
 
@@ -474,15 +499,22 @@ def _apply_layout(fig, name, unit, config, plot_data):
         else:
             x_axis_config['ticktext'] = [str(x) for x in plot_data['x'][::interval]]
 
+    # Y轴配置
+    y_axis_config = {
+        'title': y_axis_title,
+        'showgrid': True,
+        'gridwidth': 1,
+        'gridcolor': 'LightGrey'
+    }
+
+    # 用电量类型：y轴显示百分比格式
+    if is_percentage_type:
+        y_axis_config['ticksuffix'] = '%'
+
     fig.update_layout(
-        title=name,
+        title=dict(text=name, x=0.5, xanchor='center'),
         xaxis=x_axis_config,
-        yaxis=dict(
-            title=y_axis_title,
-            showgrid=True,
-            gridwidth=1,
-            gridcolor='LightGrey'
-        ),
+        yaxis=y_axis_config,
         hovermode='closest',
         hoverlabel=dict(bgcolor="white", font_size=12),
         **config['layout']
@@ -527,7 +559,7 @@ def _plot_yearly(series, name, unit):
 
     config = PLOT_CONFIGS['yearly']
     fig.update_layout(
-        title=dict(text=name, font=dict(size=16, color='black'), x=0, xanchor='left'),
+        title=dict(text=name, font=dict(size=16, color='black'), x=0.5, xanchor='center'),
         xaxis=dict(title='', showgrid=True, gridwidth=1, gridcolor='LightGrey', dtick=dtick),
         yaxis=dict(title=y_axis_title, showgrid=True, gridwidth=1, gridcolor='LightGrey'),
         hovermode='x unified',
@@ -541,4 +573,4 @@ def _plot_yearly(series, name, unit):
 
 def _create_empty_figure(name):
     """创建空图表"""
-    return go.Figure().update_layout(title=f"{name} - 无数据")
+    return go.Figure().update_layout(title=dict(text=f"{name} - 无数据", x=0.5, xanchor='center'))

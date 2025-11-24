@@ -213,6 +213,10 @@ def perform_batch_dtw_calculation(
         target_np = target_data_for_dtw.to_numpy()
         compare_np = compare_data_for_dtw.to_numpy()
 
+        # 保存时间索引（如果存在）
+        target_index = target_data_for_dtw.index
+        compare_index = compare_data_for_dtw.index
+
         # 计算DTW距离
         try:
             # 确定窗口约束
@@ -240,7 +244,9 @@ def perform_batch_dtw_calculation(
             paths_dict[compare_name] = {
                 'target_np': target_np,
                 'compare_np': compare_np,
-                'path': path
+                'path': path,
+                'target_index': target_index,
+                'compare_index': compare_index
             }
 
             logger.debug(f"DTW计算成功: {target_series_name} vs {compare_name}, 距离={distance:.4f}")
