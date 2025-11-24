@@ -15,7 +15,6 @@ from datetime import timedelta
 from typing import Dict, List, Optional, Any
 
 from dashboard.models.DFM.train import TrainingConfig
-from dashboard.models.DFM.train.training.factor_selection_config import create_factor_config
 
 
 class TrainingConfigBuilder:
@@ -81,7 +80,7 @@ class TrainingConfigBuilder:
         mapped_var_selection_method = self._map_variable_selection_method(var_selection_method)
 
         # 5. 获取因子选择配置
-        factor_config = self._create_factor_config()
+        factor_selection_method, factor_params = self._get_factor_selection_params()
 
         # 6. 获取估计方法配置
         estimation_method = self.state.get('dfm_estimation_method', 'single_stage')
@@ -117,7 +116,7 @@ class TrainingConfigBuilder:
             target_freq='W-FRI',
 
             # 模型参数
-            k_factors=4,  # 占位符，实际由factor_config确定
+            k_factors=factor_params.get('k_factors', 4),
             max_lags=self.state.get('dfm_factor_ar_order', 1),
             tolerance=1e-6,
 
@@ -126,7 +125,8 @@ class TrainingConfigBuilder:
             variable_selection_method=mapped_var_selection_method,
 
             # 因子数选择配置
-            factor_config=factor_config,
+            factor_selection_method=factor_selection_method,
+            pca_threshold=factor_params.get('pca_threshold'),
 
             # 并行计算配置
             enable_parallel=True,
@@ -229,12 +229,12 @@ class TrainingConfigBuilder:
         }
         return var_selection_method_map.get(var_selection_method, 'none')
 
-    def _create_factor_config(self):
+    def _get_factor_selection_params(self):
         """
-        创建因子选择配置对象
+        获取因子选择参数（扁平化）
 
         Returns:
-            FactorConfig对象
+            (factor_selection_method, factor_params): 方法名和参数字典
 
         Raises:
             ValueError: 配置参数缺失
@@ -248,27 +248,25 @@ class TrainingConfigBuilder:
             k_factors = self.state.get('dfm_fixed_number_of_factors')
             if k_factors is None:
                 raise ValueError("固定因子数未设置")
-            factor_config = create_factor_config('fixed', k_factors=k_factors)
             print(f"[INFO] 使用固定因子数策略: k={k_factors}")
+            return 'fixed', {'k_factors': k_factors}
 
         elif factor_strategy == 'cumulative_variance':
             pca_threshold = self.state.get('dfm_cumulative_variance_threshold')
             if pca_threshold is None:
                 raise ValueError("累积方差阈值未设置")
-            factor_config = create_factor_config('cumulative', pca_threshold=pca_threshold)
             print(f"[INFO] 使用累积方差策略: 阈值={pca_threshold}")
+            return 'cumulative', {'pca_threshold': pca_threshold}
 
         elif factor_strategy == 'kaiser':
             kaiser_threshold = self.state.get('dfm_kaiser_threshold')
             if kaiser_threshold is None:
                 raise ValueError("Kaiser阈值未设置")
-            factor_config = create_factor_config('kaiser', kaiser_threshold=kaiser_threshold)
             print(f"[INFO] 使用Kaiser准则: 阈值={kaiser_threshold}")
+            return 'kaiser', {'kaiser_threshold': kaiser_threshold}
 
         else:
             raise ValueError(f"未知的因子选择策略: {factor_strategy}")
-
-        return factor_config
 
     def _save_dataframe_to_temp(self, input_df: pd.DataFrame) -> str:
         """

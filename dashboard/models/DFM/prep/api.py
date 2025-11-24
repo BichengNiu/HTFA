@@ -1,54 +1,320 @@
-# -*- coding: utf-8 -*-
 """
-DFM数据准备模块 - 统一API接口
+DFM数据准备模块 - 简化API接口
 
-这个模块提供严格的前后端分离接口，所有UI层必须通过这些API与业务逻辑交互。
+这个模块提供简化后的前后端分离接口，遵循7步流程设计。
 
-设计原则：
-1. 所有API函数返回标准化的dict格式
-2. 完整的类型注解和文档字符串
-3. 统一的错误处理和日志记录
-4. 不包含任何UI逻辑
+重构说明（2025-11-13）：
+- 消除Pipeline和Core层，直接调用Processor
+- 映射表只加载一次（带简化的缓存机制）
+- 删除工作表自动推断功能（UI层必须明确指定）
+- 新增时间范围统计功能（步骤2）
+- 智能缺失值检测（根据频率关系选择检测时机）
 """
 
 import pandas as pd
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 import logging
 import tempfile
+import os
 from datetime import datetime
 
-from dashboard.models.DFM.prep.modules.main_data_processor import prepare_data as _prepare_data_internal
-from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings as _load_mappings_internal
-from dashboard.models.DFM.prep.modules.stationarity_processor import apply_stationarity_transforms as _apply_transforms_internal
+from dashboard.models.DFM.prep.processor import DataPreparationProcessor
+from dashboard.models.DFM.prep.utils.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
 
 
-def prepare_dfm_data(
+# 简化的缓存机制（基于文件修改时间）
+_MAPPING_CACHE = {}
+
+
+def load_mappings_once(
+    excel_path: Union[str, Any],
+    reference_sheet_name: str = "指标体系",
+    reference_column_name: str = "指标名称",
+    use_cache: bool = True
+) -> Dict[str, Any]:
+    """
+    步骤1: 加载映射表（带简化的缓存机制）
+
+    从Excel文件的"指标体系"工作表加载7种映射关系。
+    使用文件修改时间作为缓存键，避免重复加载。
+
+    Args:
+        excel_path: Excel文件路径或文件对象
+        reference_sheet_name: 映射表的工作表名称，默认"指标体系"
+        reference_column_name: 映射表的参考列名，默认"指标名称"
+        use_cache: 是否使用缓存，默认True
+
+    Returns:
+        dict: {
+            'status': str,              # 'success' 或 'error'
+            'message': str,             # 处理结果消息
+            'mappings': {               # 映射字典（仅成功时）
+                'var_type_map': Dict[str, str],           # 变量类型映射
+                'var_industry_map': Dict[str, str],       # 变量-行业映射 ★核心★
+                'var_frequency_map': Dict[str, str],      # 变量-频率映射 ★新增★
+                'single_stage_map': Dict[str, str],       # 一次估计映射
+                'first_stage_pred_map': Dict[str, str],   # 一阶段预测映射
+                'first_stage_target_map': Dict[str, str], # 一阶段目标映射
+                'second_stage_target_map': Dict[str, str] # 二阶段目标映射
+            }
+        }
+    """
+    try:
+        logger.info("步骤1/7: 加载映射表...")
+
+        # 处理文件输入
+        file_path = _handle_file_input(excel_path)
+
+        # 检查缓存
+        if use_cache:
+            cache_key = _get_cache_key(file_path)
+            if cache_key in _MAPPING_CACHE:
+                logger.info("  从缓存加载映射表（命中）")
+                return {
+                    'status': 'success',
+                    'message': '从缓存加载映射表',
+                    'mappings': _MAPPING_CACHE[cache_key]
+                }
+
+        # 加载映射表
+        logger.info("  从Excel文件加载映射表...")
+        df = pd.read_excel(file_path, sheet_name=reference_sheet_name)
+
+        # 标准化列名
+        df.columns = df.columns.str.strip()
+
+        # 验证必需列
+        required_columns = [reference_column_name, '类型', '行业', '频率', '单位']
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            raise ValueError(f"映射表缺少必需列: {missing_columns}")
+
+        # 提取映射关系
+        mappings = {}
+
+        # 1. 变量类型映射（变量名 → 类型）
+        mappings['var_type_map'] = _extract_mapping(
+            df, reference_column_name, '类型'
+        )
+
+        # 2. 变量-行业映射（变量名 → 行业）★核心★
+        mappings['var_industry_map'] = _extract_mapping(
+            df, reference_column_name, '行业'
+        )
+
+        # 3. 变量-频率映射（变量名 → 频率）★新增★
+        mappings['var_frequency_map'] = _extract_mapping(
+            df, reference_column_name, '频率'
+        )
+
+        # 4. 变量-单位映射（变量名 → 单位）★核心★
+        mappings['var_unit_map'] = _extract_mapping(
+            df, reference_column_name, '单位'
+        )
+
+        # 5. 一次估计映射（可选）
+        if '一次估计' in df.columns:
+            mappings['single_stage_map'] = _extract_mapping(
+                df, reference_column_name, '一次估计', value_filter='是'
+            )
+        else:
+            mappings['single_stage_map'] = {}
+
+        # 6. 一阶段预测映射（可选）
+        if '一阶段预测' in df.columns:
+            mappings['first_stage_pred_map'] = _extract_mapping(
+                df, reference_column_name, '一阶段预测', value_filter='是'
+            )
+        else:
+            mappings['first_stage_pred_map'] = {}
+
+        # 7. 一阶段目标映射（可选）
+        if '一阶段目标' in df.columns:
+            mappings['first_stage_target_map'] = _extract_mapping(
+                df, reference_column_name, '一阶段目标', value_filter='是'
+            )
+        else:
+            mappings['first_stage_target_map'] = {}
+
+        # 8. 二阶段目标映射（可选）
+        if '二阶段目标' in df.columns:
+            mappings['second_stage_target_map'] = _extract_mapping(
+                df, reference_column_name, '二阶段目标', value_filter='是'
+            )
+        else:
+            mappings['second_stage_target_map'] = {}
+
+        # 统计信息
+        logger.info(f"  映射加载完成:")
+        logger.info(f"    变量类型: {len(mappings['var_type_map'])}个")
+        logger.info(f"    变量-行业: {len(mappings['var_industry_map'])}个")
+        logger.info(f"    变量-频率: {len(mappings['var_frequency_map'])}个")
+        logger.info(f"    变量-单位: {len(mappings['var_unit_map'])}个")
+        logger.info(f"    一次估计: {len(mappings['single_stage_map'])}个")
+        logger.info(f"    一阶段预测: {len(mappings['first_stage_pred_map'])}个")
+        logger.info(f"    一阶段目标: {len(mappings['first_stage_target_map'])}个")
+        logger.info(f"    二阶段目标: {len(mappings['second_stage_target_map'])}个")
+
+        # 更新缓存
+        if use_cache:
+            cache_key = _get_cache_key(file_path)
+            _MAPPING_CACHE[cache_key] = mappings
+            logger.info("  映射表已缓存")
+
+        return {
+            'status': 'success',
+            'message': f'成功加载 {len(mappings["var_industry_map"])} 个变量映射',
+            'mappings': mappings
+        }
+
+    except FileNotFoundError as e:
+        logger.error(f"文件未找到: {e}")
+        return {
+            'status': 'error',
+            'message': f'文件未找到: {str(e)}',
+            'mappings': None
+        }
+
+    except Exception as e:
+        logger.error(f"加载映射表失败: {e}", exc_info=True)
+        return {
+            'status': 'error',
+            'message': f'加载映射表失败: {str(e)}',
+            'mappings': None
+        }
+
+
+def collect_time_ranges(
+    excel_path: Union[str, Any]
+) -> Dict[str, Any]:
+    """
+    步骤2: 统计所有数据的时间范围（新增功能）
+
+    遍历Excel文件中的所有工作表，统计每个工作表的时间范围，
+    并返回所有数据的并集时间范围。
+
+    Args:
+        excel_path: Excel文件路径或文件对象
+
+    Returns:
+        dict: {
+            'status': str,              # 'success' 或 'error'
+            'message': str,             # 处理结果消息
+            'time_range': {             # 时间范围信息（仅成功时）
+                'overall_start': str,   # 所有数据的最早日期
+                'overall_end': str,     # 所有数据的最晚日期
+                'sheet_ranges': {       # 每个工作表的时间范围
+                    '工业_日度': {'start': '2020-01-01', 'end': '2024-12-31'},
+                    ...
+                }
+            }
+        }
+    """
+    try:
+        logger.info("步骤2/7: 统计数据时间范围...")
+
+        # 处理文件输入
+        file_path = _handle_file_input(excel_path)
+
+        # 加载Excel文件
+        excel_file = pd.ExcelFile(file_path)
+        sheet_ranges = {}
+        all_dates = []
+
+        for sheet_name in excel_file.sheet_names:
+            # 跳过映射表
+            if sheet_name == '指标体系':
+                continue
+
+            try:
+                # 读取第一列作为日期列
+                df = pd.read_excel(excel_file, sheet_name=sheet_name, usecols=[0])
+                if df.empty:
+                    continue
+
+                # 尝试解析为日期
+                dates = pd.to_datetime(df.iloc[:, 0], errors='coerce')
+                valid_dates = dates.dropna()
+
+                if not valid_dates.empty:
+                    sheet_start = valid_dates.min()
+                    sheet_end = valid_dates.max()
+
+                    sheet_ranges[sheet_name] = {
+                        'start': sheet_start.strftime('%Y-%m-%d'),
+                        'end': sheet_end.strftime('%Y-%m-%d'),
+                        'data_points': len(valid_dates)
+                    }
+
+                    all_dates.extend(valid_dates.tolist())
+
+                    logger.info(f"  {sheet_name}: {sheet_ranges[sheet_name]['start']} 至 {sheet_ranges[sheet_name]['end']}")
+
+            except Exception as e:
+                logger.debug(f"  跳过工作表 '{sheet_name}': {e}")
+                continue
+
+        if not all_dates:
+            raise ValueError("未能从任何工作表中提取有效日期")
+
+        # 计算并集时间范围
+        overall_start = min(all_dates)
+        overall_end = max(all_dates)
+
+        time_range = {
+            'overall_start': overall_start.strftime('%Y-%m-%d'),
+            'overall_end': overall_end.strftime('%Y-%m-%d'),
+            'total_sheets': len(sheet_ranges),
+            'sheet_ranges': sheet_ranges
+        }
+
+        logger.info(f"  所有数据时间范围: {time_range['overall_start']} 至 {time_range['overall_end']}")
+        logger.info(f"  共 {time_range['total_sheets']} 个工作表")
+
+        return {
+            'status': 'success',
+            'message': f'成功统计 {len(sheet_ranges)} 个工作表的时间范围',
+            'time_range': time_range
+        }
+
+    except Exception as e:
+        logger.error(f"统计时间范围失败: {e}", exc_info=True)
+        return {
+            'status': 'error',
+            'message': f'统计时间范围失败: {str(e)}',
+            'time_range': None
+        }
+
+
+def prepare_dfm_data_simple(
     uploaded_file: Union[str, Any],
-    data_start_date: str = "2010-01-31",
-    data_end_date: str = "2025-07-03",
+    target_variable_name: str = None,
+    data_start_date: str = None,
+    data_end_date: str = None,
     target_freq: str = "W-FRI",
     consecutive_nan_threshold: int = 10,
     reference_sheet_name: str = "指标体系",
     reference_column_name: str = "指标名称"
 ) -> Dict[str, Any]:
     """
-    DFM数据准备API - 处理上传的Excel文件并准备用于DFM训练的数据
+    DFM数据准备主API - 简化版（7步流程）
 
-    这是DFM数据准备的主要API接口，负责：
-    1. 加载和验证Excel文件
-    2. 自动识别包含目标变量的工作表（从映射文件推断）
-    3. 数据清理和预处理
-    4. 频率对齐（转换为周度数据）
-    5. 平稳性处理
-    6. 生成变量映射和转换日志
+    步骤1: 加载映射表（一次性）
+    步骤2: 统计时间范围（已在UI层完成）
+    步骤3: 应用UI配置的时间范围
+    步骤4: 加载数据并按频率分类
+    步骤5: 智能缺失值检测与频率对齐
+    步骤6: 合并数据形成最终表
+    步骤7: 生成输出
 
     Args:
         uploaded_file: Excel文件路径（str）或文件对象
-        data_start_date: 数据起始日期，格式："YYYY-MM-DD"
-        data_end_date: 数据结束日期，格式："YYYY-MM-DD"
+        target_variable_name: 目标变量名称（可选，用于将其放在第一列）
+        data_start_date: 数据起始日期，格式："YYYY-MM-DD"（None表示使用数据实际起始日期）
+        data_end_date: 数据结束日期，格式："YYYY-MM-DD"（None表示使用数据实际结束日期）
         target_freq: 目标频率，默认"W-FRI"（周五结尾的周度数据）
         consecutive_nan_threshold: 允许的最大连续NaN值数量
         reference_sheet_name: 指标映射表的工作表名称
@@ -61,68 +327,62 @@ def prepare_dfm_data(
             'data': pd.DataFrame,       # 处理后的周度数据（仅成功时）
             'metadata': {               # 元数据（仅成功时）
                 'variable_mapping': Dict,      # 变量到行业的映射
-                'transform_log': Dict,         # 转换操作日志
+                'transform_log': Dict,         # 转换操作日志（包含去趋势信息）
                 'removal_log': List[Dict],     # 移除变量日志
                 'data_shape': tuple,           # 数据形状 (rows, cols)
                 'time_range': tuple,           # 时间范围 (start, end)
                 'processing_time': str         # 处理耗时
             }
         }
-
-    Example:
-        >>> result = prepare_dfm_data(
-        ...     uploaded_file=file_object,
-        ...     data_start_date="2015-01-01",
-        ...     data_end_date="2024-12-31"
-        ... )
-        >>> if result['status'] == 'success':
-        ...     prepared_data = result['data']
-        ...     print(f"数据形状: {result['metadata']['data_shape']}")
     """
     start_time = datetime.now()
 
     try:
-        logger.info("开始DFM数据准备流程")
-        logger.info(f"参数: 起始日期={data_start_date}, 结束日期={data_end_date}, 目标频率={target_freq}")
+        logger.info("\n" + "="*60)
+        logger.info("DFM数据准备流程启动（简化版 7步流程）")
+        logger.info("="*60)
+        logger.info(f"参数: 目标变量={target_variable_name}")
+        logger.info(f"      起始日期={data_start_date}, 结束日期={data_end_date}, 目标频率={target_freq}")
 
         # 步骤1: 处理文件输入
-        excel_path = _handle_file_input(uploaded_file)
+        excel_input = _handle_file_input(uploaded_file)
 
-        # 步骤2: 调用内部数据准备函数（使用自动推断）
-        logger.info("调用数据处理引擎（启用工作表自动推断）...")
-
-        processed_data, variable_mapping, transform_log, removal_log, validation_result = _prepare_data_internal(
-            excel_path=excel_path,
-            target_freq=target_freq,
-            target_sheet_name=None,  # 使用自动推断
-            target_variable_name=None,  # 使用自动推断
-            consecutive_nan_threshold=consecutive_nan_threshold,
-            data_start_date=data_start_date,
-            data_end_date=data_end_date,
-            reference_sheet_name=reference_sheet_name,
-            reference_column_name=reference_column_name
+        # 步骤1: 加载映射表（带缓存）
+        mapping_result = load_mappings_once(
+            excel_input,
+            reference_sheet_name,
+            reference_column_name
         )
 
-        # 步骤3: 验证结果
-        if processed_data is None or processed_data.empty:
-            return {
-                'status': 'error',
-                'message': '数据处理失败：返回的数据为空',
-                'data': None,
-                'metadata': None
-            }
+        if mapping_result['status'] != 'success':
+            raise ValueError(mapping_result['message'])
 
-        # 步骤4: 构建元数据
+        mappings = mapping_result['mappings']
+        var_industry_map = mappings['var_industry_map']
+        var_frequency_map = mappings['var_frequency_map']
+
+        # 步骤3-7: 创建Processor并执行
+        logger.info("\n开始执行数据处理流程...")
+        processor = DataPreparationProcessor(
+            excel_path=excel_input,
+            target_variable_name=target_variable_name,
+            var_industry_map=var_industry_map,
+            var_frequency_map=var_frequency_map,
+            target_freq=target_freq,
+            consecutive_nan_threshold=consecutive_nan_threshold,
+            data_start_date=data_start_date,
+            data_end_date=data_end_date
+        )
+
+        processed_data, variable_mapping, transform_log, removal_log = processor.execute()
+
+        # 构建元数据
         processing_time = (datetime.now() - start_time).total_seconds()
 
-        # 推断目标变量名称（通常是第一列）
-        inferred_target = processed_data.columns[0] if len(processed_data.columns) > 0 else "auto-inferred"
-
         metadata = {
-            'variable_mapping': variable_mapping or {},
-            'transform_log': transform_log or {},
-            'removal_log': removal_log or [],
-            'mapping_validation': validation_result or {},
+            'variable_mapping': variable_mapping,
+            'transform_log': transform_log,
+            'removal_log': removal_log,
             'data_shape': processed_data.shape,
             'time_range': (
                 str(processed_data.index.min()) if not processed_data.empty else None,
@@ -130,19 +390,22 @@ def prepare_dfm_data(
             ),
             'processing_time': f"{processing_time:.2f}秒",
             'parameters': {
+                'reference_sheet_name': reference_sheet_name,
+                'target_variable_name': target_variable_name,
                 'data_start_date': data_start_date,
                 'data_end_date': data_end_date,
                 'target_freq': target_freq,
-                'target_variable': inferred_target,
                 'nan_threshold': consecutive_nan_threshold
             }
         }
 
-        logger.info(f"数据准备成功! 形状: {processed_data.shape}, 耗时: {processing_time:.2f}秒")
+        logger.info("="*60)
+        logger.info(f"数据准备成功！形状: {processed_data.shape}, 耗时: {processing_time:.2f}秒")
+        logger.info("="*60 + "\n")
 
         return {
             'status': 'success',
-            'message': f'数据准备成功! 处理了 {processed_data.shape[0]} 行 × {processed_data.shape[1]} 列数据',
+            'message': f'数据准备成功！处理了 {processed_data.shape[0]} 行 × {processed_data.shape[1]} 列数据',
             'data': processed_data,
             'metadata': metadata
         }
@@ -175,183 +438,9 @@ def prepare_dfm_data(
         }
 
 
-def load_variable_mappings(
-    excel_path: Union[str, Any],
-    reference_sheet_name: str = "指标体系",
-    reference_column_name: str = "指标名称"
-) -> Dict[str, Any]:
-    """
-    加载变量映射配置
-
-    从Excel文件中加载变量到行业的映射关系。
-
-    Args:
-        excel_path: Excel文件路径或文件对象
-        reference_sheet_name: 映射表的工作表名称
-        reference_column_name: 参考列名
-
-    Returns:
-        dict: {
-            'status': str,
-            'message': str,
-            'mappings': Dict[str, str]  # 变量名 -> 行业名
-        }
-    """
-    try:
-        logger.info("加载变量映射配置...")
-
-        # 处理文件输入
-        file_path = _handle_file_input(excel_path)
-
-        # 加载映射
-        _, mappings, _, _, _, _ = _load_mappings_internal(
-            excel_path=file_path,
-            sheet_name=reference_sheet_name,
-            indicator_col=reference_column_name,
-            type_col='类型',
-            industry_col='行业',
-            single_stage_col='一次估计',
-            first_stage_pred_col='一阶段预测',
-            first_stage_target_col='一阶段目标',
-            second_stage_target_col='二阶段目标'
-        )
-
-        if not mappings:
-            return {
-                'status': 'warning',
-                'message': '未找到有效的变量映射',
-                'mappings': {}
-            }
-
-        logger.info(f"成功加载 {len(mappings)} 个变量映射")
-
-        return {
-            'status': 'success',
-            'message': f'成功加载 {len(mappings)} 个变量映射',
-            'mappings': mappings
-        }
-
-    except Exception as e:
-        logger.error(f"加载映射失败: {e}", exc_info=True)
-        return {
-            'status': 'error',
-            'message': f'加载映射失败: {str(e)}',
-            'mappings': {}
-        }
-
-
-def apply_stationarity_transforms(
-    data: pd.DataFrame,
-    transform_rules: Optional[Dict[str, Dict[str, Any]]] = None
-) -> Dict[str, Any]:
-    """
-    对数据应用平稳性转换
-
-    根据提供的规则对DataFrame中的变量应用平稳性转换。
-    如果某个变量在规则中找不到，则保留其原始值。
-
-    Args:
-        data: 输入数据（DataFrame）
-        transform_rules: 转换规则字典 {列名: {'status': '转换类型', ...}}
-                        转换类型可以是: 'diff', 'log_diff', 'level'
-                        示例: {'GDP': {'status': 'diff'}, 'CPI': {'status': 'level'}}
-
-    Returns:
-        dict: {
-            'status': str,              # 'success' 或 'error'
-            'message': str,             # 处理结果消息
-            'data': pd.DataFrame,       # 转换后的数据
-            'metadata': {               # 元数据
-                'original_shape': tuple,
-                'transformed_shape': tuple,
-                'applied_rules': int,   # 应用的规则数量
-                'transform_summary': Dict  # 转换类型统计
-            }
-        }
-
-    Example:
-        >>> rules = {
-        ...     'GDP': {'status': 'diff'},
-        ...     'CPI': {'status': 'log_diff'}
-        ... }
-        >>> result = apply_stationarity_transforms(data, rules)
-        >>> if result['status'] == 'success':
-        ...     transformed_data = result['data']
-    """
-    try:
-        logger.info("应用平稳性转换...")
-
-        if data is None or data.empty:
-            return {
-                'status': 'error',
-                'message': '输入数据为空',
-                'data': None,
-                'metadata': None
-            }
-
-        original_shape = data.shape
-
-        # 如果没有提供转换规则，保持原始数据
-        if not transform_rules:
-            logger.warning("未提供转换规则，返回原始数据")
-            return {
-                'status': 'success',
-                'message': '未提供转换规则，保持原始数据',
-                'data': data,
-                'metadata': {
-                    'original_shape': original_shape,
-                    'transformed_shape': data.shape,
-                    'applied_rules': 0,
-                    'transform_summary': {}
-                }
-            }
-
-        # 应用转换
-        transformed_data = _apply_transforms_internal(
-            data=data,
-            transform_rules=transform_rules
-        )
-
-        # 统计转换类型
-        transform_summary = {}
-        for col, rule in transform_rules.items():
-            status = rule.get('status', 'level')
-            transform_summary[status] = transform_summary.get(status, 0) + 1
-
-        logger.info(f"平稳性转换完成，应用了 {len(transform_rules)} 个规则")
-
-        return {
-            'status': 'success',
-            'message': f'平稳性转换完成，应用了 {len(transform_rules)} 个规则',
-            'data': transformed_data,
-            'metadata': {
-                'original_shape': original_shape,
-                'transformed_shape': transformed_data.shape,
-                'applied_rules': len(transform_rules),
-                'transform_summary': transform_summary
-            }
-        }
-
-    except ValueError as e:
-        logger.error(f"平稳性转换参数错误: {e}")
-        return {
-            'status': 'error',
-            'message': f'转换参数错误: {str(e)}',
-            'data': data,  # 返回原始数据
-            'metadata': None
-        }
-
-    except Exception as e:
-        logger.error(f"平稳性转换失败: {e}", exc_info=True)
-        return {
-            'status': 'error',
-            'message': f'平稳性转换失败: {str(e)}',
-            'data': data,  # 返回原始数据
-            'metadata': None
-        }
-
-
 def validate_preparation_parameters(
+    target_sheet_name: str,
+    target_variable_name: str,
     data_start_date: str,
     data_end_date: str,
     target_freq: str
@@ -360,6 +449,8 @@ def validate_preparation_parameters(
     验证数据准备参数
 
     Args:
+        target_sheet_name: 目标工作表名称
+        target_variable_name: 目标变量名称
         data_start_date: 起始日期
         data_end_date: 结束日期
         target_freq: 目标频率
@@ -375,13 +466,25 @@ def validate_preparation_parameters(
     errors = []
 
     try:
+        # 验证必填参数
+        if not target_sheet_name:
+            errors.append("目标工作表名称不能为空")
+
+        if not target_variable_name:
+            errors.append("目标变量名称不能为空")
+
         # 验证日期格式
-        start_dt = pd.to_datetime(data_start_date)
-        end_dt = pd.to_datetime(data_end_date)
+        if data_start_date:
+            start_dt = pd.to_datetime(data_start_date)
+        if data_end_date:
+            end_dt = pd.to_datetime(data_end_date)
 
         # 验证日期逻辑
-        if start_dt >= end_dt:
-            errors.append(f"起始日期 ({data_start_date}) 必须早于结束日期 ({data_end_date})")
+        if data_start_date and data_end_date:
+            start_dt = pd.to_datetime(data_start_date)
+            end_dt = pd.to_datetime(data_end_date)
+            if start_dt >= end_dt:
+                errors.append(f"起始日期 ({data_start_date}) 必须早于结束日期 ({data_end_date})")
 
         # 验证频率
         valid_freqs = ['W-FRI', 'W', 'D', 'M', 'Q', 'Y']
@@ -445,10 +548,72 @@ def _handle_file_input(file_input: Union[str, Any]) -> str:
         raise TypeError(f"不支持的文件输入类型: {type(file_input)}")
 
 
+def _get_cache_key(file_path: str) -> str:
+    """
+    生成缓存键（基于文件修改时间）
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        str: 缓存键
+    """
+    mtime = os.path.getmtime(file_path)
+    return f"{file_path}_{mtime}"
+
+
+def _extract_mapping(
+    df: pd.DataFrame,
+    key_column: str,
+    value_column: str,
+    value_filter: Optional[str] = None
+) -> Dict[str, str]:
+    """
+    从DataFrame中提取映射关系
+
+    Args:
+        df: 映射表DataFrame
+        key_column: 键列名（变量名列）
+        value_column: 值列名（映射目标列）
+        value_filter: 值过滤条件（可选，如'是'）
+
+    Returns:
+        Dict[str, str]: 标准化后的映射字典
+    """
+    mapping = {}
+
+    for _, row in df.iterrows():
+        key = str(row[key_column]).strip()
+        value = str(row[value_column]).strip()
+
+        # 跳过空值
+        if not key or key == 'nan' or not value or value == 'nan':
+            continue
+
+        # 应用值过滤
+        if value_filter and value != value_filter:
+            continue
+
+        # 标准化键名
+        key_norm = normalize_text(key)
+        if key_norm:
+            mapping[key_norm] = value
+
+    return mapping
+
+
+def clear_mapping_cache():
+    """清除映射表缓存"""
+    global _MAPPING_CACHE
+    _MAPPING_CACHE.clear()
+    logger.info("映射表缓存已清除")
+
+
 # 导出的API函数
 __all__ = [
-    'prepare_dfm_data',
-    'load_variable_mappings',
-    'apply_stationarity_transforms',
-    'validate_preparation_parameters'
+    'load_mappings_once',
+    'collect_time_ranges',
+    'prepare_dfm_data_simple',
+    'validate_preparation_parameters',
+    'clear_mapping_cache'
 ]

@@ -15,7 +15,7 @@ from datetime import datetime
 
 from dashboard.models.DFM.ui import DFMComponent
 from dashboard.models.DFM.prep import prepare_dfm_data
-from dashboard.models.DFM.prep.modules.mapping_manager import load_mappings
+from dashboard.models.DFM.prep.api import load_mappings_once
 
 
 logger = logging.getLogger(__name__)
@@ -411,21 +411,22 @@ class ProcessingStatusComponent(DFMComponent):
             mapping_sheet_name: 映射表名称
         """
         try:
-            var_type_map, var_industry_map_loaded, var_dfm_single_stage_map, var_dfm_two_stage_map = load_mappings(
+            result = load_mappings_once(
                 excel_path=excel_file,
-                sheet_name=mapping_sheet_name,
-                indicator_col='指标名称',
-                type_col='类型',
-                industry_col='行业',
-                single_stage_col='一次估计',
-                two_stage_col='二次估计'
+                reference_sheet_name=mapping_sheet_name,
+                reference_column_name='指标名称'
             )
 
+            if result['status'] != 'success':
+                raise ValueError(result['message'])
+
+            mappings = result['mappings']
+
             # 保存映射数据
-            final_industry_map = var_industry_map_loaded if var_industry_map_loaded else {}
-            final_type_map = var_type_map if var_type_map else {}
-            final_single_stage_map = var_dfm_single_stage_map if var_dfm_single_stage_map else {}
-            final_two_stage_map = var_dfm_two_stage_map if var_dfm_two_stage_map else {}
+            final_industry_map = mappings.get('var_industry_map', {})
+            final_type_map = mappings.get('var_type_map', {})
+            final_single_stage_map = mappings.get('single_stage_map', {})
+            final_two_stage_map = mappings.get('second_stage_target_map', {})
 
             self._set_state("dfm_var_type_map_obj", final_type_map)
             self._set_state("dfm_industry_map_obj", final_industry_map)

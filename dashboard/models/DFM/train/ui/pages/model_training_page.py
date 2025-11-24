@@ -33,7 +33,6 @@ from dashboard.models.DFM.train.ui.components.training_status import TrainingSta
 from dashboard.models.DFM.train.utils import StateManager, filter_industries_by_target, get_non_target_indicators
 from dashboard.models.DFM.train.ui.components.file_uploader_component import FileUploaderComponent
 from dashboard.models.DFM.train.config import UIConfig
-from dashboard.models.DFM.train.training.factor_selection_config import create_factor_config
 from dashboard.models.DFM.train.ui.utils.config_builder import TrainingConfigBuilder
 from dashboard.models.DFM.train.ui.utils.text_helpers import (
     normalize_variable_name,
