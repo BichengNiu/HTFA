@@ -22,6 +22,7 @@ class LoadedIndustrialData:
     monthly_df: pd.DataFrame
     daily_df: pd.DataFrame
     ten_day_df: pd.DataFrame
+    quarterly_df: pd.DataFrame
     yearly_df: pd.DataFrame
 
     # 映射关系
@@ -29,6 +30,7 @@ class LoadedIndustrialData:
     indicator_industry_map: Dict[str, str]
     indicator_unit_map: Dict[str, str]
     indicator_type_map: Dict[str, str]
+    indicator_freq_map: Dict[str, str]
 
 
     def get_all_dataframes(self) -> Dict[str, pd.DataFrame]:
@@ -42,6 +44,7 @@ class LoadedIndustrialData:
             'monthly': self.monthly_df,
             'daily': self.daily_df,
             'ten_day': self.ten_day_df,
+            'quarterly': self.quarterly_df,
             'yearly': self.yearly_df
         }
 
@@ -55,7 +58,8 @@ class LoadedIndustrialData:
             'source': self.source_map,
             'industry': self.indicator_industry_map,
             'unit': self.indicator_unit_map,
-            'type': self.indicator_type_map
+            'type': self.indicator_type_map,
+            'freq': self.indicator_freq_map
         } 
 
 def normalize_string(s: str) -> str:
@@ -488,6 +492,7 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
     indicator_industry_map = {}
     indicator_unit_map = {}
     indicator_type_map = {}
+    indicator_freq_map = {}
 
     # 初始化数据容器
     all_dfs_by_freq = {
@@ -495,6 +500,7 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
         'monthly': [],
         'daily': [],
         'ten_day': [],
+        'quarterly': [],
         'yearly': []
     }
     all_indicator_source_maps = []
@@ -506,11 +512,12 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
         # 只有第一个文件读取指标体系映射
         read_mapping = (idx == 0)
 
-        file_dfs, source_map, ind_map, unit_map, type_map = process_single_excel_file(
+        file_dfs, source_map, ind_map, unit_map, type_map, freq_map = process_single_excel_file(
             file_input,
             indicator_industry_map,
             indicator_unit_map,
             indicator_type_map,
+            indicator_freq_map,
             read_mapping_sheet=read_mapping
         )
 
@@ -518,6 +525,7 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
         indicator_industry_map = ind_map
         indicator_unit_map = unit_map
         indicator_type_map = type_map
+        indicator_freq_map = freq_map
 
         # 合并各频率数据
         for freq, dfs in file_dfs.items():
@@ -536,11 +544,13 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
             monthly_df=pd.DataFrame(),
             daily_df=pd.DataFrame(),
             ten_day_df=pd.DataFrame(),
+            quarterly_df=pd.DataFrame(),
             yearly_df=pd.DataFrame(),
             source_map={},
             indicator_industry_map={},
             indicator_unit_map={},
-            indicator_type_map={}
+            indicator_type_map={},
+            indicator_freq_map={}
         )
 
     # 合并所有指标来源映射
@@ -562,11 +572,13 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
         monthly_df=merged_dfs.get('monthly', pd.DataFrame()),
         daily_df=merged_dfs.get('daily', pd.DataFrame()),
         ten_day_df=merged_dfs.get('ten_day', pd.DataFrame()),
+        quarterly_df=merged_dfs.get('quarterly', pd.DataFrame()),
         yearly_df=merged_dfs.get('yearly', pd.DataFrame()),
         source_map=merged_source_map,
         indicator_industry_map=indicator_industry_map,
         indicator_unit_map=indicator_unit_map,
-        indicator_type_map=indicator_type_map
+        indicator_type_map=indicator_type_map,
+        indicator_freq_map=indicator_freq_map
     )
 
 # === 行业工具函数 ===
@@ -681,12 +693,14 @@ class IndustrialLoader(BaseDataLoader):
                 'monthly': industrial_data.monthly_df,
                 'daily': industrial_data.daily_df,
                 'ten_day': industrial_data.ten_day_df,
+                'quarterly': industrial_data.quarterly_df,
                 'yearly': industrial_data.yearly_df
             },
             source_map=industrial_data.source_map,
             indicator_industry_map=industrial_data.indicator_industry_map,
             indicator_unit_map=industrial_data.indicator_unit_map,
             indicator_type_map=industrial_data.indicator_type_map,
+            indicator_freq_map=industrial_data.indicator_freq_map,
             module_name='industrial'
         )
 

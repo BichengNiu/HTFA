@@ -244,16 +244,13 @@ def display_summary_table(
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    col_left, col_right = st.columns([1, 3])
-    with col_left:
-        st.download_button(
-            label="下载数据摘要",
-            data=buffer.getvalue(),
-            file_name=f"{download_prefix}_{timestamp}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            type="primary",
-            use_container_width=True
-        )
+    st.download_button(
+        label="下载数据摘要",
+        data=buffer.getvalue(),
+        file_name=f"{download_prefix}_{timestamp}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary"
+    )
 
 
 def _sort_summary_table(

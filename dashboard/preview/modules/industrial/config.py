@@ -16,7 +16,7 @@ class IndustrialConfig(BasePreviewConfig):
 
     def __init__(self):
         """初始化工业配置"""
-        self._frequencies = ['weekly', 'monthly', 'daily', 'ten_day', 'yearly']
+        self._frequencies = ['weekly', 'monthly', 'daily', 'ten_day', 'quarterly', 'yearly']
         self._frequency_configs = self._build_frequency_configs()
         self._colors = self._build_colors()
         self._ui_text = self._build_ui_text()
@@ -120,6 +120,20 @@ class IndustrialConfig(BasePreviewConfig):
                     '两年前值', '三年前值'
                 ],
                 color='#9467bd'
+            ),
+            'quarterly': FrequencyConfig(
+                english_name='quarterly',
+                display_name='季度',
+                sort_column='环比上季',
+                highlight_columns=['环比上季', '同比上年'],
+                percentage_columns=['环比上季', '同比上年'],
+                indicator_name_column='季度指标名称',
+                date_column='最新季度',
+                column_order=[
+                    '季度指标名称', '最新季度', '最新值', '上季值',
+                    '环比上季', '上年同季值', '同比上年'
+                ],
+                color='#8c564b'
             )
         }
 
@@ -219,6 +233,22 @@ class IndustrialConfig(BasePreviewConfig):
                 'layout': {
                     'margin': {'l': 50, 'r': 30, 't': 60, 'b': 100}
                 }
+            },
+            'quarterly': {
+                'x_range': range(1, 5),
+                'x_label_func': lambda x: f"Q{x}",
+                'x_tick_interval': 1,
+                'historical_years': 5,
+                'layout': {
+                    'margin': {'l': 50, 'r': 30, 't': 60, 'b': 120},
+                    'legend': {
+                        'orientation': 'h',
+                        'yanchor': 'bottom',
+                        'y': -0.3,
+                        'xanchor': 'center',
+                        'x': 0.5
+                    }
+                }
             }
         }
 
@@ -240,15 +270,26 @@ class IndustrialConfig(BasePreviewConfig):
 
 # 导出配置变量供共享组件使用
 UNIFIED_FREQUENCY_CONFIGS = {}
-FREQUENCY_ORDER = ['日度', '周度', '旬度', '月度', '年度']
+FREQUENCY_ORDER = ['日度', '周度', '旬度', '月度', '季度', '年度']
 CHINESE_TO_ENGLISH_FREQ = {
     '周度': 'weekly',
     '月度': 'monthly',
     '日度': 'daily',
     '旬度': 'ten_day',
+    '季度': 'quarterly',
     '年度': 'yearly'
 }
 ENGLISH_TO_CHINESE_FREQ = {v: k for k, v in CHINESE_TO_ENGLISH_FREQ.items()}
+
+# 指标体系中频率字符到英文标识的映射（单字格式）
+FREQ_CHAR_TO_ENGLISH = {
+    '日': 'daily',
+    '周': 'weekly',
+    '旬': 'ten_day',
+    '月': 'monthly',
+    '季': 'quarterly',
+    '年': 'yearly'
+}
 
 # 初始化配置
 _config = IndustrialConfig()

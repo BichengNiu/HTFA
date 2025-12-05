@@ -20,7 +20,7 @@ import os
 from datetime import datetime
 
 from dashboard.models.DFM.prep.processor import DataPreparationProcessor
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -115,7 +115,15 @@ def load_mappings_once(
             df, reference_column_name, '单位'
         )
 
-        # 5. 一次估计映射（可选）
+        # 5. 变量-性质映射（变量名 → 性质）★新增：用于变量转换推荐★
+        if '性质' in df.columns:
+            mappings['var_nature_map'] = _extract_mapping(
+                df, reference_column_name, '性质'
+            )
+        else:
+            mappings['var_nature_map'] = {}
+
+        # 6. 一次估计映射（可选）
         if '一次估计' in df.columns:
             mappings['single_stage_map'] = _extract_mapping(
                 df, reference_column_name, '一次估计', value_filter='是'
@@ -147,12 +155,22 @@ def load_mappings_once(
         else:
             mappings['second_stage_target_map'] = {}
 
+        # 9. 变量-发布日期滞后映射（新增：用于发布日期校准）
+        if '发布日期' in df.columns:
+            mappings['var_publication_lag_map'] = _extract_numeric_mapping(
+                df, reference_column_name, '发布日期'
+            )
+        else:
+            mappings['var_publication_lag_map'] = {}
+
         # 统计信息
         logger.info(f"  映射加载完成:")
         logger.info(f"    变量类型: {len(mappings['var_type_map'])}个")
         logger.info(f"    变量-行业: {len(mappings['var_industry_map'])}个")
         logger.info(f"    变量-频率: {len(mappings['var_frequency_map'])}个")
         logger.info(f"    变量-单位: {len(mappings['var_unit_map'])}个")
+        logger.info(f"    变量-性质: {len(mappings['var_nature_map'])}个")
+        logger.info(f"    发布日期滞后: {len(mappings['var_publication_lag_map'])}个")
         logger.info(f"    一次估计: {len(mappings['single_stage_map'])}个")
         logger.info(f"    一阶段预测: {len(mappings['first_stage_pred_map'])}个")
         logger.info(f"    一阶段目标: {len(mappings['first_stage_target_map'])}个")
@@ -297,7 +315,11 @@ def prepare_dfm_data_simple(
     target_freq: str = "W-FRI",
     consecutive_nan_threshold: int = 10,
     reference_sheet_name: str = "指标体系",
-    reference_column_name: str = "指标名称"
+    reference_column_name: str = "指标名称",
+    enable_borrowing: bool = True,
+    enable_freq_alignment: bool = True,
+    zero_handling: str = "missing",
+    enable_publication_calibration: bool = False
 ) -> Dict[str, Any]:
     """
     DFM数据准备主API - 简化版（7步流程）
@@ -319,6 +341,10 @@ def prepare_dfm_data_simple(
         consecutive_nan_threshold: 允许的最大连续NaN值数量
         reference_sheet_name: 指标映射表的工作表名称
         reference_column_name: 映射表中的参考列名
+        enable_borrowing: 是否启用数据借调，默认True
+        enable_freq_alignment: 是否启用频率对齐，默认True。选择False时保留原始日期
+        zero_handling: 零值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1，默认'missing'
+        enable_publication_calibration: 是否启用发布日期校准，默认False。启用时按指标实际发布日期对齐
 
     Returns:
         dict: {
@@ -360,9 +386,13 @@ def prepare_dfm_data_simple(
         mappings = mapping_result['mappings']
         var_industry_map = mappings['var_industry_map']
         var_frequency_map = mappings['var_frequency_map']
+        var_publication_lag_map = mappings.get('var_publication_lag_map', {})
 
         # 步骤3-7: 创建Processor并执行
         logger.info("\n开始执行数据处理流程...")
+        logger.info(f"频率对齐模式: {'启用' if enable_freq_alignment else '禁用（保留原始日期）'}")
+        logger.info(f"零值处理: {zero_handling}")
+        logger.info(f"发布日期校准: {'启用' if enable_publication_calibration else '禁用'}")
         processor = DataPreparationProcessor(
             excel_path=excel_input,
             target_variable_name=target_variable_name,
@@ -371,7 +401,12 @@ def prepare_dfm_data_simple(
             target_freq=target_freq,
             consecutive_nan_threshold=consecutive_nan_threshold,
             data_start_date=data_start_date,
-            data_end_date=data_end_date
+            data_end_date=data_end_date,
+            enable_borrowing=enable_borrowing,
+            enable_freq_alignment=enable_freq_alignment,
+            zero_handling=zero_handling,
+            var_publication_lag_map=var_publication_lag_map,
+            enable_publication_calibration=enable_publication_calibration
         )
 
         processed_data, variable_mapping, transform_log, removal_log = processor.execute()
@@ -602,11 +637,157 @@ def _extract_mapping(
     return mapping
 
 
+def _extract_numeric_mapping(
+    df: pd.DataFrame,
+    key_column: str,
+    value_column: str
+) -> Dict[str, int]:
+    """
+    从DataFrame中提取数值映射关系
+
+    Args:
+        df: 映射表DataFrame
+        key_column: 键列名（变量名列）
+        value_column: 值列名（数值列）
+
+    Returns:
+        Dict[str, int]: 标准化后的映射字典（值为整数）
+    """
+    mapping = {}
+
+    for _, row in df.iterrows():
+        key = str(row[key_column]).strip()
+        value = row[value_column]
+
+        # 跳过空值
+        if not key or key == 'nan':
+            continue
+
+        # 尝试转换为整数
+        try:
+            if pd.notna(value):
+                int_value = int(float(value))
+                key_norm = normalize_text(key)
+                if key_norm:
+                    mapping[key_norm] = int_value
+        except (ValueError, TypeError):
+            continue
+
+    return mapping
+
+
 def clear_mapping_cache():
     """清除映射表缓存"""
     global _MAPPING_CACHE
     _MAPPING_CACHE.clear()
     logger.info("映射表缓存已清除")
+
+
+def detect_file_info(
+    file_content: bytes
+) -> Dict[str, Any]:
+    """
+    检测Excel文件信息（日期范围和变量统计）
+
+    整合日期检测和变量统计功能，供UI层调用
+
+    Args:
+        file_content: Excel文件字节内容
+
+    Returns:
+        dict: {
+            'status': str,
+            'message': str,
+            'date_range': {
+                'start': date,
+                'end': date
+            },
+            'variable_count': int,
+            'freq_counts': Dict[str, int],
+            'variable_stats': pd.DataFrame
+        }
+    """
+    from dashboard.models.DFM.prep.services.stats_service import StatsService
+
+    try:
+        # 检测日期范围
+        start_date, end_date, var_count, freq_counts = StatsService.detect_date_range(file_content)
+
+        # 计算变量统计
+        var_stats = StatsService.compute_raw_stats(file_content)
+
+        return {
+            'status': 'success',
+            'message': f'检测到 {var_count} 个变量',
+            'date_range': {
+                'start': start_date,
+                'end': end_date
+            },
+            'variable_count': var_count,
+            'freq_counts': freq_counts,
+            'variable_stats': var_stats
+        }
+
+    except Exception as e:
+        logger.error(f"文件信息检测失败: {e}", exc_info=True)
+        return {
+            'status': 'error',
+            'message': f'文件信息检测失败: {str(e)}',
+            'date_range': None,
+            'variable_count': 0,
+            'freq_counts': {},
+            'variable_stats': None
+        }
+
+
+def generate_export_excel(
+    prepared_data: pd.DataFrame,
+    industry_map: Dict[str, str],
+    mappings: Dict[str, Any],
+    removed_vars_log: Optional[list] = None,
+    transform_details: Optional[Dict] = None
+) -> bytes:
+    """
+    生成导出Excel文件
+
+    Args:
+        prepared_data: 处理后的数据
+        industry_map: 行业映射
+        mappings: 完整映射字典
+        removed_vars_log: 被删除变量日志
+        transform_details: 变量转换详情
+
+    Returns:
+        bytes: Excel文件字节内容
+    """
+    from dashboard.models.DFM.prep.services.export_service import ExportService
+
+    return ExportService.generate_excel(
+        prepared_data=prepared_data,
+        industry_map=industry_map,
+        mappings=mappings,
+        removed_vars_log=removed_vars_log,
+        transform_details=transform_details
+    )
+
+
+def compute_variable_stats(
+    prepared_data: pd.DataFrame,
+    var_frequency_map: Optional[Dict[str, str]] = None
+) -> pd.DataFrame:
+    """
+    计算处理后数据的变量统计
+
+    Args:
+        prepared_data: 处理后的DataFrame
+        var_frequency_map: 变量频率映射
+
+    Returns:
+        DataFrame: 变量统计信息
+    """
+    from dashboard.models.DFM.prep.services.stats_service import StatsService
+
+    return StatsService.compute_processed_stats(prepared_data, var_frequency_map)
 
 
 # 导出的API函数
@@ -615,5 +796,8 @@ __all__ = [
     'collect_time_ranges',
     'prepare_dfm_data_simple',
     'validate_preparation_parameters',
-    'clear_mapping_cache'
+    'clear_mapping_cache',
+    'detect_file_info',
+    'generate_export_excel',
+    'compute_variable_stats'
 ]

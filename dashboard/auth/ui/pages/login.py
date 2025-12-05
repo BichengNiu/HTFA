@@ -193,7 +193,7 @@ class LoginPage:
         <div class="platform-header">
             <h1 class="platform-title">经济运行分析平台</h1>
             <hr class="platform-divider">
-            <p class="platform-subtitle">国家信息中心</p>
+            <p class="platform-subtitle">国家信息中心经济预测部政策仿真实验室</p>
         </div>
         """, unsafe_allow_html=True)
 

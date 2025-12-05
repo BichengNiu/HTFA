@@ -8,7 +8,6 @@ from dashboard.core.ui.components.data_input.base import DataInputComponent
 from dashboard.core.ui.components.data_input.upload import UnifiedDataUploadComponent, DataUploadSidebar
 from dashboard.core.ui.components.data_input.validation import DataValidationComponent
 from dashboard.core.ui.components.data_input.staging import DataStagingComponent
-from dashboard.models.DFM.prep.ui.components.data_preview import DataPreviewComponent
 
 __all__ = [
     'DataInputComponent',
@@ -16,5 +15,4 @@ __all__ = [
     'DataUploadSidebar',
     'DataValidationComponent',
     'DataStagingComponent',
-    'DataPreviewComponent'
 ]

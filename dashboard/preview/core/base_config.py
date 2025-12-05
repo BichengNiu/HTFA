@@ -98,7 +98,7 @@ class BasePreviewConfig(ABC):
         Returns:
             List[str]: 频率中文名列表
         """
-        return ['日度', '周度', '旬度', '月度', '年度']
+        return ['日度', '周度', '旬度', '月度', '季度', '年度']
 
     def get_chinese_to_english_freq(self) -> Dict[str, str]:
         """获取中文到英文频率映射
@@ -113,6 +113,7 @@ class BasePreviewConfig(ABC):
             '月度': 'monthly',
             '日度': 'daily',
             '旬度': 'ten_day',
+            '季度': 'quarterly',
             '年度': 'yearly'
         }
 

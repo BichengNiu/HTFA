@@ -28,6 +28,7 @@ class LoadedPreviewData:
     indicator_industry_map: Dict[str, str] = field(default_factory=dict)
     indicator_unit_map: Dict[str, str] = field(default_factory=dict)
     indicator_type_map: Dict[str, str] = field(default_factory=dict)
+    indicator_freq_map: Dict[str, str] = field(default_factory=dict)
 
     # 元数据
     module_name: str = "unknown"
@@ -64,7 +65,8 @@ class LoadedPreviewData:
             'source': self.source_map,
             'industry': self.indicator_industry_map,
             'unit': self.indicator_unit_map,
-            'type': self.indicator_type_map
+            'type': self.indicator_type_map,
+            'freq': self.indicator_freq_map
         }
 
     def has_frequency(self, frequency: str) -> bool:

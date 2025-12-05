@@ -12,7 +12,7 @@ from collections import defaultdict, Counter
 from statsmodels.tsa.stattools import adfuller
 
 from dashboard.models.DFM.prep.modules.config_constants import ADF_P_THRESHOLD
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 def ensure_stationarity(
     df: pd.DataFrame,

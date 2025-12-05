@@ -6,7 +6,7 @@
 - date_utils: 日期处理
 """
 
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text, normalize_column_name
+from dashboard.models.DFM.utils.text_utils import normalize_text, normalize_column_name
 from dashboard.models.DFM.prep.utils.date_utils import standardize_date, parse_date_range, filter_by_date_range
 
 __all__ = [

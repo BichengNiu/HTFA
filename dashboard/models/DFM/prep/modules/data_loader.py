@@ -14,7 +14,7 @@ from collections import defaultdict
 
 from dashboard.models.DFM.prep.modules.format_detection import detect_sheet_format, parse_sheet_info
 from dashboard.models.DFM.prep.modules.data_cleaner import DataCleaner
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 class DataLoader:
     """数据加载器类"""
@@ -64,9 +64,6 @@ class DataLoader:
         print(f"    [目标Sheet读取] 使用统一格式，第一行为列名，第一列为时间列")
 
         df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=0)
-
-        # 清理数据
-        df_raw = self.cleaner.clean_zero_values(df_raw, "[目标Sheet] ")
 
         if df_raw.shape[1] < 2:
             raise ValueError(f"目标 Sheet '{sheet_name}' 列数 < 2，数据格式不正确")
@@ -181,7 +178,6 @@ class DataLoader:
         df = pd.read_excel(excel_file, sheet_name=sheet_name, header=0, index_col=0, parse_dates=True)
 
         # 清理数据
-        df = self.cleaner.clean_zero_values(df, f"[{freq_type}] ")
         df = self.cleaner.remove_unnamed_columns(df, f"[{freq_type}] ")
 
         # 强制索引转换为日期时间
@@ -245,7 +241,6 @@ class DataLoader:
         df = pd.read_excel(excel_file, sheet_name=sheet_name, header=0, index_col=0, parse_dates=True)
 
         # 清理数据
-        df = self.cleaner.clean_zero_values(df, f"[旬度] ")
         df = self.cleaner.remove_unnamed_columns(df, f"[旬度] ")
 
         # 强制索引转换为日期时间
@@ -309,7 +304,6 @@ class DataLoader:
 
         # 清理数据
         df_raw_pred = self.cleaner.remove_unnamed_columns(df_raw_pred, "[月度预测] ")
-        df_raw_pred = self.cleaner.clean_zero_values(df_raw_pred, "[月度预测] ")
 
         if df_raw_pred.shape[1] < 2:
             print(f"      错误: 月度预测 Sheet '{sheet_name}' 列数 < 2。跳过。")

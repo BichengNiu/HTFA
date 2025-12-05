@@ -17,9 +17,9 @@ def read_indicator_mapping(
     excel_file_handler,
     sheet_name: str = '指标体系',
     file_buffer=None
-) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str]]:
+) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
     """
-    读取指标体系映射（行业、单位、类型）
+    读取指标体系映射（行业、单位、类型、频率）
 
     Args:
         excel_file_handler: pandas ExcelFile对象
@@ -27,13 +27,15 @@ def read_indicator_mapping(
         file_buffer: 文件缓冲区（用于BytesIO seek操作）
 
     Returns:
-        Tuple[Dict, Dict, Dict]: (行业映射, 单位映射, 类型映射)
+        Tuple[Dict, Dict, Dict, Dict]: (行业映射, 单位映射, 类型映射, 频率映射)
     """
     from dashboard.preview.modules.industrial.loader import normalize_string
+    from dashboard.preview.modules.industrial.config import FREQ_CHAR_TO_ENGLISH
 
     industry_map = {}
     unit_map = {}
     type_map = {}
+    freq_map = {}
 
     try:
         if file_buffer and isinstance(file_buffer, io.BytesIO):
@@ -49,7 +51,8 @@ def read_indicator_mapping(
             '指标名称': ['指标名称'],
             '行业': ['行业'],
             '单位': ['单位'],
-            '类型': ['类型']
+            '类型': ['类型'],
+            '频率': ['频率']
         }
 
         actual_col_names = {}
@@ -62,7 +65,7 @@ def read_indicator_mapping(
 
         if not actual_col_names.get('指标名称'):
             warnings.warn(f"Sheet '{sheet_name}' found, but no indicator name column found.")
-            return industry_map, unit_map, type_map
+            return industry_map, unit_map, type_map, freq_map
 
         df_mapping = pd.read_excel(
             excel_file_handler,
@@ -106,12 +109,22 @@ def read_indicator_mapping(
             ).to_dict()
             logger.debug(f"成功读取 {len(type_map)} 个类型映射")
 
+        # 创建频率映射
+        if '频率' in df_mapping.columns:
+            df_freq = df_mapping.dropna(subset=['指标名称', '频率'])
+            for _, row in df_freq.iterrows():
+                name = row['指标名称']
+                freq_char = str(row['频率']).strip()
+                if freq_char in FREQ_CHAR_TO_ENGLISH:
+                    freq_map[name] = FREQ_CHAR_TO_ENGLISH[freq_char]
+            logger.debug(f"成功读取 {len(freq_map)} 个频率映射")
+
     except KeyError as ke:
         warnings.warn(f"Sheet '{sheet_name}' columns not found: {ke}")
     except Exception as e:
         warnings.warn(f"Error reading mapping sheet '{sheet_name}': {e}")
 
-    return industry_map, unit_map, type_map
+    return industry_map, unit_map, type_map, freq_map
 
 
 def determine_data_type(sheet_name: str) -> Optional[str]:
@@ -319,9 +332,10 @@ def process_single_sheet(
     file_name: str,
     source_name_base: str,
     indicator_source_map: Dict[str, str],
+    indicator_freq_map: Dict[str, str],
     file_buffer=None
-) -> Optional[Tuple[str, pd.DataFrame]]:
-    """处理单个Excel sheet
+) -> Optional[Dict[str, List[pd.DataFrame]]]:
+    """处理单个Excel sheet（按变量分配频率）
 
     Args:
         excel_file_handler: pandas ExcelFile对象
@@ -329,21 +343,18 @@ def process_single_sheet(
         file_name: 文件名
         source_name_base: 源文件基础名称
         indicator_source_map: 指标来源映射字典
+        indicator_freq_map: 指标频率映射字典
         file_buffer: 文件缓冲区
 
     Returns:
-        Optional[Tuple[str, pd.DataFrame]]: (数据类型, 处理后的DataFrame)，失败返回None
+        Optional[Dict[str, List[pd.DataFrame]]]: {频率: [DataFrame列表]}，失败返回None
     """
+    from dashboard.preview.modules.industrial.loader import normalize_string
+
     logger.debug(f"分析sheet: '{sheet_name}'")
 
     # 跳过指标体系sheet
     if sheet_name == '指标体系':
-        return None
-
-    # 判断数据类型
-    data_type = determine_data_type(sheet_name)
-    if data_type is None:
-        logger.debug(f"Sheet名称不包含数据类型标记，跳过")
         return None
 
     try:
@@ -351,7 +362,7 @@ def process_single_sheet(
         if file_buffer and isinstance(file_buffer, io.BytesIO):
             file_buffer.seek(0)
 
-        logger.debug(f"从sheet '{sheet_name}' 读取 '{data_type}' 数据")
+        logger.debug(f"从sheet '{sheet_name}' 读取数据")
 
         # 使用统一格式读取
         read_params = {
@@ -385,20 +396,97 @@ def process_single_sheet(
         if df_sheet is None:
             return None
 
-        # 频率特定处理
+        # 验证所有变量都在指标体系中定义了频率
+        data_columns = list(df_sheet.columns)
+        unknown_vars = []
+        for col in data_columns:
+            normalized_col = normalize_string(col)
+            if normalized_col not in indicator_freq_map:
+                unknown_vars.append(col)
+
+        if unknown_vars:
+            error_msg = (
+                f"Sheet '{sheet_name}' 包含 {len(unknown_vars)} 个未在指标体系中定义频率的变量:\n"
+                + "\n".join(f"  - {v}" for v in unknown_vars[:10])
+                + (f"\n  ... 等共 {len(unknown_vars)} 个" if len(unknown_vars) > 10 else "")
+            )
+            raise ValueError(error_msg)
+
+        # 按变量分配到不同频率
+        result = {
+            'weekly': [],
+            'monthly': [],
+            'daily': [],
+            'ten_day': [],
+            'quarterly': [],
+            'yearly': []
+        }
+
         source_identifier_prefix = f"{source_name_base}|{sheet_name}"
-        df_processed = process_frequency_specific(
-            df_sheet,
-            data_type,
-            source_identifier_prefix,
-            indicator_source_map
-        )
 
-        return (data_type, df_processed)
+        for col in data_columns:
+            normalized_col = normalize_string(col)
+            freq = indicator_freq_map.get(normalized_col)
 
+            if freq and freq in result:
+                # 提取单列数据
+                col_df = df_sheet[[col]].copy()
+                col_df.columns = [normalized_col]
+
+                # 更新指标来源映射
+                if normalized_col not in indicator_source_map:
+                    indicator_source_map[normalized_col] = source_identifier_prefix
+
+                # 应用频率特定处理
+                col_df = _apply_frequency_processing(col_df, freq, normalized_col)
+
+                result[freq].append(col_df)
+                logger.debug(f"变量 '{normalized_col}' 分配到 '{freq}' 频率")
+
+        return result
+
+    except ValueError:
+        # 重新抛出验证错误
+        raise
     except Exception as e:
         warnings.warn(f"     Error processing sheet '{sheet_name}' in '{file_name}': {e}. Skipping sheet.")
         return None
+
+
+def _apply_frequency_processing(
+    df: pd.DataFrame,
+    freq: str,
+    col_name: str
+) -> pd.DataFrame:
+    """对单列数据应用频率特定处理
+
+    Args:
+        df: 单列DataFrame
+        freq: 频率类型
+        col_name: 列名（用于日志）
+
+    Returns:
+        pd.DataFrame: 处理后的DataFrame
+    """
+    # 月度数据特殊处理：工业增加值日期调整
+    if freq == "monthly" and "工业增加值" in col_name:
+        if pd.api.types.is_datetime64_any_dtype(df.index):
+            try:
+                df = df.copy()
+                df.index = df.index - pd.offsets.MonthEnd(1)
+                logger.debug(f"调整'{col_name}'的日期索引")
+            except Exception as e:
+                warnings.warn(f"Failed to apply MonthEnd offset for '{col_name}': {e}")
+
+    # 周度数据处理
+    elif freq == "weekly":
+        df = _process_periodic_frequency(df, "weekly", 'W-FRI')
+
+    # 旬度数据处理
+    elif freq == "ten_day":
+        df = _process_periodic_frequency(df, "ten_day", 'ten_day')
+
+    return df
 
 
 def process_single_excel_file(
@@ -406,8 +494,9 @@ def process_single_excel_file(
     indicator_industry_map: Dict[str, str],
     indicator_unit_map: Dict[str, str],
     indicator_type_map: Dict[str, str],
+    indicator_freq_map: Dict[str, str],
     read_mapping_sheet: bool = False
-) -> Tuple[Dict[str, List[pd.DataFrame]], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
+) -> Tuple[Dict[str, List[pd.DataFrame]], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
     """处理单个Excel文件
 
     Args:
@@ -415,10 +504,11 @@ def process_single_excel_file(
         indicator_industry_map: 行业映射字典（会被更新）
         indicator_unit_map: 单位映射字典（会被更新）
         indicator_type_map: 类型映射字典（会被更新）
+        indicator_freq_map: 频率映射字典（会被更新）
         read_mapping_sheet: 是否读取指标体系映射
 
     Returns:
-        Tuple: (数据框字典, 指标来源映射, 行业映射, 单位映射, 类型映射)
+        Tuple: (数据框字典, 指标来源映射, 行业映射, 单位映射, 类型映射, 频率映射)
     """
     # 初始化结果容器
     all_dfs_by_type = {
@@ -426,6 +516,7 @@ def process_single_excel_file(
         'monthly': [],
         'daily': [],
         'ten_day': [],
+        'quarterly': [],
         'yearly': []
     }
     indicator_source_map = {}
@@ -437,7 +528,7 @@ def process_single_excel_file(
     except Exception as e:
         logger.error(f"文件读取失败: {e}")
         warnings.warn(f"Failed to read file: {e}")
-        return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
+        return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map, indicator_freq_map
     source_name_base = file_name_for_display.rsplit('.', 1)[0] if '.' in file_name_for_display else file_name_for_display
 
     try:
@@ -449,7 +540,7 @@ def process_single_excel_file(
         # 读取指标体系（如果需要）
         if read_mapping_sheet and '指标体系' in sheet_names:
             logger.debug("尝试从'指标体系'sheet读取映射")
-            industry_map_temp, unit_map_temp, type_map_temp = read_indicator_mapping(
+            industry_map_temp, unit_map_temp, type_map_temp, freq_map_temp = read_indicator_mapping(
                 excel_file_handler,
                 '指标体系',
                 file_buffer
@@ -460,6 +551,13 @@ def process_single_excel_file(
                 indicator_unit_map.update(unit_map_temp)
             if type_map_temp:
                 indicator_type_map.update(type_map_temp)
+            if freq_map_temp:
+                indicator_freq_map.update(freq_map_temp)
+                logger.info(f"成功读取 {len(freq_map_temp)} 个频率映射")
+
+        # 验证是否有频率映射（必须在处理数据sheet之前完成）
+        if not indicator_freq_map:
+            raise ValueError("指标体系中未找到频率映射，无法处理数据。请确保'指标体系'sheet包含'频率'列。")
 
         # 处理每个sheet
         processed_sheets = 0
@@ -470,12 +568,14 @@ def process_single_excel_file(
                 file_name_for_display,
                 source_name_base,
                 indicator_source_map,
+                indicator_freq_map,
                 file_buffer
             )
 
             if result:
-                data_type, df_processed = result
-                all_dfs_by_type[data_type].append(df_processed)
+                # result是Dict[str, List[pd.DataFrame]]
+                for freq, dfs in result.items():
+                    all_dfs_by_type[freq].extend(dfs)
                 processed_sheets += 1
 
         if processed_sheets > 0:
@@ -483,6 +583,9 @@ def process_single_excel_file(
         else:
             warnings.warn(f"--- No valid data sheets found in file: {file_name_for_display} ---")
 
+    except ValueError:
+        # 重新抛出验证错误
+        raise
     except Exception as e:
         warnings.warn(f"General error processing file {file_name_for_display}: {e}")
     finally:
@@ -492,7 +595,7 @@ def process_single_excel_file(
             except Exception:
                 pass
 
-    return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map
+    return all_dfs_by_type, indicator_source_map, indicator_industry_map, indicator_unit_map, indicator_type_map, indicator_freq_map
 
 
 def merge_dataframes_by_type(

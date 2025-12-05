@@ -16,7 +16,6 @@ from dashboard.core.ui.components.data_input import (
     DataUploadSidebar,
     DataValidationComponent,
     DataStagingComponent,
-    DataPreviewComponent
 )
 
 # 导入组件注册功能
@@ -49,5 +48,4 @@ __all__.extend([
     'DataUploadSidebar',
     'DataValidationComponent',
     'DataStagingComponent',
-    'DataPreviewComponent',
 ])

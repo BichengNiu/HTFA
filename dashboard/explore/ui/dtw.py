@@ -158,6 +158,9 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # 直接从st.session_state读取UI控件的值（而不是从统一状态管理器）
             # 因为Streamlit控件使用key参数时，值会自动保存到st.session_state
             target_series = st.session_state.get(f"dtw_{data_name}_auto_target_series")
+            # 清理target_series的首尾空格
+            if target_series and isinstance(target_series, str):
+                target_series = target_series.strip()
 
             # 获取窗口约束参数（从下拉菜单读取）
             window_constraint_choice = st.session_state.get(f"dtw_{data_name}_window_constraint_choice", "是")
@@ -190,7 +193,9 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # distance_metric = st.session_state.get(dist_metric_key, 'euclidean')
 
             # 获取比较序列（所有除目标序列外的数值列）
-            comparison_series = [col for col in numeric_cols if col != target_series] if target_series else []
+            # 清理列名首尾空格，防止空格导致的匹配失败
+            comparison_series = [col.strip() if isinstance(col, str) else col
+                                for col in numeric_cols if col != target_series] if target_series else []
 
             return {
                 'target_series': target_series,
@@ -427,6 +432,11 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         # 添加相似度标签
         results = self.add_similarity_labels(results)
 
+        # 缓存分析时使用的数据和路径字典，避免第二次重复计算
+        self.set_state('dtw_analysis_data', data.copy())
+        self.set_state('dtw_paths_dict', paths_dict)
+        logger.info(f"[DTW] 已缓存分析数据（列数: {len(data.columns)}）和路径字典（{len(paths_dict)}个变量）")
+
         return results
 
     def render_download_button(self, st_obj, results, params, data_name):
@@ -550,6 +560,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 var_name = result.get('变量名')
                 dtw_distance = result.get('DTW距离')
                 if var_name and dtw_distance != 'Error' and isinstance(dtw_distance, (int, float)):
+                    # 去除变量名首尾的空格（修复空格导致的匹配失败问题）
+                    var_name = var_name.strip() if isinstance(var_name, str) else var_name
                     valid_comparison_series.append(var_name)
 
             if valid_comparison_series:
@@ -626,9 +638,49 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             window_type_param = "无限制"
             window_size_param = None
 
-        # 为单个比较序列重新计算DTW以获取路径信息
-        dtw_results, paths_dict, errors, warnings = perform_batch_dtw_calculation(
-            df_input=data,
+        # 诊断日志：检查selected_comparison是否在data中
+        logger.info(f"[DTW诊断] 用户选择: {selected_comparison}")
+        logger.info(f"[DTW诊断] 数据集列数: {len(data.columns)}")
+        logger.info(f"[DTW诊断] 是否存在于数据集: {selected_comparison in data.columns}")
+
+        # 如果不存在，记录最相似的列名并使用缓存数据
+        if selected_comparison not in data.columns:
+            numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+            from difflib import SequenceMatcher
+            similarities = [(col, SequenceMatcher(None, selected_comparison, col).ratio())
+                            for col in numeric_cols]
+            top3 = sorted(similarities, key=lambda x: x[1], reverse=True)[:3]
+            logger.warning(f"[DTW诊断] 变量不存在！最相似的3个列名: {top3}")
+
+        # 优先使用缓存的路径字典，避免重复计算
+        cached_paths_dict = self.get_state('dtw_paths_dict')
+        if cached_paths_dict and selected_comparison in cached_paths_dict:
+            logger.info(f"[DTW] 使用缓存的路径数据（无需重新计算）: {selected_comparison}")
+            paths_dict = cached_paths_dict
+            errors = []
+            warnings = []
+        else:
+            # 缓存中没有，需要重新计算
+            logger.info(f"[DTW] 缓存中没有路径数据，重新计算: {selected_comparison}")
+
+            # 使用缓存的分析数据（如果存在）
+            cached_data = self.get_state('dtw_analysis_data')
+            if cached_data is not None:
+                logger.info("[DTW] 使用缓存的分析数据")
+                data_for_calc = cached_data
+                # 确保缓存数据的列名也被清理（防止旧缓存列名带空格）
+                data_for_calc.columns = data_for_calc.columns.str.strip() if hasattr(data_for_calc.columns, 'str') else data_for_calc.columns
+                logger.info(f"[DTW] 已清理缓存数据列名，列数: {len(data_for_calc.columns)}")
+            else:
+                logger.warning("[DTW] 未找到缓存数据，使用当前data")
+                data_for_calc = data
+                # 确保当前data的列名也被清理
+                data_for_calc.columns = data_for_calc.columns.str.strip() if hasattr(data_for_calc.columns, 'str') else data_for_calc.columns
+                logger.info(f"[DTW] 已清理当前数据列名，列数: {len(data_for_calc.columns)}")
+
+            # 为单个比较序列重新计算DTW以获取路径信息
+            dtw_results, paths_dict, errors, warnings = perform_batch_dtw_calculation(
+            df_input=data_for_calc,
             target_series_name=target_series,
             comparison_series_names=[selected_comparison],
             window_type_param=window_type_param,
@@ -666,7 +718,34 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 st_obj.warning(f"无法获取 {selected_comparison} 的DTW路径数据")
         else:
             logger.warning(f"[DTW图表] 在paths_dict中未找到 {selected_comparison}")
-            st_obj.warning(f"无法找到 {selected_comparison} 的DTW计算结果")
+
+            # 提供更友好的错误提示和建议
+            if errors:
+                st_obj.error(f"DTW计算失败：{errors[0]}")
+            else:
+                st_obj.error(f"无法找到 '{selected_comparison}' 的DTW计算结果")
+
+            # 如果变量不在数据集中，显示最相似的变量作为建议
+            if selected_comparison not in data_for_calc.columns:
+                numeric_cols = data_for_calc.select_dtypes(include=[np.number]).columns.tolist()
+                from difflib import SequenceMatcher
+                suggestions = sorted(
+                    [(col, SequenceMatcher(None, selected_comparison, col).ratio())
+                     for col in numeric_cols],
+                    key=lambda x: x[1],
+                    reverse=True
+                )[:3]
+
+                if suggestions and suggestions[0][1] > 0.7:
+                    st_obj.info("数据集中不存在该变量，您是否想选择以下相似变量？")
+                    for col, ratio in suggestions:
+                        st_obj.write(f"- {col} (相似度: {ratio:.1%})")
+
+            # 显示调试信息（仅在有警告时）
+            if warnings:
+                with st_obj.expander("查看详细警告信息"):
+                    for warning in warnings:
+                        st_obj.text(warning)
 
     def plot_dtw_path(self, st_obj, s1_np, s2_np, path, s1_name, s2_name, s1_time_index=None, s2_time_index=None):
         """绘制DTW路径图（使用Plotly）
@@ -807,6 +886,11 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         """渲染DTW分析界面"""
 
         try:
+            # 立即清理DataFrame列名中的首尾空格（统一在入口处处理）
+            data = data.copy()
+            data.columns = data.columns.str.strip() if hasattr(data.columns, 'str') else data.columns
+            logger.info(f"[DTW界面] 已清理数据列名空格，列数: {len(data.columns)}")
+
             # 渲染参数设置
             params = self.render_analysis_parameters(st_obj, data, data_name)
 

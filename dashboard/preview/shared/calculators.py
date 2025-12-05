@@ -162,6 +162,23 @@ def _calculate_reference_values(
             '上旬值': _find_previous_ten_day_value(series, current_date)
         }
 
+    elif frequency == 'quarterly':
+        current_year = current_date.year
+        current_quarter = (current_date.month - 1) // 3 + 1
+
+        # 上季度
+        last_quarter_year = current_year if current_quarter > 1 else current_year - 1
+        last_quarter = current_quarter - 1 if current_quarter > 1 else 4
+        val_last_quarter = _get_value_by_year_quarter(series, last_quarter_year, last_quarter)
+
+        # 上年同季度
+        last_year_same_quarter = _get_value_by_year_quarter(series, current_year - 1, current_quarter)
+
+        return {
+            '上季值': val_last_quarter,
+            '上年同季值': last_year_same_quarter
+        }
+
     elif frequency == 'yearly':
         current_year = current_date.year
         val_last_year = _get_value_by_year_end(series, current_year - 1)
@@ -229,6 +246,16 @@ def _calculate_growth_rates(
         if '上旬值' in reference_values:
             growth_rates['环比上旬'] = _growth_rate(
                 current_value, reference_values['上旬值'], True, use_difference
+            )
+    elif frequency == 'quarterly':
+        # 季度数据：计算环比上季和同比上年
+        if '上季值' in reference_values:
+            growth_rates['环比上季'] = _growth_rate(
+                current_value, reference_values['上季值'], False, use_difference
+            )
+        if '上年同季值' in reference_values:
+            growth_rates['同比上年'] = _growth_rate(
+                current_value, reference_values['上年同季值'], False, use_difference
             )
 
     # 同比增长率
@@ -315,6 +342,30 @@ def _get_value_at_date(df: pd.DataFrame, indicator: str, date: pd.Timestamp) -> 
 def _get_value_by_year_month(series: pd.Series, year: int, month: int) -> Any:
     """通过年月获取值"""
     mask = (series.index.year == year) & (series.index.month == month)
+    data = series[mask]
+    return data.iloc[-1] if not data.empty else np.nan
+
+
+def _get_value_by_year_quarter(series: pd.Series, year: int, quarter: int) -> Any:
+    """通过年份和季度获取值
+
+    Args:
+        series: 数据序列
+        year: 年份
+        quarter: 季度 (1-4)
+
+    Returns:
+        该季度的最新值，如果不存在则返回np.nan
+    """
+    # 季度对应的月份范围
+    quarter_months = {
+        1: [1, 2, 3],
+        2: [4, 5, 6],
+        3: [7, 8, 9],
+        4: [10, 11, 12]
+    }
+    months = quarter_months.get(quarter, [])
+    mask = (series.index.year == year) & (series.index.month.isin(months))
     data = series[mask]
     return data.iloc[-1] if not data.empty else np.nan
 

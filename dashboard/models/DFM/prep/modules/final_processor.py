@@ -12,7 +12,7 @@ import streamlit as st
 
 from dashboard.models.DFM.prep.modules.stationarity_processor import ensure_stationarity, apply_stationarity_transforms
 from dashboard.models.DFM.prep.modules.mapping_manager import create_industry_map_from_data
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 def apply_final_stationarity_check(
     all_data_aligned_weekly, actual_target_variable_name, target_sheet_cols,

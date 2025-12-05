@@ -14,7 +14,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from dashboard.models.DFM.ui import DFMComponent
-from dashboard.models.DFM.prep import prepare_dfm_data
+from dashboard.models.DFM.prep import prepare_dfm_data_simple
 from dashboard.models.DFM.prep.api import load_mappings_once
 
 
@@ -271,14 +271,13 @@ class ProcessingStatusComponent(DFMComponent):
             self._update_processing_progress(progress_bar, status_text, 30, "[CONFIG] 正在执行数据预处理...")
 
             # 调用数据预处理函数
-            result = prepare_dfm_data(
+            result = prepare_dfm_data_simple(
                 uploaded_file=excel_file_like_object,
-                target_freq=processing_params['target_freq'],
-                target_sheet_name=processing_params['target_sheet_name'],
                 target_variable_name=processing_params['target_variable'],
-                consecutive_nan_threshold=nan_threshold_int,
                 data_start_date=str(processing_params['data_start_date']),
                 data_end_date=str(processing_params['data_end_date']),
+                target_freq=processing_params['target_freq'],
+                consecutive_nan_threshold=nan_threshold_int,
                 reference_sheet_name=processing_params['type_mapping_sheet']
             )
 

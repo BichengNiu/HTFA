@@ -8,7 +8,7 @@
 import pandas as pd
 from typing import List, Dict, Tuple
 
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 from dashboard.models.DFM.prep.utils.date_utils import filter_by_date_range as filter_by_date_range_util
 
 

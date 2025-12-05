@@ -38,7 +38,7 @@ def should_reprocess_file(uploaded_file) -> bool:
     # 第二层：检查是否有任意数据
     has_data = any(
         get_preview_state(key) is not None and not get_preview_state(key).empty
-        for key in ['weekly_df', 'monthly_df', 'daily_df', 'ten_day_df', 'yearly_df']
+        for key in ['weekly_df', 'monthly_df', 'daily_df', 'ten_day_df', 'quarterly_df', 'yearly_df']
     )
 
     if not has_data:

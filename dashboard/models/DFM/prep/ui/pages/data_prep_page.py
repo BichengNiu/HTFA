@@ -2,21 +2,14 @@
 """
 DFM数据准备页面
 
-在新架构下100%恢复旧版本功能：
-- 日期范围自动检测
-- 8个参数完整配置
-- 自动映射加载
-- 移除变量详细日志
-- 行业映射文件导出
-- 导出文件名自定义
+重构版本：UI层仅负责渲染和状态管理，业务逻辑调用后端API
 """
 
 import streamlit as st
 import pandas as pd
-import numpy as np
 import io
 import time
-from datetime import datetime, date
+from datetime import date
 from typing import Optional, Tuple
 import logging
 
@@ -39,180 +32,81 @@ def _set_state(key: str, value):
     st.session_state[full_key] = value
 
 
-# 已删除 _sync_dates_to_train_model() 函数 - 移除与训练模块的耦合
-
-
 # ============================================================================
-# 核心功能函数
+# 核心功能函数（调用后端API）
 # ============================================================================
 
-def _detect_data_date_range(uploaded_file) -> Tuple[Optional[date], Optional[date]]:
+def _detect_data_date_range(uploaded_file) -> Tuple[Optional[date], Optional[date], int, dict]:
     """
-    从上传的文件中检测所有数据工作表的真实日期范围
+    从上传的文件中检测日期范围和变量数（调用后端API）
+    """
+    if uploaded_file is None or not hasattr(uploaded_file, 'getvalue'):
+        return None, None, 0, {}
+
+    file_bytes = uploaded_file.getvalue()
+    if not file_bytes:
+        return None, None, 0, {}
+
+    from dashboard.models.DFM.prep.services.stats_service import StatsService
+    return StatsService.detect_date_range(file_bytes)
+
+
+def _compute_raw_variable_stats(uploaded_file) -> pd.DataFrame:
+    """
+    从原始Excel文件计算变量统计信息（调用后端API）
+    """
+    if uploaded_file is None:
+        return pd.DataFrame()
+
+    file_bytes = uploaded_file.getvalue()
+    if not file_bytes:
+        return pd.DataFrame()
+
+    from dashboard.models.DFM.prep.services.stats_service import StatsService
+    return StatsService.compute_raw_stats(file_bytes)
+
+
+def _render_raw_variable_stats_table(st_obj, uploaded_file):
+    """
+    渲染变量状态表（文件上传后立即显示）
 
     Args:
+        st_obj: Streamlit对象
         uploaded_file: 上传的文件对象
-
-    Returns:
-        (开始日期, 结束日期) 元组，如果检测失败返回 (None, None)
     """
-    try:
-        if uploaded_file is None or not hasattr(uploaded_file, 'getvalue'):
-            return None, None
-
-        file_bytes = uploaded_file.getvalue()
-        if not file_bytes:
-            return None, None
-
-        excel_file = io.BytesIO(file_bytes)
-        all_dates_found = []
-
-        # 获取所有工作表名称
-        try:
-            xl_file = pd.ExcelFile(excel_file)
-            sheet_names = xl_file.sheet_names
-            print(f"检测到工作表: {sheet_names}")
-        except:
-            sheet_names = [0]
-
-        # 检查所有数据工作表
-        for sheet_name in sheet_names:
-            try:
-                excel_file.seek(0)
-
-                # 跳过明显的元数据工作表
-                if any(keyword in str(sheet_name).lower() for keyword in ['指标体系', 'mapping', 'meta', 'info']):
-                    print(f"跳过元数据工作表: {sheet_name}")
-                    continue
-
-                # 读取工作表
-                df_raw = pd.read_excel(excel_file, sheet_name=sheet_name)
-
-                if len(df_raw) < 5:
-                    continue
-
-                # 检测日期列
-                date_values = []
-
-                # 检查是否是Wind格式
-                if 'Wind' in sheet_name or (len(df_raw) > 0 and df_raw.iloc[0, 0] == '指标名称'):
-                    if len(df_raw) > 1:
-                        date_values = pd.to_datetime(df_raw.iloc[1:, 0], errors='coerce')
-                else:
-                    # 尝试前两列作为日期
-                    for col_idx in range(min(2, len(df_raw.columns))):
-                        try:
-                            test_dates = pd.to_datetime(df_raw.iloc[:, col_idx], errors='coerce')
-                            valid_dates = test_dates[test_dates.notna()]
-
-                            if len(valid_dates) > len(df_raw) * 0.5:
-                                date_values = valid_dates
-                                break
-                        except:
-                            continue
-
-                # 收集有效日期
-                if len(date_values) > 0:
-                    valid_dates = date_values[date_values.notna()]
-                    if len(valid_dates) > 5:
-                        all_dates_found.extend(valid_dates.tolist())
-                        print(f"  {sheet_name}: 找到 {len(valid_dates)} 个日期")
-
-            except Exception as e:
-                print(f"  处理 {sheet_name} 时出错: {str(e)}")
-                continue
-
-        # 汇总所有数据工作表的日期范围
-        if all_dates_found:
-            all_dates = pd.to_datetime(all_dates_found)
-
-            # 智能过滤异常日期
-            # 1. 过滤Excel纪元日期错误（1900年之前）
-            min_valid_date = pd.Timestamp('1900-01-01')
-            # 2. 过滤未来日期（当前日期+10年）
-            max_valid_date = pd.Timestamp.now() + pd.DateOffset(years=10)
-
-            valid_dates = all_dates[(all_dates >= min_valid_date) & (all_dates <= max_valid_date)]
-
-            if len(valid_dates) > 0:
-                actual_start = valid_dates.min().date()
-                actual_end = valid_dates.max().date()
-                print(f"检测到的真实日期范围: {actual_start} 到 {actual_end}")
-
-                if len(all_dates) > len(valid_dates):
-                    filtered_count = len(all_dates) - len(valid_dates)
-                    before_1900 = len(all_dates[all_dates < min_valid_date])
-                    after_future = len(all_dates[all_dates > max_valid_date])
-                    print(f"  (已过滤 {filtered_count} 个异常日期: {before_1900}个早于1900年, {after_future}个晚于{max_valid_date.year}年)")
-
-                return actual_start, actual_end
-
-        return None, None
-
-    except Exception as e:
-        print(f"日期检测异常: {e}")
-        return None, None
-
-
-def _auto_load_mapping_data(current_file, mapping_sheet_name: str = '指标体系'):
-    """
-    自动加载映射数据
-
-    Args:
-        current_file: 当前文件对象
-        mapping_sheet_name: 映射表工作表名称
-    """
-    # 会话级缓存，避免重复加载
-    cache_key = f"mapping_loaded_{current_file.name if current_file else 'none'}"
-    if _get_state(cache_key, False):
+    if uploaded_file is None:
         return
 
+    # 使用缓存
     try:
-        # 检查是否已经加载了映射数据
-        existing_industry_map = _get_state('industry_map_obj')
-        existing_type_map = _get_state('var_type_map_obj')
+        file_bytes = uploaded_file.getvalue()
+        cache_key = f"var_stats_{uploaded_file.name}_{len(file_bytes)}"
+    except:
+        cache_key = "var_stats_none"
 
-        if existing_industry_map and existing_type_map:
-            _set_state(cache_key, True)
-            return
+    cached_stats = _get_state(cache_key)
+    if cached_stats is not None:
+        stats_df = cached_stats
+    else:
+        with st_obj.spinner("正在分析变量状态..."):
+            stats_df = _compute_raw_variable_stats(uploaded_file)
+        _set_state(cache_key, stats_df)
 
-        if current_file is None:
-            return
+    if stats_df.empty:
+        return
 
-        # 加载映射数据
-        from dashboard.models.DFM.prep.api import load_mappings_once
-
-        result = load_mappings_once(
-            excel_path=current_file,
-            reference_sheet_name=mapping_sheet_name,
-            reference_column_name='指标名称'
-        )
-
-        if result['status'] != 'success':
-            st.error(f"加载映射表失败: {result['message']}")
-            return
-
-        mappings = result['mappings']
-
-        # 保存映射数据
-        _set_state("var_type_map_obj", mappings.get('var_type_map', {}))
-        _set_state("industry_map_obj", mappings.get('var_industry_map', {}))
-        _set_state("dfm_default_single_stage_map", mappings.get('single_stage_map', {}))
-        _set_state("dfm_first_stage_pred_map", mappings.get('first_stage_pred_map', {}))
-        _set_state("dfm_first_stage_target_map", mappings.get('first_stage_target_map', {}))
-        _set_state("dfm_second_stage_target_map", mappings.get('second_stage_target_map', {}))
-
-        # 标记为已加载
-        _set_state(cache_key, True)
-
-        print(f"自动加载映射数据完成: {len(var_industry_map)} 个指标")
-        print(f"一次估计默认变量: {len(var_dfm_single_stage_map)} 个")
-        print(f"一阶段预测默认变量: {len(var_first_stage_pred_map)} 个")
-        print(f"一阶段目标默认变量: {len(var_first_stage_target_map)} 个")
-        print(f"二阶段目标默认变量: {len(var_second_stage_target_map)} 个")
-
-    except Exception as e:
-        print(f"自动加载映射数据失败: {e}")
+    st_obj.dataframe(
+        stats_df,
+        column_config={
+            '变量名': st.column_config.TextColumn('变量名', width='large'),
+            '频率': st.column_config.TextColumn('频率', width='small'),
+            '缺失值占比': st.column_config.TextColumn('缺失值占比', width='small'),
+            '开始日期': st.column_config.TextColumn('开始日期', width='medium'),
+            '结束日期': st.column_config.TextColumn('结束日期', width='medium')
+        },
+        hide_index=True,
+        use_container_width=True
+    )
 
 
 # ============================================================================
@@ -222,7 +116,7 @@ def _auto_load_mapping_data(current_file, mapping_sheet_name: str = '指标体�
 def _render_file_upload_section(st_obj):
     """渲染文件上传区域"""
 
-    st_obj.markdown("#### 数据文件上传")
+    st_obj.markdown("#### 数据上传")
 
     # 检查已有文件
     existing_file = _get_state('training_data_file')
@@ -287,12 +181,14 @@ def _render_date_detection(st_obj, uploaded_file):
         # 需要重新检测
         print(f"执行日期检测: {uploaded_file.name}")
         with st_obj.spinner("正在检测数据日期范围..."):
-            detected_start, detected_end = _detect_data_date_range(uploaded_file)
+            detected_start, detected_end, variable_count, freq_counts = _detect_data_date_range(uploaded_file)
 
         # 缓存结果
-        _set_state(cache_key, (detected_start, detected_end))
+        _set_state(cache_key, (detected_start, detected_end, variable_count, freq_counts))
         _set_state("detected_start_date", detected_start)
         _set_state("detected_end_date", detected_end)
+        _set_state("detected_variable_count", variable_count)
+        _set_state("detected_freq_counts", freq_counts)
         _set_state("date_detection_needed", False)
 
         # 清理旧缓存
@@ -305,14 +201,42 @@ def _render_date_detection(st_obj, uploaded_file):
             print(f"清理旧缓存时出错: {e}")
     else:
         # 使用缓存的结果
-        detected_start, detected_end = cached_result if cached_result else (None, None)
+        if cached_result and len(cached_result) == 4:
+            detected_start, detected_end, variable_count, freq_counts = cached_result
+        elif cached_result and len(cached_result) == 3:
+            detected_start, detected_end, variable_count = cached_result
+            freq_counts = {}
+        elif cached_result:
+            detected_start, detected_end = cached_result[:2]
+            variable_count = 0
+            freq_counts = {}
+        else:
+            detected_start, detected_end, variable_count, freq_counts = None, None, 0, {}
         _set_state("detected_start_date", detected_start)
         _set_state("detected_end_date", detected_end)
+        _set_state("detected_variable_count", variable_count)
+        _set_state("detected_freq_counts", freq_counts)
         print(f"使用缓存的日期范围: {detected_start} 到 {detected_end}")
 
     # 显示检测结果
     if detected_start and detected_end:
-        st_obj.success(f"已检测数据文件的真实日期范围: {detected_start} 到 {detected_end}")
+        variable_count = _get_state("detected_variable_count", 0)
+        freq_counts = _get_state("detected_freq_counts", {})
+
+        # 构建频率统计字符串
+        freq_parts = []
+        for freq_name in ['日度', '周度', '旬度', '月度', '季度', '年度', '其他']:
+            if freq_name in freq_counts and freq_counts[freq_name] > 0:
+                freq_parts.append(f"{freq_name}({freq_counts[freq_name]}个)")
+        freq_str = "，".join(freq_parts) if freq_parts else ""
+
+        # 构建显示信息
+        if freq_str:
+            display_msg = f"已检测数据文件的真实日期范围: {detected_start} 到 {detected_end}，共 {variable_count} 个变量：{freq_str}"
+        else:
+            display_msg = f"已检测数据文件的真实日期范围: {detected_start} 到 {detected_end}，共 {variable_count} 个变量"
+
+        st_obj.success(display_msg)
         # 设置日期选择器范围（宽松一年）
         min_date = detected_start - pd.Timedelta(days=365)
         max_date = detected_end + pd.Timedelta(days=365)
@@ -391,22 +315,37 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         _set_state("param_remove_consecutive_nans", remove_nans)
 
     with row2_col2:
+        # 连续缺失值阈值（仅在移除=是时启用）
+        threshold_disabled = (remove_nans == "否")
+        nan_threshold = st_obj.number_input(
+            "连续缺失值阈值",
+            min_value=0,
+            value=_get_state('param_consecutive_nan_threshold') or 10,
+            step=1,
+            key="ss_dfm_nan_thresh",
+            disabled=threshold_disabled
+        )
         if remove_nans == "是":
-            nan_threshold = st_obj.number_input(
-                "连续缺失值阈值",
-                min_value=0,
-                value=_get_state('param_consecutive_nan_threshold'),
-                step=1,
-                key="ss_dfm_nan_thresh"
-            )
             _set_state("param_consecutive_nan_threshold", nan_threshold)
         else:
             _set_state("param_consecutive_nan_threshold", None)
 
-    # 第3行：目标频率和映射表名称
+    # 第3行：频率对齐和目标频率
     row3_col1, row3_col2 = st_obj.columns(2)
     with row3_col1:
-        # 目标频率选择
+        # 频率对齐选项
+        enable_freq_alignment = st_obj.selectbox(
+            "频率对齐",
+            options=["是", "否"],
+            index=0 if _get_state('param_enable_freq_alignment', '是') == "是" else 1,
+            key="ss_dfm_enable_freq_alignment",
+            help="选择'是'将所有数据对齐到目标频率；选择'否'则保留原始发布日期，按发布日合并"
+        )
+        _set_state("param_enable_freq_alignment", enable_freq_alignment)
+
+    with row3_col2:
+        # 目标频率选择（仅在频率对齐=是时启用）
+        freq_disabled = (enable_freq_alignment == "否")
         freq_options = {
             'D': '日度 (Daily)',
             'W-FRI': '周度-周五 (Weekly-Friday)',
@@ -422,11 +361,14 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
             format_func=lambda x: freq_options[x],
             index=list(freq_options.keys()).index(current_freq) if current_freq in freq_options else 1,
             key="ss_dfm_target_freq",
-            help="选择模型的目标频率，应与数据频率一致"
+            disabled=freq_disabled,
+            help="选择模型的目标频率（仅在频率对齐=是时有效）"
         )
         _set_state("param_target_freq", target_freq)
 
-    with row3_col2:
+    # 第4行：指标映射表名称和数据借调
+    row4_col1, row4_col2 = st_obj.columns(2)
+    with row4_col1:
         mapping_sheet = st_obj.text_input(
             "指标映射表名称",
             value=_get_state('param_type_mapping_sheet'),
@@ -434,28 +376,70 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state("param_type_mapping_sheet", mapping_sheet)
 
+    with row4_col2:
+        # 数据借调（仅在频率对齐=是时启用）
+        borrowing_disabled = (enable_freq_alignment == "否")
+        enable_borrowing = st_obj.selectbox(
+            "数据借调",
+            options=["是", "否"],
+            index=0 if _get_state('param_enable_borrowing', '是') == "是" else 1,
+            key="ss_dfm_enable_borrowing",
+            disabled=borrowing_disabled,
+            help="开启时，当某个时间窗口无数据但下个窗口有多个数据时，会将数据借调到前一个窗口（仅在频率对齐=是时有效）"
+        )
+        _set_state("param_enable_borrowing", enable_borrowing)
+
+    # 第5行：零值处理（只占一半宽度）
+    row5_col1, row5_col2 = st_obj.columns(2)
+    with row5_col1:
+        zero_options = {
+            'none': '不处理',
+            'missing': '缺失值',
+            'adjust': '调正（+1）'
+        }
+        current_zero = _get_state('param_zero_handling', 'missing')
+        zero_keys = list(zero_options.keys())
+        zero_index = zero_keys.index(current_zero) if current_zero in zero_keys else 1
+        zero_handling = st_obj.selectbox(
+            "零值处理",
+            options=zero_keys,
+            format_func=lambda x: zero_options[x],
+            index=zero_index,
+            key="ss_dfm_zero_handling",
+            help="设置全局零值处理方式，对所有变量生效"
+        )
+        _set_state("param_zero_handling", zero_handling)
+
+    with row5_col2:
+        publication_options = ["否", "是"]
+        current_publication = _get_state('param_publication_date_calibration', '是')
+        publication_index = 1 if current_publication == "是" else 0
+        publication_calibration = st_obj.selectbox(
+            "发布日期校准",
+            options=publication_options,
+            index=publication_index,
+            key="ss_dfm_publication_calibration",
+            help="选择'是'将按指标实际发布日期对齐数据（基于指标体系中的'发布日期'列）"
+        )
+        _set_state("param_publication_date_calibration", publication_calibration)
+
     return True
 
 
 def _render_processing_section(st_obj, uploaded_file):
     """
-    渲染数据处理与导出区域
+    渲染数据处理按钮区域
 
     Returns:
         bool - 是否点击了处理按钮
     """
 
-    # 开始预处理按钮（放在分隔线之前）
+    # 开始预处理按钮
     run_button_clicked = st_obj.button(
         "开始处理",
         key="ss_dfm_run_preprocessing",
         type="primary"
     )
-
-    st_obj.markdown("---")
-
-    # 处理结果标题（左对齐）
-    st_obj.markdown("#### 处理结果")
 
     return run_button_clicked
 
@@ -466,9 +450,11 @@ def _execute_data_preparation(st_obj, uploaded_file):
     # 清空旧结果
     _set_state("processed_outputs", None)
     _set_state("prepared_data_df", None)
+    _set_state("base_prepared_data_df", None)  # 原始处理结果（变量转换前的基准）
     _set_state("transform_log_obj", None)
     _set_state("industry_map_obj", None)
     _set_state("removed_vars_log_obj", None)
+    _set_state("variable_transform_details", None)
 
     if uploaded_file is None:
         st_obj.error("错误：请先上传训练数据集")
@@ -489,28 +475,7 @@ def _execute_data_preparation(st_obj, uploaded_file):
             start_date = _get_state('param_data_start_date')
             end_date = _get_state('param_data_end_date')
 
-            # 从状态中读取检测到的有效日期范围
-            detected_start = _get_state("detected_start_date")
-            detected_end = _get_state("detected_end_date")
-
-            # 使用检测到的有效日期范围进行验证和修正
-            cutoff_date = date(2000, 1, 1)
-            future_date = date(2030, 12, 31)
-
-            if detected_start:
-                if start_date and start_date < cutoff_date:
-                    print(f"日期修正: 开始日期 {start_date} 早于2000年，使用检测日期 {detected_start}")
-                    start_date = detected_start
-                elif not start_date:
-                    start_date = detected_start
-
-            if detected_end:
-                if end_date and end_date > future_date:
-                    print(f"日期修正: 结束日期 {end_date} 过于遥远，使用检测日期 {detected_end}")
-                    end_date = detected_end
-                elif not end_date:
-                    end_date = detected_end
-
+            # 直接使用用户设置的日期范围（UI层已有min_value/max_value限制）
             start_date_str = start_date.strftime('%Y-%m-%d') if start_date else None
             end_date_str = end_date.strftime('%Y-%m-%d') if end_date else None
 
@@ -533,11 +498,28 @@ def _execute_data_preparation(st_obj, uploaded_file):
             # 调用数据准备API（简化版）
             from dashboard.models.DFM.prep.api import prepare_dfm_data_simple
 
+            # 获取频率对齐和数据借调参数
+            enable_freq_alignment = _get_state('param_enable_freq_alignment', '是') == '是'
+            enable_borrowing = _get_state('param_enable_borrowing', '是') == '是'
+            # 不对齐时自动禁用借调
+            if not enable_freq_alignment:
+                enable_borrowing = False
+
+            # 获取零值处理参数
+            zero_handling = _get_state('param_zero_handling', 'missing')
+
+            # 获取发布日期校准参数
+            enable_publication_calibration = _get_state('param_publication_date_calibration', '否') == '是'
+
             print(f"调用prepare_dfm_data_simple参数:")
             print(f"  - target_freq: {_get_state('param_target_freq')}")
             print(f"  - consecutive_nan_threshold: {nan_threshold_int}")
             print(f"  - data_start_date: {start_date_str}")
             print(f"  - data_end_date: {end_date_str}")
+            print(f"  - enable_freq_alignment: {enable_freq_alignment}")
+            print(f"  - enable_borrowing: {enable_borrowing}")
+            print(f"  - zero_handling: {zero_handling}")
+            print(f"  - enable_publication_calibration: {enable_publication_calibration}")
 
             result = prepare_dfm_data_simple(
                 uploaded_file=excel_file_like_object,
@@ -546,7 +528,11 @@ def _execute_data_preparation(st_obj, uploaded_file):
                 consecutive_nan_threshold=nan_threshold_int,
                 data_start_date=start_date_str,
                 data_end_date=end_date_str,
-                reference_sheet_name=_get_state('param_type_mapping_sheet')
+                reference_sheet_name=_get_state('param_type_mapping_sheet'),
+                enable_borrowing=enable_borrowing,
+                enable_freq_alignment=enable_freq_alignment,
+                zero_handling=zero_handling,
+                enable_publication_calibration=enable_publication_calibration
             )
 
             status_text.text("数据预处理完成，正在生成结果...")
@@ -575,13 +561,11 @@ def _execute_data_preparation(st_obj, uploaded_file):
 
                 # 保存数据对象到状态管理
                 _set_state("prepared_data_df", prepared_data)
+                _set_state("base_prepared_data_df", prepared_data.copy())  # 保存基准数据（变量转换前）
                 _set_state("transform_log_obj", transform_log)
                 _set_state("industry_map_obj", industry_map)
                 _set_state("removed_vars_log_obj", removed_variables_log)
                 _set_state("mapping_validation_result", mapping_validation)
-
-                st_obj.success("数据预处理完成！结果已准备就绪，可用于模型训练模块。")
-                st_obj.info(f"预处理后数据形状: {prepared_data.shape}")
 
                 # 准备导出数据 - 输出为Excel文件，包含两个sheet
                 processed_outputs = {
@@ -592,6 +576,7 @@ def _execute_data_preparation(st_obj, uploaded_file):
                     try:
                         # 重新加载映射以确保和industry_map使用同一份数据
                         from dashboard.models.DFM.prep.api import load_mappings_once
+                        from dashboard.models.DFM.prep.services.export_service import ExportService
 
                         excel_file_like_object.seek(0)
                         result = load_mappings_once(
@@ -604,61 +589,21 @@ def _execute_data_preparation(st_obj, uploaded_file):
                             raise ValueError(result['message'])
 
                         mappings = result['mappings']
-                        dfm_single_stage_map = mappings.get('single_stage_map', {})
-                        dfm_first_stage_pred_map = mappings.get('first_stage_pred_map', {})
-                        dfm_first_stage_target_map = mappings.get('first_stage_target_map', {})
-                        dfm_second_stage_target_map = mappings.get('second_stage_target_map', {})
-                        var_frequency_map = mappings.get('var_frequency_map', {})
-                        var_unit_map = mappings.get('var_unit_map', {})
 
-                        # 创建统一映射数据
-                        all_indicators = list(industry_map.keys())
-                        unified_mapping_data = []
+                        # 保存性质映射和频率映射到状态（用于变量处理功能）
+                        _set_state("var_nature_map_obj", mappings.get('var_nature_map', {}))
+                        _set_state("var_frequency_map_obj", mappings.get('var_frequency_map', {}))
 
-                        for indicator in all_indicators:
-                            industry = industry_map.get(indicator, '')
-                            frequency = var_frequency_map.get(indicator, '')
-                            unit = var_unit_map.get(indicator, '')
-                            single_stage_default = dfm_single_stage_map.get(indicator, '')
-                            first_stage_pred = dfm_first_stage_pred_map.get(indicator, '')
-                            first_stage_target = dfm_first_stage_target_map.get(indicator, '')
-                            second_stage_target = dfm_second_stage_target_map.get(indicator, '')
-                            unified_mapping_data.append({
-                                'Indicator': indicator,
-                                'Industry': industry,
-                                'Frequency': frequency,
-                                'Unit': unit,
-                                '一次估计': single_stage_default,
-                                '一阶段预测': first_stage_pred,
-                                '一阶段目标': first_stage_target,
-                                '二阶段目标': second_stage_target
-                            })
-
-                        # 创建统一映射DataFrame
-                        df_unified_map = pd.DataFrame(
-                            unified_mapping_data,
-                            columns=['Indicator', 'Industry', 'Frequency', 'Unit', '一次估计', '一阶段预测', '一阶段目标', '二阶段目标']
+                        # 调用 ExportService 生成 Excel 文件
+                        processed_outputs['excel_file'] = ExportService.generate_excel(
+                            prepared_data=prepared_data,
+                            industry_map=industry_map,
+                            mappings=mappings,
+                            removed_vars_log=removed_variables_log,
+                            transform_details=_get_state('variable_transform_details')
                         )
 
-                        # 将数据和映射写入Excel的两个sheet
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            # Sheet1: 处理后的数据
-                            prepared_data.to_excel(writer, sheet_name='数据', index=True, index_label='Date')
-                            # Sheet2: 映射表
-                            df_unified_map.to_excel(writer, sheet_name='映射', index=False)
-
-                        processed_outputs['excel_file'] = excel_buffer.getvalue()
-
-                        print(f"导出Excel文件: 数据形状 {prepared_data.shape}, 映射 {len(df_unified_map)} 条记录")
-                        single_yes_count = len(df_unified_map[df_unified_map['一次估计'] == '是'])
-                        first_stage_pred_count = len(df_unified_map[df_unified_map['一阶段预测'] == '是'])
-                        first_stage_target_count = len(df_unified_map[df_unified_map['一阶段目标'] == '是'])
-                        second_stage_target_count = len(df_unified_map[df_unified_map['二阶段目标'] == '是'])
-                        print(f"其中一次估计默认变量: {single_yes_count} 个")
-                        print(f"其中一阶段预测默认变量: {first_stage_pred_count} 个")
-                        print(f"其中一阶段目标默认变量: {first_stage_target_count} 个")
-                        print(f"其中二阶段目标默认变量: {second_stage_target_count} 个")
+                        logger.info(f"导出Excel文件: 数据形状 {prepared_data.shape}, 映射 {len(industry_map)} 条记录")
 
                     except Exception as e:
                         st_obj.warning(f"生成Excel文件时出错: {e}")
@@ -692,6 +637,26 @@ def _execute_data_preparation(st_obj, uploaded_file):
         st_obj.text_area("详细错误信息:", traceback.format_exc(), height=200)
 
 
+def _render_data_preview(st_obj):
+    """渲染数据预览（显示最终处理后的数据）"""
+
+    prepared_data = _get_state('prepared_data_df')
+    if prepared_data is None:
+        return
+
+
+    # 按时间由近及远排列（降序）
+    display_data = prepared_data.copy()
+    display_data = display_data.sort_index(ascending=False)
+
+    # 格式化日期索引为 年-月-日 格式
+    if isinstance(display_data.index, pd.DatetimeIndex):
+        display_data.index = display_data.index.strftime('%Y-%m-%d')
+
+    st_obj.dataframe(display_data, use_container_width=True)
+    st_obj.caption(f"数据形状: {prepared_data.shape[0]} 行 x {prepared_data.shape[1]} 列")
+
+
 def _render_mapping_warnings(st_obj):
     """渲染行业映射警告信息"""
 
@@ -721,71 +686,514 @@ def _render_mapping_warnings(st_obj):
                 st_obj.caption(f"... 还有 {len(undefined) - 20} 个未定义变量")
 
 
-def _render_removed_variables_log(st_obj):
-    """渲染移除变量详细日志（按原因分组并分列显示）"""
+def _render_details_row(st_obj):
+    """
+    渲染移除变量详情和数据借调详情（分两行显示，各占整行宽度）
 
+    移除变量详情始终显示（即使0个）
+    数据借调详情仅在启用借调且有借调发生时显示
+    """
+    # 检查是否已经处理过数据（有处理结果才显示）
+    prepared_data = _get_state('prepared_data_df')
+    if prepared_data is None:
+        return
+
+    # 第一行：移除变量详情（始终显示）
+    _render_removed_variables_summary(st_obj)
+
+    # 第二行：数据借调详情（有借调时显示）
+    _render_borrowing_details_expander(st_obj)
+
+
+def _render_removed_variables_summary(st_obj):
+    """
+    渲染移除变量摘要和详情
+
+    格式：按原因分组，变量名横向流式排列
+    始终显示，即使没有变量被移除
+    """
     removed_vars_log = _get_state("removed_vars_log_obj")
+    removed_count = len(removed_vars_log) if removed_vars_log else 0
 
-    if removed_vars_log and len(removed_vars_log) > 0:
-        # 按原因分组
-        reason_groups = {}
-        for entry in removed_vars_log:
-            reason = entry.get('Reason', '未知原因')
-            if reason not in reason_groups:
-                reason_groups[reason] = []
-            reason_groups[reason].append(entry)
+    with st_obj.expander(f"移除变量详情 ({removed_count}个)", expanded=False):
+        if removed_count > 0:
+            # 按原因分组显示详情
+            reason_groups = {}
+            for entry in removed_vars_log:
+                reason = entry.get('Reason', '未知原因')
+                if reason not in reason_groups:
+                    reason_groups[reason] = []
+                reason_groups[reason].append(entry.get('Variable', '未知变量'))
 
-        # 显示统计信息
-        st_obj.info(f"共有 {len(removed_vars_log)} 个变量被移除")
+            # 每个原因分组，变量名横向流式排列
+            for reason, var_names in reason_groups.items():
+                st.markdown(f"**[{reason}]** ({len(var_names)}个变量)")
+                var_items = [
+                    f'<span style="display:inline-block;margin:2px 8px 2px 0;'
+                    f'padding:2px 6px;background:#f0f2f6;border-radius:4px;">'
+                    f'{var_name}</span>'
+                    for var_name in var_names
+                ]
+                st.markdown(''.join(var_items), unsafe_allow_html=True)
+        else:
+            st.success("所有变量都通过了筛选，没有变量被移除")
 
-        # 使用expander显示详细信息
-        with st_obj.expander("查看详细信息", expanded=False):
-            reason_list = list(reason_groups.items())
-            num_reasons = len(reason_list)
 
-            if num_reasons == 0:
-                pass
-            elif num_reasons == 1:
-                # 单个原因，全宽显示
-                reason, entries = reason_list[0]
-                st_obj.markdown(f"**{reason}** ({len(entries)}个变量)")
-                for entry in entries:
-                    variable = entry.get('Variable', '未知变量')
-                    details = entry.get('Details', {})
+def _render_borrowing_details_expander(st_obj):
+    """
+    渲染数据借调详情expander
 
-                    if details and 'nan_period' in details:
-                        nan_period = details.get('nan_period', '未知')
-                        max_consecutive = details.get('max_consecutive_nan', 'N/A')
-                        st_obj.markdown(f"- {variable} ({nan_period}, {max_consecutive})")
-                    else:
-                        st_obj.markdown(f"- {variable}")
-            else:
-                # 多个原因，使用列布局（2-3列）
-                num_cols = min(3, num_reasons)
-                cols = st_obj.columns(num_cols)
+    格式：按变量分组，借调记录横向流式排列
+    仅在启用借调且有借调发生时显示
+    """
+    enable_borrowing = _get_state('param_enable_borrowing', '是') == '是'
+    if not enable_borrowing:
+        return
 
-                # 将原因分配到各列
-                for idx, (reason, entries) in enumerate(reason_list):
-                    col_idx = idx % num_cols
-                    with cols[col_idx]:
-                        st_obj.markdown(f"**{reason}** ({len(entries)}个变量)")
-                        for entry in entries:
-                            variable = entry.get('Variable', '未知变量')
-                            details = entry.get('Details', {})
+    transform_log = _get_state('transform_log_obj')
+    if transform_log is None:
+        return
 
-                            if details and 'nan_period' in details:
-                                nan_period = details.get('nan_period', '未知')
-                                max_consecutive = details.get('max_consecutive_nan', 'N/A')
-                                st_obj.markdown(f"- {variable} ({nan_period}, {max_consecutive})")
-                            else:
-                                st_obj.markdown(f"- {variable}")
+    borrowing_log = transform_log.get('borrowing_log', {})
+    if not borrowing_log:
+        return
 
-                        # 在每个原因组后添加间距（除了最后一个）
-                        if idx < len(reason_list) - 1:
-                            st_obj.markdown("")
+    total_vars = len(borrowing_log)
+    total_count = sum(len(logs) for logs in borrowing_log.values())
 
-    elif removed_vars_log is not None and len(removed_vars_log) == 0:
-        st_obj.success("所有变量都通过了筛选，没有变量被移除")
+    with st_obj.expander(f"数据借调详情 ({total_vars}个变量，{total_count}次借调)", expanded=False):
+        for var_name, logs in borrowing_log.items():
+            st.markdown(f"**[{var_name}]** ({len(logs)}次借调)")
+            items = []
+            for log in logs:
+                borrowed_from = log.get('borrowed_from')
+                borrowed_to = log.get('borrowed_to')
+                from_str = borrowed_from.strftime('%Y-%m-%d') if hasattr(borrowed_from, 'strftime') else str(borrowed_from)
+                to_str = borrowed_to.strftime('%Y-%m-%d') if hasattr(borrowed_to, 'strftime') else str(borrowed_to)
+                items.append(
+                    f'<span style="display:inline-block;margin:2px 8px 2px 0;'
+                    f'padding:2px 6px;background:#f0f2f6;border-radius:4px;">'
+                    f'{from_str} -> {to_str}</span>'
+                )
+            st.markdown(''.join(items), unsafe_allow_html=True)
+
+
+def _render_transform_details_expander(st_obj, transform_details: dict):
+    """
+    渲染变量转换详情expander（在应用转换按钮下方显示）
+
+    格式与移除变量详情一致：按操作分组，变量名横向流式排列
+
+    Args:
+        st_obj: Streamlit对象
+        transform_details: 转换详情字典
+    """
+    if not transform_details:
+        return
+
+    transform_count = len(transform_details)
+
+    with st_obj.expander(f"变量转换详情 ({transform_count}个变量)", expanded=False):
+        if transform_count > 0:
+            # 按操作分组显示详情
+            ops_groups = {}
+            for var_name, details in transform_details.items():
+                ops_str = ' -> '.join(details.get('operations', []))
+                if not ops_str:
+                    ops_str = '无操作'
+                if ops_str not in ops_groups:
+                    ops_groups[ops_str] = []
+                ops_groups[ops_str].append(var_name)
+
+            # 每个操作分组，变量名横向流式排列
+            for ops_str, var_names in ops_groups.items():
+                st.markdown(f"**[{ops_str}]** ({len(var_names)}个变量)")
+                # 使用HTML实现流式布局
+                var_items = []
+                for var_name in var_names:
+                    var_items.append(
+                        f'<span style="display:inline-block;margin:2px 8px 2px 0;'
+                        f'padding:2px 6px;background:#f0f2f6;border-radius:4px;">'
+                        f'{var_name}</span>'
+                    )
+                st.markdown(''.join(var_items), unsafe_allow_html=True)
+        else:
+            st.info("没有变量被转换")
+
+
+def _render_stationarity_test_expander(st_obj, transformed_df: pd.DataFrame):
+    """
+    渲染平稳性检验结果expander
+
+    以表格形式展示：变量名、频率、性质、处理、P值、平稳性
+    只显示非平稳和数据不足的变量
+    """
+    from dashboard.explore.analysis.stationarity import run_adf_test
+    from dashboard.models.DFM.utils.text_utils import normalize_text
+
+    if transformed_df is None or transformed_df.empty:
+        return
+
+    # 获取频率、性质映射和转换详情
+    var_frequency_map = _get_state('var_frequency_map_obj') or {}
+    var_nature_map = _get_state('var_nature_map_obj') or {}
+    transform_details = _get_state('variable_transform_details') or {}
+
+    # 对所有列进行ADF检验，只收集非平稳和数据不足的
+    problem_vars = []
+    for col in transformed_df.columns:
+        series = transformed_df[col]
+        p_value, is_stationary = run_adf_test(series, alpha=0.05)
+
+        # 跳过平稳的变量
+        if is_stationary == '是':
+            continue
+
+        # 获取频率、性质和处理操作
+        col_normalized = normalize_text(col)
+        freq = var_frequency_map.get(col_normalized, '-')
+        nature = var_nature_map.get(col_normalized, '-')
+        ops = transform_details.get(col, {}).get('operations', [])
+        ops_str = ' -> '.join(ops) if ops else '不处理'
+        p_str = f"{p_value:.4f}" if p_value is not None else '-'
+        # 转换平稳性状态显示
+        stationarity = '数据不足' if is_stationary == '数据不足' else '非平稳'
+
+        problem_vars.append((col, freq, nature, ops_str, p_str, stationarity))
+
+    var_count = len(transformed_df.columns)
+    problem_count = len(problem_vars)
+
+    with st_obj.expander(f"平稳性检验结果 ({var_count}个变量)", expanded=False):
+        if problem_count == 0:
+            st.success("所有变量均通过平稳性检验")
+            return
+
+        # 构建DataFrame用于展示
+        display_df = pd.DataFrame(problem_vars, columns=['变量名', '频率', '性质', '处理', 'P值', '平稳性'])
+
+        # 使用st.dataframe显示表格
+        st.dataframe(
+            display_df,
+            column_config={
+                '变量名': st.column_config.TextColumn('变量名', width='large'),
+                '频率': st.column_config.TextColumn('频率', width='small'),
+                '性质': st.column_config.TextColumn('性质', width='small'),
+                '处理': st.column_config.TextColumn('处理', width='medium'),
+                'P值': st.column_config.TextColumn('P值', width='small'),
+                '平稳性': st.column_config.TextColumn('平稳性', width='small')
+            },
+            hide_index=True,
+            use_container_width=True
+        )
+
+
+# ============================================================================
+# 变量处理功能区
+# ============================================================================
+
+def _render_variable_transform_section(st_obj):
+    """
+    渲染变量处理功能区（表格式布局）
+
+    使用 st.data_editor 显示可编辑的变量转换配置表格
+    """
+    from dashboard.models.DFM.prep.modules.variable_transformer import (
+        VariableTransformer,
+        get_default_transform_config,
+        FREQUENCY_PERIOD_MAP
+    )
+    from dashboard.models.DFM.utils.text_utils import normalize_text
+
+    st_obj.markdown("---")
+    st_obj.markdown("#### 变量处理")
+
+    # 获取目标频率
+    target_freq = _get_state('param_target_freq', 'W-FRI')
+    yoy_period = FREQUENCY_PERIOD_MAP.get(target_freq, 52)
+    st_obj.caption(f"根据变量性质自动推荐转换操作。当前目标频率: {target_freq}，同比差分周期: {yoy_period}期")
+
+    # 获取处理后数据
+    prepared_data = _get_state('prepared_data_df')
+    var_nature_map = _get_state('var_nature_map_obj') or {}
+
+    if prepared_data is None or prepared_data.empty:
+        st_obj.info("请先完成数据处理")
+        return
+
+    # 操作选项列表
+    OPERATIONS = ['不处理', '对数', '环比差分', '同比差分']
+    # 注：零值处理已在基础设置中全局配置，变量处理区只配置转换操作
+
+    # 获取或初始化配置DataFrame
+    config_df = _get_state('transform_config_df')
+
+    if config_df is None:
+        # 生成默认配置
+        config_list = get_default_transform_config(
+            list(prepared_data.columns),
+            var_nature_map,
+            freq=target_freq
+        )
+        config_df = pd.DataFrame(config_list)
+
+    # 在传给 data_editor 之前应用联动逻辑
+    # 规则1: 第一次处理选"不处理"时，第二次、第三次处理强制设为"不处理"
+    # 规则2: 第二次处理选"不处理"时，第三次处理强制设为"不处理"
+    mask_first = config_df['第一次处理'] == '不处理'
+    mask_second = config_df['第二次处理'] == '不处理'
+    if mask_first.any() or mask_second.any():
+        config_df = config_df.copy()
+        config_df.loc[mask_first, '第二次处理'] = '不处理'
+        config_df.loc[mask_first, '第三次处理'] = '不处理'
+        config_df.loc[mask_second, '第三次处理'] = '不处理'
+
+    _set_state('transform_config_df', config_df)
+
+    # 使用 data_editor 显示可编辑表格
+    edited_df = st_obj.data_editor(
+        config_df,
+        column_config={
+            '变量名': st.column_config.TextColumn(
+                '变量名',
+                disabled=True,
+                width='large'
+            ),
+            '性质': st.column_config.TextColumn(
+                '性质',
+                disabled=True,
+                width='small'
+            ),
+            '第一次处理': st.column_config.SelectboxColumn(
+                '第一次处理',
+                options=OPERATIONS,
+                width='medium',
+                required=True
+            ),
+            '第二次处理': st.column_config.SelectboxColumn(
+                '第二次处理',
+                options=OPERATIONS,
+                width='medium',
+                required=True
+            ),
+            '第三次处理': st.column_config.SelectboxColumn(
+                '第三次处理',
+                options=OPERATIONS,
+                width='medium',
+                required=True
+            )
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="variable_transform_editor",
+        num_rows="fixed"
+    )
+
+    # 联动逻辑：任何一次选"不处理"时，后续步骤自动改为"不处理"
+    needs_sync = False
+    mask_first = edited_df['第一次处理'] == '不处理'
+    mask_second = edited_df['第二次处理'] == '不处理'
+
+    # 检查第一次处理的不一致
+    if mask_first.any():
+        inconsistent_first = mask_first & (
+            (edited_df['第二次处理'] != '不处理') |
+            (edited_df['第三次处理'] != '不处理')
+        )
+        if inconsistent_first.any():
+            edited_df = edited_df.copy()
+            edited_df.loc[mask_first, '第二次处理'] = '不处理'
+            edited_df.loc[mask_first, '第三次处理'] = '不处理'
+            needs_sync = True
+
+    # 检查第二次处理的不一致
+    if mask_second.any():
+        inconsistent_second = mask_second & (edited_df['第三次处理'] != '不处理')
+        if inconsistent_second.any():
+            if not needs_sync:
+                edited_df = edited_df.copy()
+            edited_df.loc[mask_second, '第三次处理'] = '不处理'
+            needs_sync = True
+
+    # 保存编辑后的配置
+    _set_state('transform_config_df', edited_df)
+
+    # 如果有不一致需要同步，触发重新渲染
+    if needs_sync:
+        st.rerun()
+
+    # 统计需要转换的变量数量
+    vars_with_transform = len(edited_df[edited_df['第一次处理'] != '不处理'])
+
+    if vars_with_transform > 0:
+        st_obj.info(f"将对 {vars_with_transform} 个变量应用转换")
+    else:
+        st_obj.info("当前没有选择任何转换操作")
+
+    # 应用按钮
+    col1, col2 = st_obj.columns([1, 4])
+    with col1:
+        apply_clicked = st_obj.button(
+            "应用转换",
+            key="apply_variable_transform",
+            type="primary",
+            disabled=vars_with_transform == 0
+        )
+
+    if apply_clicked:
+        _apply_variable_transforms(st_obj, edited_df)
+
+
+def _apply_variable_transforms(st_obj, config_df):
+    """
+    应用变量转换
+
+    始终基于基准数据（开始处理后的原始结果）进行转换，避免累积叠加。
+
+    Args:
+        st_obj: Streamlit对象
+        config_df: 配置DataFrame，包含 {变量名, 性质, 第一次处理, 第二次处理, 第三次处理}
+    """
+    from dashboard.models.DFM.prep.modules.variable_transformer import VariableTransformer
+
+    if config_df is None or config_df.empty:
+        st_obj.warning("没有选择任何转换操作")
+        return
+
+    # 始终基于基准数据进行转换（避免累积叠加）
+    base_data = _get_state('base_prepared_data_df')
+    if base_data is None:
+        st_obj.error("没有可处理的数据，请先点击\"开始处理\"")
+        return
+
+    # 获取目标频率
+    target_freq = _get_state('param_target_freq', 'W-FRI')
+
+    # 操作名称到代码的映射
+    OP_NAME_TO_CODE = {
+        '不处理': 'none',
+        '对数': 'log',
+        '环比差分': 'diff_1',
+        '同比差分': 'diff_yoy'
+    }
+    # 注：零值处理已在基础设置中全局配置，变量处理区只配置转换操作
+
+    # 构建转换配置字典
+    transform_config = {}
+    for _, row in config_df.iterrows():
+        var_name = row['变量名']
+        first_op = OP_NAME_TO_CODE.get(row['第一次处理'], 'none')
+        second_op = OP_NAME_TO_CODE.get(row['第二次处理'], 'none')
+        third_op = OP_NAME_TO_CODE.get(row.get('第三次处理', '不处理'), 'none')
+
+        # 只有非"不处理"的操作才添加
+        ops = []
+        if first_op != 'none':
+            ops.append(first_op)
+        if second_op != 'none':
+            ops.append(second_op)
+        if third_op != 'none':
+            ops.append(third_op)
+
+        # 只要有任何操作，就添加到配置中
+        if ops:
+            transform_config[var_name] = {
+                'zero_method': 'none',  # 零值已在基础设置中全局处理
+                'neg_method': 'none',   # 负值已在基础设置中全局处理
+                'operations': ops
+            }
+
+    if not transform_config:
+        st_obj.warning("没有选择任何转换操作")
+        return
+
+    try:
+        with st_obj.spinner("正在应用变量转换..."):
+            transformer = VariableTransformer(freq=target_freq)
+            transformed_df, transform_details = transformer.transform_dataframe(
+                base_data.copy(),  # 基于基准数据的副本进行转换
+                transform_config
+            )
+
+            # 更新prepared_data
+            _set_state('prepared_data_df', transformed_df)
+
+            # 更新transform_log（保存转换详情供处理结果区域显示）
+            transform_log = _get_state('transform_log_obj') or {}
+            transform_log['variable_transforms'] = transform_details
+            _set_state('transform_log_obj', transform_log)
+
+            # 保存转换详情到单独状态
+            _set_state('variable_transform_details', transform_details)
+
+            # 重新生成导出文件
+            _regenerate_export_file(st_obj, transformed_df)
+
+            # 在应用转换按钮下方显示转换详情expander
+            _render_transform_details_expander(st_obj, transform_details)
+
+            # 显示平稳性检验结果expander
+            _render_stationarity_test_expander(st_obj, transformed_df)
+
+    except Exception as e:
+        st_obj.error(f"变量转换失败: {e}")
+        import traceback
+        st_obj.text_area("详细错误信息:", traceback.format_exc(), height=150)
+
+
+def _regenerate_export_file(st_obj, transformed_df):
+    """
+    重新生成导出文件（转换后）
+
+    Args:
+        st_obj: Streamlit对象
+        transformed_df: 转换后的DataFrame
+    """
+    try:
+        industry_map = _get_state('industry_map_obj') or {}
+
+        if not industry_map:
+            return
+
+        # 重新加载映射以获取完整信息
+        uploaded_file = _get_state('training_data_file')
+        if uploaded_file is None:
+            return
+
+        from dashboard.models.DFM.prep.api import load_mappings_once
+        from dashboard.models.DFM.prep.services.export_service import ExportService
+
+        file_bytes = uploaded_file.getvalue()
+        excel_file = io.BytesIO(file_bytes)
+
+        result = load_mappings_once(
+            excel_path=excel_file,
+            reference_sheet_name=_get_state('param_type_mapping_sheet'),
+            reference_column_name='指标名称'
+        )
+
+        if result['status'] != 'success':
+            return
+
+        mappings = result['mappings']
+
+        # 调用 ExportService 生成 Excel 文件
+        excel_bytes = ExportService.generate_excel(
+            prepared_data=transformed_df,
+            industry_map=industry_map,
+            mappings=mappings,
+            removed_vars_log=_get_state('removed_vars_log_obj'),
+            transform_details=_get_state('variable_transform_details')
+        )
+
+        processed_outputs = _get_state("processed_outputs") or {}
+        processed_outputs['excel_file'] = excel_bytes
+        _set_state("processed_outputs", processed_outputs)
+
+        logger.info(f"导出文件已重新生成: 数据形状 {transformed_df.shape}")
+
+    except Exception as e:
+        logger.warning(f"重新生成导出文件失败: {e}")
 
 
 def _render_download_buttons(st_obj):
@@ -818,15 +1226,14 @@ def render_dfm_data_prep_page(st_obj):
     """
     渲染DFM数据准备页面
 
-    在新架构下100%恢复旧版本功能：
+    功能：
     1. 文件上传与变更检测
     2. 日期范围自动检测与缓存
-    3. 8个参数完整配置（4行2列布局）
-    4. 自动映射加载
-    5. 数据预处理执行
-    6. 移除变量详细日志（按原因分组）
+    3. 参数配置（目标频率等）
+    4. 数据预处理执行
+    5. 变量转换配置（表格式布局）
+    6. 处理结果展示
     7. 数据和映射文件导出
-    8. 与训练模块状态同步
     """
 
     # 初始化状态
@@ -834,6 +1241,8 @@ def render_dfm_data_prep_page(st_obj):
         _set_state("training_data_file", None)
     if _get_state('prepared_data_df') is None:
         _set_state("prepared_data_df", None)
+    if _get_state('base_prepared_data_df') is None:
+        _set_state("base_prepared_data_df", None)  # 基准数据（变量转换前）
     if _get_state('transform_log_obj') is None:
         _set_state("transform_log_obj", None)
     if _get_state('industry_map_obj') is None:
@@ -844,6 +1253,13 @@ def render_dfm_data_prep_page(st_obj):
         _set_state("export_base_name", "dfm_prepared_output")
     if _get_state('processed_outputs') is None:
         _set_state("processed_outputs", None)
+    # 变量处理相关状态
+    if _get_state('var_nature_map_obj') is None:
+        _set_state("var_nature_map_obj", {})
+    if _get_state('transform_config_df') is None:
+        _set_state("transform_config_df", None)
+    if _get_state('variable_transform_details') is None:
+        _set_state("variable_transform_details", None)
 
     # 1. 文件上传区域
     uploaded_file = _render_file_upload_section(st_obj)
@@ -855,122 +1271,42 @@ def render_dfm_data_prep_page(st_obj):
     # 2. 日期检测
     detected_start, detected_end, min_date, max_date = _render_date_detection(st_obj, uploaded_file)
 
+    # 3. 变量状态表（文件上传后立即显示）
+    _render_raw_variable_stats_table(st_obj, uploaded_file)
+
     st_obj.markdown("---")
-    st_obj.markdown("#### 预处理设置")
+    st_obj.markdown("#### 基础设置")
 
     # 3. 参数配置区域
     _render_parameter_config(st_obj, detected_start, detected_end, min_date, max_date)
 
-    # 5. 数据处理与导出区域
+    # 4. 数据处理按钮
     run_button_clicked = _render_processing_section(st_obj, uploaded_file)
 
-    # 6. 执行数据准备
+    # 5. 执行数据准备
     if run_button_clicked:
+        # 清除旧的配置
+        _set_state('transform_config_df', None)
         _execute_data_preparation(st_obj, uploaded_file)
 
-    # 7. 显示处理结果和警告信息（全宽）
-    _render_mapping_warnings(st_obj)
-    _render_removed_variables_log(st_obj)
+    # 6. 显示移除变量详情和数据借调详情（同一行布局）
+    _render_details_row(st_obj)
 
-    # 8. 渲染下载按钮
+    # 7. 变量处理功能区（在数据处理完成后显示）
+    _render_variable_transform_section(st_obj)
+
+    # 8. 处理结果区域
+    st_obj.markdown("---")
+    st_obj.markdown("#### 处理结果")
+
+    # 9. 数据预览（显示最终处理后的数据）
+    _render_data_preview(st_obj)
+
+    # 10. 显示警告信息
+    _render_mapping_warnings(st_obj)
+
+    # 11. 渲染下载按钮
     _render_download_buttons(st_obj)
 
 
 __all__ = ['render_dfm_data_prep_page']
-
-
-# ============================================================================
-# 新增功能：工作表和变量选择、时间范围统计
-# ============================================================================
-
-def _render_time_range_info(st_obj, uploaded_file):
-    """
-    渲染时间范围统计信息（步骤2新增功能）
-
-    Args:
-        st_obj: Streamlit对象
-        uploaded_file: 上传的文件对象
-    """
-    # 检查缓存
-    if _get_state("time_range_info"):
-        time_range = _get_state("time_range_info")
-    else:
-        try:
-            from dashboard.models.DFM.prep.api import collect_time_ranges
-
-            # 调用API统计时间范围
-            file_bytes = uploaded_file.getvalue()
-            excel_file = io.BytesIO(file_bytes)
-
-            result = collect_time_ranges(excel_file)
-
-            if result['status'] == 'success':
-                time_range = result['time_range']
-                _set_state("time_range_info", time_range)
-            else:
-                st_obj.warning(f"时间范围统计失败: {result['message']}")
-                return
-
-        except Exception as e:
-            st_obj.warning(f"时间范围统计失败: {e}")
-            return
-
-    # 显示时间范围信息
-    with st_obj.expander("数据时间范围统计", expanded=False):
-        st_obj.info(f"所有数据的时间范围: **{time_range['overall_start']}** 至 **{time_range['overall_end']}**")
-        st_obj.write(f"共 {time_range['total_sheets']} 个工作表")
-
-
-def _render_sheet_and_variable_selection(st_obj, uploaded_file):
-    """
-    渲染工作表和变量选择区域（新增功能）
-
-    Args:
-        st_obj: Streamlit对象
-        uploaded_file: 上传的文件对象
-    """
-    st_obj.subheader("目标选择")
-
-    try:
-        # 读取Excel工作表列表
-        file_bytes = uploaded_file.getvalue()
-        excel_file = io.BytesIO(file_bytes)
-        xl_file = pd.ExcelFile(excel_file)
-        sheet_names = [s for s in xl_file.sheet_names if s != '指标体系']
-
-        # 第1行：工作表选择
-        target_sheet = st_obj.selectbox(
-            "目标工作表",
-            options=sheet_names,
-            index=sheet_names.index(_get_state('param_target_sheet')) if _get_state('param_target_sheet') in sheet_names else 0,
-            key="ss_dfm_target_sheet",
-            help="选择包含目标变量的工作表"
-        )
-        _set_state("param_target_sheet", target_sheet)
-
-        # 第2行：变量选择
-        if target_sheet:
-            # 读取选定工作表的列名
-            excel_file.seek(0)
-            df = pd.read_excel(excel_file, sheet_name=target_sheet, nrows=1)
-            variable_options = df.columns.tolist()
-
-            # 移除第一列（通常是日期列）
-            if len(variable_options) > 1:
-                variable_options = variable_options[1:]
-
-            target_variable = st_obj.selectbox(
-                "目标变量",
-                options=variable_options,
-                index=variable_options.index(_get_state('param_target_variable')) if _get_state('param_target_variable') in variable_options else 0,
-                key="ss_dfm_target_variable",
-                help="选择作为预测目标的变量"
-            )
-            _set_state("param_target_variable", target_variable)
-
-    except Exception as e:
-        st_obj.error(f"读取工作表列表失败: {e}")
-        _set_state("param_target_sheet", None)
-        _set_state("param_target_variable", None)
-
-    st_obj.markdown("---")

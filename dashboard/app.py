@@ -282,6 +282,7 @@ lazy_loader = get_resource_manager()
 # 集成认证中间件
 from dashboard.auth.ui.middleware import get_auth_middleware
 from dashboard.auth.config import AuthConfig
+from dashboard.auth.ui.utils.storage import get_auth_storage_manager
 
 auth_middleware = get_auth_middleware()
 
@@ -297,7 +298,13 @@ else:
 # 如果用户已认证，渲染用户信息到侧边栏
 if current_user:
     # 在侧边栏显示用户信息和登出按钮
-    auth_middleware.render_user_info()
+    from dashboard.auth.ui.components.user_info_panel import render_user_info_panel
+
+    def handle_logout():
+        auth_middleware.logout()
+        st.rerun()
+
+    render_user_info_panel(current_user, on_logout_callback=handle_logout)
 
 # time模块已在顶部导入
 current_time = time.time()

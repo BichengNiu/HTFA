@@ -2,6 +2,7 @@
 认证系统配置模块
 提供统一的安全和认证配置
 """
+import os
 from dataclasses import dataclass
 
 
@@ -10,7 +11,7 @@ class AuthConfig:
     """认证系统统一配置类"""
 
     # 调试模式 - 设为True时跳过认证
-    debug_mode: bool = True  # 默认开启调试模式
+    debug_mode: bool = os.getenv('HTFA_DEBUG_MODE', 'false').lower() == 'true'
 
     # 密码策略
     min_password_length: int = 8

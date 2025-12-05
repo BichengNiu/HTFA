@@ -26,20 +26,24 @@ from dashboard.models.DFM.prep.api import (
     load_mappings_once,
     collect_time_ranges,
     validate_preparation_parameters,
-    clear_mapping_cache
+    clear_mapping_cache,
+    detect_file_info,
+    generate_export_excel,
+    compute_variable_stats
 )
 
-# 向后兼容别名
-prepare_dfm_data = prepare_dfm_data_simple
-load_variable_mappings = load_mappings_once
+# 服务层导出
+from dashboard.models.DFM.prep.services import StatsService, ExportService
 
 __all__ = [
-    'prepare_dfm_data_simple',  # 新API
-    'load_mappings_once',       # 新API
-    'collect_time_ranges',      # 新API
+    'prepare_dfm_data_simple',
+    'load_mappings_once',
+    'collect_time_ranges',
     'validate_preparation_parameters',
-    'clear_mapping_cache',      # 新API
-    # 向后兼容
-    'prepare_dfm_data',
-    'load_variable_mappings'
+    'clear_mapping_cache',
+    'detect_file_info',
+    'generate_export_excel',
+    'compute_variable_stats',
+    'StatsService',
+    'ExportService',
 ]

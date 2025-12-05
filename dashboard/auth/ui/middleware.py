@@ -36,7 +36,7 @@ class AuthMiddleware:
         """
         try:
             # 首先尝试从持久化存储恢复认证状态
-            self._try_restore_from_persistent_storage()
+            # self._try_restore_from_persistent_storage()  # 禁用自动恢复，每次启动都需要重新登录
 
             # 从session state获取会话ID
             session_id = st.session_state.get('auth.user_session_id')

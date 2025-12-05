@@ -8,7 +8,7 @@ import pandas as pd
 import io
 from typing import Dict, Tuple, Optional, Union
 
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 def load_mappings(
     excel_path: Union[str, io.BytesIO, pd.ExcelFile, object],

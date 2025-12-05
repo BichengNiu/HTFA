@@ -15,7 +15,7 @@ from dashboard.models.DFM.prep.modules.data_loader import DataLoader
 from dashboard.models.DFM.prep.modules.data_aligner import DataAligner
 from dashboard.models.DFM.prep.modules.data_cleaner import clean_dataframe
 from dashboard.models.DFM.prep.modules.format_detection import parse_sheet_info
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 
 @dataclass

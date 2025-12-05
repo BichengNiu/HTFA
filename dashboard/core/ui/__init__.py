@@ -47,7 +47,6 @@ from dashboard.core.ui.components.data_input import (
     DataUploadSidebar,
     DataValidationComponent,
     DataStagingComponent,
-    DataPreviewComponent
 )
 
 # 静态资源路径
@@ -87,5 +86,4 @@ __all__ = [
     'DataUploadSidebar',
     'DataValidationComponent',
     'DataStagingComponent',
-    'DataPreviewComponent',
 ]

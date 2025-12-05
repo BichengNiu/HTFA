@@ -57,6 +57,11 @@ def perform_batch_dtw_calculation(
         Tuple[结果列表, 路径字典, 错误列表, 警告列表]
     """
     df = df_input.copy()
+
+    # 清理DataFrame列名中的首尾空格（修复空格导致的匹配问题）
+    df.columns = df.columns.str.strip() if hasattr(df.columns, 'str') else df.columns
+    logger.info(f"[DTW批量计算] 已清理列名空格，列数: {len(df.columns)}")
+
     results_list = []
     paths_dict = {}
     error_messages = []

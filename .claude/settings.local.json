@@ -28,7 +28,8 @@
       "Bash(NUL)",
       "Bash(chcp 65001)",
       "Bash(temp_columns.txt)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(chcp 6500)"
     ],
     "deny": [],
     "ask": []

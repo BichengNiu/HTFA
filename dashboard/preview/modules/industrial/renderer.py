@@ -72,7 +72,7 @@ class IndustrialRenderer(BaseRenderer):
         has_data = self._has_any_data()
 
         # 始终创建Tab页（无论是否有数据）
-        tabs = ['数据概览', '日度', '周度', '旬度', '月度', '年度']
+        tabs = ['数据概览', '日度', '周度', '旬度', '月度', '季度', '年度']
         tab_objects = st.tabs(tabs)
 
         # 数据概览Tab
@@ -88,6 +88,7 @@ class IndustrialRenderer(BaseRenderer):
             '周度': 'weekly',
             '旬度': 'ten_day',
             '月度': 'monthly',
+            '季度': 'quarterly',
             '年度': 'yearly'
         }
 
@@ -122,7 +123,7 @@ class IndustrialRenderer(BaseRenderer):
             return True
 
         # 检查是否有任意数据
-        keys_to_check = ['weekly_df', 'monthly_df', 'daily_df', 'ten_day_df', 'yearly_df']
+        keys_to_check = ['weekly_df', 'monthly_df', 'daily_df', 'ten_day_df', 'quarterly_df', 'yearly_df']
         print(f"[DEBUG] _should_reprocess_file: 检查缓存数据，keys={keys_to_check}")
         has_data = any(
             get_preview_state(key) is not None and not get_preview_state(key).empty

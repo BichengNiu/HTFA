@@ -122,6 +122,19 @@ def _prepare_plot_data(series, frequency, current_year, previous_year, config):
             use_loop_stats=False,
             period_extractor=extract_ten_day_index
         )
+    elif frequency == 'quarterly':
+        # 季度数据：直接调用通用函数
+        def extract_quarter_index(index):
+            """计算季度索引：1-4"""
+            return (index.month - 1) // 3 + 1
+
+        return _prepare_periodic_data_generic(
+            series, current_year, previous_year, x_range,
+            period_key='quarter',
+            label_formatter=lambda q: f"Q{q}",
+            use_loop_stats=False,
+            period_extractor=extract_quarter_index
+        )
 
 
 def _prepare_periodic_data_generic(series, current_year, previous_year, x_range,

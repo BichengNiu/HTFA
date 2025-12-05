@@ -6,7 +6,7 @@
 """
 
 from typing import Dict, List, Any
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 
 def validate_industry_mapping(

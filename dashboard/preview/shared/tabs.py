@@ -236,76 +236,24 @@ def render_indicator_details(indicator_details, st_module):
     # 显示表格（隐藏默认index）
     st_module.dataframe(detailed_df, use_container_width=True, hide_index=True)
 
-    # 添加间距
-    st_module.markdown("")
+    # 下载指标详情按钮
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+        detailed_df.to_excel(writer, sheet_name='指标详情', index=False)
 
-    # 创建下载按钮区域
-    col1, col2 = st_module.columns(2)
+        # 设置列宽自适应
+        worksheet = writer.sheets['指标详情']
+        for column in worksheet.columns:
+            max_length = max(len(str(cell.value)) for cell in column if cell.value)
+            worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
 
-    with col1:
-        # 下载指标详情统计表
-        buffer1 = io.BytesIO()
-        with pd.ExcelWriter(buffer1, engine='openpyxl') as writer:
-            detailed_df.to_excel(writer, sheet_name='指标详情', index=False)
-
-            # 设置列宽自适应
-            worksheet = writer.sheets['指标详情']
-            for column in worksheet.columns:
-                max_length = max(len(str(cell.value)) for cell in column if cell.value)
-                worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
-
-        st_module.download_button(
-            label="下载指标详情统计表",
-            data=buffer1.getvalue(),
-            file_name=f"指标详情统计_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type = "primary"
-        )
-
-    with col2:
-        # 下载全部原始数据
-        # 收集所有频率的DataFrame（按顺序：日度、周度、旬度、月度、年度）
-        frequency_data = {
-            '日度': get_preview_state('daily_df'),
-            '周度': get_preview_state('weekly_df'),
-            '旬度': get_preview_state('ten_day_df'),
-            '月度': get_preview_state('monthly_df'),
-            '年度': get_preview_state('yearly_df')
-        }
-
-        buffer2 = io.BytesIO()
-        with pd.ExcelWriter(buffer2, engine='openpyxl') as writer:
-            for freq_name, df in frequency_data.items():
-                if df is not None and not df.empty:
-                    # 创建副本以避免修改原始数据
-                    df_export = df.copy()
-
-                    # 重置索引并重命名为"时间"
-                    df_export = df_export.reset_index()
-                    if len(df_export.columns) > 0 and df_export.columns[0] != '时间':
-                        df_export.rename(columns={df_export.columns[0]: '时间'}, inplace=True)
-
-                    # 格式化时间列为年-月-日格式
-                    if '时间' in df_export.columns:
-                        df_export['时间'] = pd.to_datetime(df_export['时间']).dt.strftime('%Y-%m-%d')
-
-                    # 写入Excel（不包含index，因为已经转为时间列）
-                    df_export.to_excel(writer, sheet_name=freq_name, index=False)
-
-                    # 设置列宽自适应
-                    worksheet = writer.sheets[freq_name]
-                    for column in worksheet.columns:
-                        max_length = max(len(str(cell.value)) for cell in column if cell.value)
-                        worksheet.column_dimensions[column[0].column_letter].width = min(max_length + 2, 50)
-
-        st_module.download_button(
-            label="下载全部原始数据",
-            data=buffer2.getvalue(),
-            file_name=f"全部原始数据_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+    st_module.download_button(
+        label="下载指标详情",
+        data=buffer.getvalue(),
+        file_name=f"指标详情_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type = "primary"
+    )
 
 
 def _get_available_types_for_industries(selected_industries, all_indicators, indicator_maps):
@@ -317,6 +265,52 @@ def _get_available_types_for_industries(selected_industries, all_indicators, ind
             ind_type = indicator_maps['type'].get(indicator, "未分类")
             available_types.add(ind_type)
     return sorted(list(available_types))
+
+
+def _group_indicators_by_industry_and_type(indicators, industry_map, type_map):
+    """按行业和类型分组指标，并按数量降序排序
+
+    Args:
+        indicators: 指标列表
+        industry_map: 指标->行业映射
+        type_map: 指标->类型映射
+
+    Returns:
+        dict: {行业名: {类型名: [指标列表]}}，行业和类型都按指标数量降序排列
+    """
+    from collections import defaultdict
+
+    # Step 1: 按行业分组
+    industry_groups = defaultdict(list)
+    for ind in indicators:
+        industry = industry_map.get(ind, "未分类")
+        industry_groups[industry].append(ind)
+
+    # Step 2: 行业按指标数量降序排序
+    sorted_industries = sorted(
+        industry_groups.keys(),
+        key=lambda x: len(industry_groups[x]),
+        reverse=True
+    )
+
+    # Step 3: 每个行业内按类型分组，类型按数量降序
+    result = {}
+    for industry in sorted_industries:
+        type_groups = defaultdict(list)
+        for ind in industry_groups[industry]:
+            ind_type = type_map.get(ind, "未分类")
+            type_groups[ind_type].append(ind)
+
+        # 类型按指标数量降序
+        sorted_types = sorted(
+            type_groups.keys(),
+            key=lambda x: len(type_groups[x]),
+            reverse=True
+        )
+
+        result[industry] = {t: sorted(type_groups[t]) for t in sorted_types}
+
+    return result
 
 
 def display_time_series_tab(st_module, frequency):
@@ -393,38 +387,52 @@ def display_time_series_tab(st_module, frequency):
             download_prefix=config['summary_config']['download_prefix']
         )
 
-    # 6. 绑制图表
+    # 6. 绑制图表（按行业和类型分组）
     current_year = datetime.now().year
     previous_year = current_year - 1
     indicator_unit_map = get_preview_state('indicator_unit_map', {})
     indicator_type_map = get_preview_state('indicator_type_map', {})
+    indicator_industry_map = get_preview_state('indicator_industry_map', {})
 
-    # 创建两列布局
-    col1, col2 = st_module.columns(2)
-    col_idx = 0
+    # 按行业和类型分组指标
+    grouped = _group_indicators_by_industry_and_type(
+        filtered_indicators,
+        indicator_industry_map,
+        indicator_type_map
+    )
 
-    for indicator in sorted(filtered_indicators):
-        series = df[indicator].dropna()
-        if not series.empty:
-            current_col = col1 if col_idx % 2 == 0 else col2
-            with current_col:
-                with st_module.spinner(UI_TEXT['loading_message'].format(indicator)):
-                    try:
-                        unit = indicator_unit_map.get(indicator, None)
-                        indicator_type = indicator_type_map.get(indicator, None)
-                        fig = plot_indicator(
-                            series=series,
-                            name=indicator,
-                            frequency=frequency,
-                            current_year=current_year,
-                            previous_year=previous_year,
-                            unit=unit,
-                            indicator_type=indicator_type
-                        )
-                        st_module.plotly_chart(fig, use_container_width=True)
-                    except Exception as e:
-                        st_module.error(f"为指标 '{indicator}' 生成图表时出错: {e}")
-            col_idx += 1
+    for industry, types_dict in grouped.items():
+        # 行业标题和分隔线
+        st_module.markdown(f"### {industry}")
+        st_module.markdown("---")
+
+        # 创建两列布局
+        col1, col2 = st_module.columns(2)
+        col_idx = 0
+
+        for type_name, indicators in types_dict.items():
+            for indicator in indicators:
+                series = df[indicator].dropna()
+                if not series.empty:
+                    current_col = col1 if col_idx % 2 == 0 else col2
+                    with current_col:
+                        with st_module.spinner(UI_TEXT['loading_message'].format(indicator)):
+                            try:
+                                unit = indicator_unit_map.get(indicator, None)
+                                ind_type = indicator_type_map.get(indicator, None)
+                                fig = plot_indicator(
+                                    series=series,
+                                    name=indicator,
+                                    frequency=frequency,
+                                    current_year=current_year,
+                                    previous_year=previous_year,
+                                    unit=unit,
+                                    indicator_type=ind_type
+                                )
+                                st_module.plotly_chart(fig, use_container_width=True)
+                            except Exception as e:
+                                st_module.error(f"为指标 '{indicator}' 生成图表时出错: {e}")
+                    col_idx += 1
 
 
 def calculate_expected_data_points(start_date, end_date, full_df, frequency):
@@ -475,6 +483,13 @@ def calculate_expected_data_points(start_date, end_date, full_df, frequency):
     elif frequency == "年度":
         years_diff = end_date.year - start_date.year + 1
         return years_diff
+
+    elif frequency == "季度":
+        # 计算季度数
+        start_quarter = (start_date.month - 1) // 3 + 1
+        end_quarter = (end_date.month - 1) // 3 + 1
+        quarters = (end_date.year - start_date.year) * 4 + (end_quarter - start_quarter) + 1
+        return quarters
 
     else:
         return 0

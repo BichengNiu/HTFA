@@ -34,7 +34,7 @@ from dashboard.models.DFM.prep.modules.input_adapters import (
     apply_stationarity_check
 )
 from dashboard.models.DFM.prep.utils.date_utils import standardize_date
-from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 
 def infer_target_sheet_from_mapping(
