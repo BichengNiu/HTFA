@@ -20,6 +20,7 @@ import os
 from datetime import datetime
 
 from dashboard.models.DFM.prep.processor import DataPreparationProcessor
+from dashboard.models.DFM.prep.config import PrepParallelConfig, create_default_prep_config
 from dashboard.models.DFM.utils.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -319,7 +320,8 @@ def prepare_dfm_data_simple(
     enable_borrowing: bool = True,
     enable_freq_alignment: bool = True,
     zero_handling: str = "missing",
-    enable_publication_calibration: bool = False
+    enable_publication_calibration: bool = False,
+    parallel_config: Optional[PrepParallelConfig] = None
 ) -> Dict[str, Any]:
     """
     DFM数据准备主API - 简化版（7步流程）
@@ -406,7 +408,8 @@ def prepare_dfm_data_simple(
             enable_freq_alignment=enable_freq_alignment,
             zero_handling=zero_handling,
             var_publication_lag_map=var_publication_lag_map,
-            enable_publication_calibration=enable_publication_calibration
+            enable_publication_calibration=enable_publication_calibration,
+            parallel_config=parallel_config
         )
 
         processed_data, variable_mapping, transform_log, removal_log = processor.execute()

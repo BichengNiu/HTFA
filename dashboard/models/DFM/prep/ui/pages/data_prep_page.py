@@ -146,7 +146,33 @@ def _render_file_upload_section(st_obj):
             _set_state("uploaded_file_path", uploaded_file_new.name)
             _set_state("file_processed", False)
             _set_state("date_detection_needed", True)
-            print(f"新文件上传: {uploaded_file_new.name}，字节大小: {len(file_bytes)}")
+
+            # 清除基础设置参数，让新文件使用检测到的默认值
+            _set_state("param_target_freq", None)
+            _set_state("param_remove_consecutive_nans", None)
+            _set_state("param_consecutive_nan_threshold", None)
+            _set_state("param_type_mapping_sheet", None)
+            _set_state("param_data_start_date", None)
+            _set_state("param_data_end_date", None)
+            _set_state("param_enable_freq_alignment", None)
+            _set_state("param_enable_borrowing", None)
+            _set_state("param_zero_handling", None)
+            _set_state("param_publication_date_calibration", None)
+
+            # 清除处理结果和变量配置
+            _set_state("prepared_data_df", None)
+            _set_state("base_prepared_data_df", None)
+            _set_state("transform_log_obj", None)
+            _set_state("industry_map_obj", None)
+            _set_state("removed_vars_log_obj", None)
+            _set_state("processed_outputs", None)
+            _set_state("transform_config_df", None)
+            _set_state("variable_transform_details", None)
+            _set_state("var_nature_map_obj", None)
+            _set_state("var_frequency_map_obj", None)
+            _set_state("mapping_validation_result", None)
+
+            print(f"新文件上传: {uploaded_file_new.name}，字节大小: {len(file_bytes)}，已重置参数")
 
         uploaded_file = uploaded_file_new
     elif existing_file:
@@ -266,17 +292,17 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         'param_consecutive_nan_threshold': 10,
         'param_type_mapping_sheet': '指标体系',
         'param_data_start_date': default_start_date,
-        'param_data_end_date': default_end_date
+        'param_data_end_date': default_end_date,
+        'param_enable_freq_alignment': '是',
+        'param_enable_borrowing': '是',
+        'param_zero_handling': 'missing',
+        'param_publication_date_calibration': '是'
     }
 
-    # 初始化默认值
+    # 初始化默认值（仅当值为None时设置，保留用户手动修改的值）
     for key, default_value in param_defaults.items():
-        current_value = _get_state(key)
-        if current_value is None:
+        if _get_state(key) is None:
             _set_state(key, default_value)
-        elif key == 'param_data_end_date' and detected_end:
-            # 结束日期特殊处理：自动更新到最新检测日期
-            _set_state(key, default_end_date)
 
     # 第1行：日期范围
     row1_col1, row1_col2 = st_obj.columns(2)
@@ -460,181 +486,176 @@ def _execute_data_preparation(st_obj, uploaded_file):
         st_obj.error("错误：请先上传训练数据集")
         return
 
+    progress_bar = st_obj.progress(0)
+    status_text = st_obj.empty()
+
     try:
-        progress_bar = st_obj.progress(0)
-        status_text = st_obj.empty()
+        status_text.text("正在准备数据...")
+        progress_bar.progress(10)
 
-        try:
-            status_text.text("正在准备数据...")
-            progress_bar.progress(10)
+        uploaded_file_bytes = uploaded_file.getvalue()
+        excel_file_like_object = io.BytesIO(uploaded_file_bytes)
 
-            uploaded_file_bytes = uploaded_file.getvalue()
-            excel_file_like_object = io.BytesIO(uploaded_file_bytes)
+        # 获取参数
+        start_date = _get_state('param_data_start_date')
+        end_date = _get_state('param_data_end_date')
 
-            # 获取参数
-            start_date = _get_state('param_data_start_date')
-            end_date = _get_state('param_data_end_date')
+        # 直接使用用户设置的日期范围（UI层已有min_value/max_value限制）
+        start_date_str = start_date.strftime('%Y-%m-%d') if start_date else None
+        end_date_str = end_date.strftime('%Y-%m-%d') if end_date else None
 
-            # 直接使用用户设置的日期范围（UI层已有min_value/max_value限制）
-            start_date_str = start_date.strftime('%Y-%m-%d') if start_date else None
-            end_date_str = end_date.strftime('%Y-%m-%d') if end_date else None
+        status_text.text("正在读取数据文件...")
+        progress_bar.progress(20)
 
-            status_text.text("正在读取数据文件...")
-            progress_bar.progress(20)
+        # 准备NaN阈值参数
+        nan_threshold_int = None
+        if _get_state('param_remove_consecutive_nans') == "是":
+            nan_threshold = _get_state('param_consecutive_nan_threshold')
+            if not pd.isna(nan_threshold):
+                try:
+                    nan_threshold_int = int(nan_threshold)
+                except ValueError:
+                    st_obj.warning(f"连续缺失值阈值 '{nan_threshold}' 不是有效整数，将忽略此阈值")
 
-            # 准备NaN阈值参数
-            nan_threshold_int = None
-            if _get_state('param_remove_consecutive_nans') == "是":
-                nan_threshold = _get_state('param_consecutive_nan_threshold')
-                if not pd.isna(nan_threshold):
-                    try:
-                        nan_threshold_int = int(nan_threshold)
-                    except ValueError:
-                        st_obj.warning(f"连续缺失值阈值 '{nan_threshold}' 不是有效整数，将忽略此阈值")
+        status_text.text("正在执行数据预处理...")
+        progress_bar.progress(30)
 
-            status_text.text("正在执行数据预处理...")
-            progress_bar.progress(30)
+        # 调用数据准备API（简化版）
+        from dashboard.models.DFM.prep.api import prepare_dfm_data_simple
 
-            # 调用数据准备API（简化版）
-            from dashboard.models.DFM.prep.api import prepare_dfm_data_simple
+        # 获取频率对齐和数据借调参数
+        enable_freq_alignment = _get_state('param_enable_freq_alignment', '是') == '是'
+        enable_borrowing = _get_state('param_enable_borrowing', '是') == '是'
+        # 不对齐时自动禁用借调
+        if not enable_freq_alignment:
+            enable_borrowing = False
 
-            # 获取频率对齐和数据借调参数
-            enable_freq_alignment = _get_state('param_enable_freq_alignment', '是') == '是'
-            enable_borrowing = _get_state('param_enable_borrowing', '是') == '是'
-            # 不对齐时自动禁用借调
-            if not enable_freq_alignment:
-                enable_borrowing = False
+        # 获取零值处理参数
+        zero_handling = _get_state('param_zero_handling', 'missing')
 
-            # 获取零值处理参数
-            zero_handling = _get_state('param_zero_handling', 'missing')
+        # 获取发布日期校准参数
+        enable_publication_calibration = _get_state('param_publication_date_calibration', '否') == '是'
 
-            # 获取发布日期校准参数
-            enable_publication_calibration = _get_state('param_publication_date_calibration', '否') == '是'
+        print(f"调用prepare_dfm_data_simple参数:")
+        print(f"  - target_freq: {_get_state('param_target_freq')}")
+        print(f"  - consecutive_nan_threshold: {nan_threshold_int}")
+        print(f"  - data_start_date: {start_date_str}")
+        print(f"  - data_end_date: {end_date_str}")
+        print(f"  - enable_freq_alignment: {enable_freq_alignment}")
+        print(f"  - enable_borrowing: {enable_borrowing}")
+        print(f"  - zero_handling: {zero_handling}")
+        print(f"  - enable_publication_calibration: {enable_publication_calibration}")
 
-            print(f"调用prepare_dfm_data_simple参数:")
-            print(f"  - target_freq: {_get_state('param_target_freq')}")
-            print(f"  - consecutive_nan_threshold: {nan_threshold_int}")
-            print(f"  - data_start_date: {start_date_str}")
-            print(f"  - data_end_date: {end_date_str}")
-            print(f"  - enable_freq_alignment: {enable_freq_alignment}")
-            print(f"  - enable_borrowing: {enable_borrowing}")
-            print(f"  - zero_handling: {zero_handling}")
-            print(f"  - enable_publication_calibration: {enable_publication_calibration}")
+        result = prepare_dfm_data_simple(
+            uploaded_file=excel_file_like_object,
+            target_variable_name=None,
+            target_freq=_get_state('param_target_freq'),
+            consecutive_nan_threshold=nan_threshold_int,
+            data_start_date=start_date_str,
+            data_end_date=end_date_str,
+            reference_sheet_name=_get_state('param_type_mapping_sheet'),
+            enable_borrowing=enable_borrowing,
+            enable_freq_alignment=enable_freq_alignment,
+            zero_handling=zero_handling,
+            enable_publication_calibration=enable_publication_calibration
+        )
 
-            result = prepare_dfm_data_simple(
-                uploaded_file=excel_file_like_object,
-                target_variable_name=None,
-                target_freq=_get_state('param_target_freq'),
-                consecutive_nan_threshold=nan_threshold_int,
-                data_start_date=start_date_str,
-                data_end_date=end_date_str,
-                reference_sheet_name=_get_state('param_type_mapping_sheet'),
-                enable_borrowing=enable_borrowing,
-                enable_freq_alignment=enable_freq_alignment,
-                zero_handling=zero_handling,
-                enable_publication_calibration=enable_publication_calibration
-            )
+        status_text.text("数据预处理完成，正在生成结果...")
+        progress_bar.progress(70)
 
-            status_text.text("数据预处理完成，正在生成结果...")
-            progress_bar.progress(70)
+        # 处理返回结果
+        if result['status'] == 'success':
+            prepared_data = result['data']
+            industry_map = result['metadata']['variable_mapping']
+            transform_log = result['metadata']['transform_log']
+            removed_variables_log = result['metadata']['removal_log']
+            mapping_validation = result['metadata'].get('mapping_validation', {})
+            print(f"准备数据形状: {prepared_data.shape if prepared_data is not None else 'None'}")
+            print(f"移除日志长度: {len(removed_variables_log) if removed_variables_log else 0}")
+        else:
+            prepared_data = None
+            industry_map = {}
+            transform_log = {}
+            removed_variables_log = []
+            mapping_validation = {}
+            st_obj.error(f"数据预处理失败: {result['message']}")
 
-            # 处理返回结果
-            if result['status'] == 'success':
-                prepared_data = result['data']
-                industry_map = result['metadata']['variable_mapping']
-                transform_log = result['metadata']['transform_log']
-                removed_variables_log = result['metadata']['removal_log']
-                mapping_validation = result['metadata'].get('mapping_validation', {})
-                print(f"准备数据形状: {prepared_data.shape if prepared_data is not None else 'None'}")
-                print(f"移除日志长度: {len(removed_variables_log) if removed_variables_log else 0}")
-            else:
-                prepared_data = None
-                industry_map = {}
-                transform_log = {}
-                removed_variables_log = []
-                mapping_validation = {}
-                st_obj.error(f"数据预处理失败: {result['message']}")
+        if prepared_data is not None:
+            status_text.text("正在处理结果数据...")
+            progress_bar.progress(80)
 
-            if prepared_data is not None:
-                status_text.text("正在处理结果数据...")
-                progress_bar.progress(80)
+            # 保存数据对象到状态管理
+            _set_state("prepared_data_df", prepared_data)
+            _set_state("base_prepared_data_df", prepared_data.copy())  # 保存基准数据（变量转换前）
+            _set_state("transform_log_obj", transform_log)
+            _set_state("industry_map_obj", industry_map)
+            _set_state("removed_vars_log_obj", removed_variables_log)
+            _set_state("mapping_validation_result", mapping_validation)
 
-                # 保存数据对象到状态管理
-                _set_state("prepared_data_df", prepared_data)
-                _set_state("base_prepared_data_df", prepared_data.copy())  # 保存基准数据（变量转换前）
-                _set_state("transform_log_obj", transform_log)
-                _set_state("industry_map_obj", industry_map)
-                _set_state("removed_vars_log_obj", removed_variables_log)
-                _set_state("mapping_validation_result", mapping_validation)
+            # 准备导出数据 - 输出为Excel文件，包含两个sheet
+            processed_outputs = {
+                'excel_file': None
+            }
 
-                # 准备导出数据 - 输出为Excel文件，包含两个sheet
-                processed_outputs = {
-                    'excel_file': None
-                }
+            if prepared_data is not None and industry_map:
+                try:
+                    # 重新加载映射以确保和industry_map使用同一份数据
+                    from dashboard.models.DFM.prep.api import load_mappings_once
+                    from dashboard.models.DFM.prep.services.export_service import ExportService
 
-                if prepared_data is not None and industry_map:
-                    try:
-                        # 重新加载映射以确保和industry_map使用同一份数据
-                        from dashboard.models.DFM.prep.api import load_mappings_once
-                        from dashboard.models.DFM.prep.services.export_service import ExportService
+                    excel_file_like_object.seek(0)
+                    result = load_mappings_once(
+                        excel_path=excel_file_like_object,
+                        reference_sheet_name=_get_state('param_type_mapping_sheet'),
+                        reference_column_name='指标名称'
+                    )
 
-                        excel_file_like_object.seek(0)
-                        result = load_mappings_once(
-                            excel_path=excel_file_like_object,
-                            reference_sheet_name=_get_state('param_type_mapping_sheet'),
-                            reference_column_name='指标名称'
-                        )
+                    if result['status'] != 'success':
+                        raise ValueError(result['message'])
 
-                        if result['status'] != 'success':
-                            raise ValueError(result['message'])
+                    mappings = result['mappings']
 
-                        mappings = result['mappings']
+                    # 保存性质映射和频率映射到状态（用于变量处理功能）
+                    _set_state("var_nature_map_obj", mappings.get('var_nature_map', {}))
+                    _set_state("var_frequency_map_obj", mappings.get('var_frequency_map', {}))
 
-                        # 保存性质映射和频率映射到状态（用于变量处理功能）
-                        _set_state("var_nature_map_obj", mappings.get('var_nature_map', {}))
-                        _set_state("var_frequency_map_obj", mappings.get('var_frequency_map', {}))
+                    # 调用 ExportService 生成 Excel 文件
+                    processed_outputs['excel_file'] = ExportService.generate_excel(
+                        prepared_data=prepared_data,
+                        industry_map=industry_map,
+                        mappings=mappings,
+                        removed_vars_log=removed_variables_log,
+                        transform_details=_get_state('variable_transform_details')
+                    )
 
-                        # 调用 ExportService 生成 Excel 文件
-                        processed_outputs['excel_file'] = ExportService.generate_excel(
-                            prepared_data=prepared_data,
-                            industry_map=industry_map,
-                            mappings=mappings,
-                            removed_vars_log=removed_variables_log,
-                            transform_details=_get_state('variable_transform_details')
-                        )
+                    logger.info(f"导出Excel文件: 数据形状 {prepared_data.shape}, 映射 {len(industry_map)} 条记录")
 
-                        logger.info(f"导出Excel文件: 数据形状 {prepared_data.shape}, 映射 {len(industry_map)} 条记录")
+                except Exception as e:
+                    st_obj.warning(f"生成Excel文件时出错: {e}")
+                    processed_outputs['excel_file'] = None
 
-                    except Exception as e:
-                        st_obj.warning(f"生成Excel文件时出错: {e}")
-                        processed_outputs['excel_file'] = None
+            # 保存处理结果
+            _set_state("processed_outputs", processed_outputs)
+            progress_bar.progress(100)
+            status_text.text("处理完成！")
 
-                # 保存处理结果
-                _set_state("processed_outputs", processed_outputs)
-
-            else:
-                progress_bar.progress(100)
-                status_text.text("处理失败")
-                st_obj.error("数据预处理失败或未返回数据。请检查控制台日志获取更多信息。")
-                _set_state("processed_outputs", None)
-
-            if 'progress_bar' in locals():
-                progress_bar.progress(100)
-                status_text.text("处理完成！")
-                time.sleep(1)
-                progress_bar.empty()
-                status_text.empty()
-
-        except Exception as e:
-            st_obj.error(f"运行数据预处理时发生错误: {e}")
-            import traceback
-            st_obj.text_area("详细错误信息:", traceback.format_exc(), height=200)
+        else:
+            progress_bar.progress(100)
+            status_text.text("处理失败")
+            st_obj.error("数据预处理失败或未返回数据。请检查控制台日志获取更多信息。")
             _set_state("processed_outputs", None)
 
-    except Exception as outer_e:
-        st_obj.error(f"数据预处理过程中发生未预期的错误: {outer_e}")
+    except Exception as e:
+        st_obj.error(f"运行数据预处理时发生错误: {e}")
         import traceback
         st_obj.text_area("详细错误信息:", traceback.format_exc(), height=200)
+        _set_state("processed_outputs", None)
+
+    finally:
+        # 确保进度条和状态文本始终被清理
+        time.sleep(0.5)
+        progress_bar.empty()
+        status_text.empty()
 
 
 def _render_data_preview(st_obj):
@@ -1236,30 +1257,11 @@ def render_dfm_data_prep_page(st_obj):
     7. 数据和映射文件导出
     """
 
-    # 初始化状态
-    if _get_state('training_data_file') is None:
-        _set_state("training_data_file", None)
-    if _get_state('prepared_data_df') is None:
-        _set_state("prepared_data_df", None)
-    if _get_state('base_prepared_data_df') is None:
-        _set_state("base_prepared_data_df", None)  # 基准数据（变量转换前）
-    if _get_state('transform_log_obj') is None:
-        _set_state("transform_log_obj", None)
-    if _get_state('industry_map_obj') is None:
-        _set_state("industry_map_obj", None)
-    if _get_state('removed_vars_log_obj') is None:
-        _set_state("removed_vars_log_obj", None)
+    # 初始化有默认值的状态（其他状态在文件上传时按需初始化）
     if _get_state('export_base_name') is None:
         _set_state("export_base_name", "dfm_prepared_output")
-    if _get_state('processed_outputs') is None:
-        _set_state("processed_outputs", None)
-    # 变量处理相关状态
     if _get_state('var_nature_map_obj') is None:
         _set_state("var_nature_map_obj", {})
-    if _get_state('transform_config_df') is None:
-        _set_state("transform_config_df", None)
-    if _get_state('variable_transform_details') is None:
-        _set_state("variable_transform_details", None)
 
     # 1. 文件上传区域
     uploaded_file = _render_file_upload_section(st_obj)
@@ -1285,8 +1287,9 @@ def render_dfm_data_prep_page(st_obj):
 
     # 5. 执行数据准备
     if run_button_clicked:
-        # 清除旧的配置
+        # 清除旧的变量转换配置和详情
         _set_state('transform_config_df', None)
+        _set_state('variable_transform_details', None)
         _execute_data_preparation(st_obj, uploaded_file)
 
     # 6. 显示移除变量详情和数据借调详情（同一行布局）

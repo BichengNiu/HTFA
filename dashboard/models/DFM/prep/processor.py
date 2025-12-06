@@ -22,6 +22,11 @@ from dashboard.models.DFM.prep.modules.data_aligner import DataAligner
 from dashboard.models.DFM.prep.modules.data_cleaner import DataCleaner, clean_dataframe
 from dashboard.models.DFM.prep.utils.date_utils import standardize_date
 from dashboard.models.DFM.utils.text_utils import normalize_text
+from dashboard.models.DFM.prep.config import PrepParallelConfig, create_default_prep_config
+from dashboard.models.DFM.prep.parallel.frequency_processor import (
+    parallel_process_frequencies,
+    serial_process_frequencies
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +68,8 @@ class DataPreparationProcessor:
         enable_freq_alignment: bool = True,
         zero_handling: str = 'missing',
         var_publication_lag_map: Dict[str, int] = None,
-        enable_publication_calibration: bool = False
+        enable_publication_calibration: bool = False,
+        parallel_config: Optional[PrepParallelConfig] = None
     ):
         """初始化处理器
 
@@ -81,6 +87,7 @@ class DataPreparationProcessor:
             zero_handling: 零值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1
             var_publication_lag_map: 变量-发布日期滞后映射（从指标体系加载）
             enable_publication_calibration: 是否启用发布日期校准，默认False
+            parallel_config: 并行处理配置，默认启用并行
         """
         # 仅在启用频率对齐时验证目标频率
         if enable_freq_alignment and not target_freq.upper().endswith('-FRI'):
@@ -99,6 +106,7 @@ class DataPreparationProcessor:
         self.zero_handling = zero_handling
         self.var_publication_lag_map = var_publication_lag_map or {}
         self.enable_publication_calibration = enable_publication_calibration
+        self.parallel_config = parallel_config or create_default_prep_config()
 
         # 初始化组件
         self.data_loader = DataLoader(
@@ -118,6 +126,7 @@ class DataPreparationProcessor:
 
         logger.info(f"[Processor] 初始化完成: 目标变量={target_variable_name}, 频率对齐={'启用' if enable_freq_alignment else '禁用'}")
         logger.info(f"[Processor] 零值处理={zero_handling}, 发布日期校准={'启用' if enable_publication_calibration else '禁用'}")
+        logger.info(f"[Processor] 并行配置: {self.parallel_config}")
 
     def _apply_global_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
         """应用全局零值处理
@@ -584,6 +593,8 @@ class DataPreparationProcessor:
         - 仅检测缺失值，不进行频率转换
         - 保留原始发布日期
 
+        支持并行处理（6个频率独立处理）
+
         Args:
             data_by_freq: 按频率分类的数据
 
@@ -602,70 +613,43 @@ class DataPreparationProcessor:
         if not self.enable_freq_alignment:
             return self._step5_no_alignment(data_by_freq)
 
-        aligned_data = {}
-        all_borrowing_log = {}  # 聚合所有频率的借调日志
         target_level = self._get_freq_level(self.target_freq)
 
-        # 处理日度数据
-        if data_by_freq['daily']:
-            logger.info("  处理日度数据...")
-            aligned_df, borrowing_log = self._process_frequency_data(
-                data_by_freq['daily'], 'D', target_level, 'daily'
-            )
-            aligned_data['daily'] = aligned_df
-            if borrowing_log:
-                all_borrowing_log.update(borrowing_log)
+        # 统计有数据的频率数量
+        active_freqs = sum(1 for f in data_by_freq.values() if f)
 
-        # 处理周度数据
-        if data_by_freq['weekly']:
-            logger.info("  处理周度数据...")
-            aligned_df, borrowing_log = self._process_frequency_data(
-                data_by_freq['weekly'], 'W', target_level, 'weekly'
-            )
-            aligned_data['weekly'] = aligned_df
-            if borrowing_log:
-                all_borrowing_log.update(borrowing_log)
+        # 决定是否使用并行处理
+        if self.parallel_config.should_parallelize_frequencies(active_freqs):
+            try:
+                logger.info(f"  使用并行频率处理 ({active_freqs}个频率, n_jobs={self.parallel_config.get_effective_n_jobs()})...")
+                aligned_data, all_borrowing_log, removal_log = parallel_process_frequencies(
+                    data_by_freq=data_by_freq,
+                    target_level=target_level,
+                    consecutive_nan_threshold=self.consecutive_nan_threshold,
+                    data_start_date=self.data_start_date,
+                    data_end_date=self.data_end_date,
+                    target_freq=self.target_freq,
+                    enable_borrowing=self.enable_borrowing,
+                    n_jobs=self.parallel_config.get_effective_n_jobs(),
+                    backend=self.parallel_config.backend
+                )
+                self.removal_log.extend(removal_log)
+                return aligned_data, all_borrowing_log
+            except Exception as e:
+                logger.warning(f"  并行频率处理失败，降级到串行: {e}")
 
-        # 处理旬度数据
-        if data_by_freq['dekad']:
-            logger.info("  处理旬度数据...")
-            aligned_df, borrowing_log = self._process_frequency_data(
-                data_by_freq['dekad'], 'M', target_level, 'dekad'
-            )
-            aligned_data['dekad'] = aligned_df
-            if borrowing_log:
-                all_borrowing_log.update(borrowing_log)
-
-        # 处理月度数据
-        if data_by_freq['monthly']:
-            logger.info("  处理月度数据...")
-            aligned_df, borrowing_log = self._process_frequency_data(
-                data_by_freq['monthly'], 'M', target_level, 'monthly'
-            )
-            aligned_data['monthly'] = aligned_df
-            if borrowing_log:
-                all_borrowing_log.update(borrowing_log)
-
-        # 处理季度数据
-        if data_by_freq['quarterly']:
-            logger.info("  处理季度数据...")
-            aligned_df, borrowing_log = self._process_frequency_data(
-                data_by_freq['quarterly'], 'Q', target_level, 'quarterly'
-            )
-            aligned_data['quarterly'] = aligned_df
-            if borrowing_log:
-                all_borrowing_log.update(borrowing_log)
-
-        # 处理年度数据
-        if data_by_freq['yearly']:
-            logger.info("  处理年度数据...")
-            aligned_df, borrowing_log = self._process_frequency_data(
-                data_by_freq['yearly'], 'Y', target_level, 'yearly'
-            )
-            aligned_data['yearly'] = aligned_df
-            if borrowing_log:
-                all_borrowing_log.update(borrowing_log)
-
+        # 串行处理（默认或降级）
+        logger.info(f"  使用串行频率处理 ({active_freqs}个频率)...")
+        aligned_data, all_borrowing_log, removal_log = serial_process_frequencies(
+            data_by_freq=data_by_freq,
+            target_level=target_level,
+            consecutive_nan_threshold=self.consecutive_nan_threshold,
+            data_start_date=self.data_start_date,
+            data_end_date=self.data_end_date,
+            target_freq=self.target_freq,
+            enable_borrowing=self.enable_borrowing
+        )
+        self.removal_log.extend(removal_log)
         return aligned_data, all_borrowing_log
 
     def _step5_no_alignment(
