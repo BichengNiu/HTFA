@@ -4,9 +4,12 @@
 提供统一的日期处理功能，包括日期标准化、解析和验证
 """
 
+import logging
 import pandas as pd
 from typing import Union, Optional, Tuple
 from datetime import datetime, date
+
+logger = logging.getLogger(__name__)
 
 
 def standardize_date(
@@ -36,14 +39,14 @@ def standardize_date(
         try:
             return pd.to_datetime(date_param)
         except (ValueError, TypeError) as e:
-            print(f"警告: 无法解析日期字符串: {date_param}, 错误: {e}")
+            logger.warning("无法解析日期字符串: %s, 错误: %s", date_param, e)
             return None
     elif isinstance(date_param, (datetime, date)):
         return pd.to_datetime(date_param)
     elif isinstance(date_param, pd.Timestamp):
         return date_param
     else:
-        print(f"警告: 不支持的日期类型: {type(date_param)}")
+        logger.warning("不支持的日期类型: %s", type(date_param))
         return None
 
 
@@ -83,7 +86,7 @@ def parse_date_range(
 
     # 验证日期范围的合理性
     if parsed_start and parsed_end and parsed_start > parsed_end:
-        print(f"警告: 开始日期 ({parsed_start}) 晚于结束日期 ({parsed_end})")
+        logger.warning("开始日期 (%s) 晚于结束日期 (%s)", parsed_start, parsed_end)
 
     return parsed_start, parsed_end
 
@@ -128,7 +131,7 @@ def filter_by_date_range(
                 result = result[result.index <= end_dt]
 
     except Exception as e:
-        print(f"警告: 时间范围筛选失败: {e}，返回原始数据")
+        logger.warning("时间范围筛选失败: %s，返回原始数据", e)
         return df
 
     return result

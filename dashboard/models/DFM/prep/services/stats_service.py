@@ -14,15 +14,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 频率周期映射（天数）
-FREQ_DAYS_MAP = {
-    '日度': 1, '日': 1, 'daily': 1, 'd': 1,
-    '周度': 7, '周': 7, 'weekly': 7, 'w': 7,
-    '旬度': 10, '旬': 10,
-    '月度': 30, '月': 30, 'monthly': 30, 'm': 30,
-    '季度': 90, '季': 90, 'quarterly': 90, 'q': 90,
-    '年度': 365, '年': 365, 'yearly': 365, 'annual': 365, 'y': 365
-}
+# 频率周期映射（从统一常量导入）
+from dashboard.models.DFM.prep.modules.config_constants import FREQ_DAYS_MAP
 
 
 class StatsService:

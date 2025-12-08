@@ -8,8 +8,11 @@
 - 数据验证
 """
 
+import logging
 import pandas as pd
 import numpy as np
+
+logger = logging.getLogger(__name__)
 from typing import List, Dict, Set, Tuple, Optional
 from collections import Counter
 
@@ -53,10 +56,10 @@ class DataCleaner:
                     'Reason': f'{log_prefix}duplicate_column'
                 })
             
-            print(f"    {log_prefix}移除重复列: {original_col_count} → {len(df_cleaned.columns)} (减少了 {removed_count} 列)")
+            logger.info("%s移除重复列: %d → %d (减少了 %d 列)", log_prefix, original_col_count, len(df_cleaned.columns), removed_count)
             return df_cleaned
         else:
-            print(f"    {log_prefix}未发现重复列")
+            logger.info("%s未发现重复列", log_prefix)
             return df
     
     def handle_consecutive_nans(
@@ -104,28 +107,28 @@ class DataCleaner:
 
         # 首先检查并处理原始DataFrame的重复列名
         if df.columns.duplicated().any():
-            print(f"  {log_prefix}警告: 检测到重复列名，正在去重...")
+            logger.warning("%s检测到重复列名，正在去重...", log_prefix)
             df = df.loc[:, ~df.columns.duplicated(keep='first')]
-            print(f"  {log_prefix}去重后形状: {df.shape}")
+            logger.info("%s去重后形状: %s", log_prefix, df.shape)
 
         # 应用时间范围筛选
         df_filtered = self._apply_time_range_filter(df, data_start_date, data_end_date)
 
         if df_filtered.empty:
-            print(f"  {log_prefix}警告: 时间范围筛选后数据为空，使用原有逻辑")
+            logger.warning("%s时间范围筛选后数据为空，使用原有逻辑", log_prefix)
             return self._handle_consecutive_nans_original(df, threshold, log_prefix)
 
-        print(f"  {log_prefix}基于用户选择时间范围检查连续缺失值 (阈值 >= {threshold})...")
-        print(f"  {log_prefix}时间范围: {data_start_date} 到 {data_end_date}")
-        print(f"  {log_prefix}筛选后数据形状: {df_filtered.shape} (原始: {df.shape})")
+        logger.info("%s基于用户选择时间范围检查连续缺失值 (阈值 >= %d)...", log_prefix, threshold)
+        logger.info("%s时间范围: %s 到 %s", log_prefix, data_start_date, data_end_date)
+        logger.info("%s筛选后数据形状: %s (原始: %s)", log_prefix, df_filtered.shape, df.shape)
 
         # 确保df_filtered没有重复列名（防止时间筛选后产生重复）
         if df_filtered.columns.duplicated().any():
-            print(f"  {log_prefix}警告: 筛选后发现重复列名，正在去重...")
+            logger.warning("%s筛选后发现重复列名，正在去重...", log_prefix)
             df_filtered = df_filtered.loc[:, ~df_filtered.columns.duplicated(keep='first')]
             # 同时更新原始df以保持一致
             df = df.loc[:, ~df.columns.duplicated(keep='first')]
-            print(f"  {log_prefix}去重后形状: {df_filtered.shape}")
+            logger.info("%s去重后形状: %s", log_prefix, df_filtered.shape)
 
         cols_to_remove = []
 
@@ -149,15 +152,12 @@ class DataCleaner:
                 if nan_start_date is not None and nan_end_date is not None:
                     # 转换为字符串格式
                     nan_period_str = f"{nan_start_date} to {nan_end_date}"
-                    print(f"    {log_prefix}标记移除变量: '{col}' "
-                          f"(最大连续NaN: {max_consecutive_nan} >= {threshold}, "
-                          f"缺失时间段: {nan_period_str}, "
-                          f"缺失率: {missing_ratio:.1f}%)")
+                    logger.info("%s标记移除变量: '%s' (最大连续NaN: %d >= %d, 缺失时间段: %s, 缺失率: %.1f%%)",
+                                log_prefix, col, max_consecutive_nan, threshold, nan_period_str, missing_ratio)
                 else:
                     nan_period_str = "未知"
-                    print(f"    {log_prefix}标记移除变量: '{col}' "
-                          f"(时间范围内最大连续 NaN: {max_consecutive_nan} >= {threshold}, "
-                          f"缺失率: {missing_ratio:.1f}%)")
+                    logger.info("%s标记移除变量: '%s' (时间范围内最大连续 NaN: %d >= %d, 缺失率: %.1f%%)",
+                                log_prefix, col, max_consecutive_nan, threshold, missing_ratio)
 
                 self.removed_variables_log.append({
                     'Variable': col,
@@ -176,12 +176,12 @@ class DataCleaner:
                 })
 
         if cols_to_remove:
-            print(f"    {log_prefix}正在移除 {len(cols_to_remove)} 个在选定时间范围内连续缺失值超标的变量...")
+            logger.info("%s正在移除 %d 个在选定时间范围内连续缺失值超标的变量...", log_prefix, len(cols_to_remove))
             df_cleaned = df.drop(columns=cols_to_remove)
-            print(f"      {log_prefix}移除后 Shape: {df_cleaned.shape}")
+            logger.info("%s移除后 Shape: %s", log_prefix, df_cleaned.shape)
             return df_cleaned
         else:
-            print(f"    {log_prefix}所有变量在选定时间范围内的连续缺失值均低于阈值。")
+            logger.info("%s所有变量在选定时间范围内的连续缺失值均低于阈值。", log_prefix)
             return df
 
     def _handle_consecutive_nans_original(
@@ -191,13 +191,13 @@ class DataCleaner:
         log_prefix: str
     ) -> pd.DataFrame:
         """原有的连续NaN处理逻辑"""
-        print(f"  {log_prefix}开始检查连续缺失值 (阈值 >= {threshold})...")
+        logger.info("%s开始检查连续缺失值 (阈值 >= %d)...", log_prefix, threshold)
 
         # 检查并处理重复列名
         if df.columns.duplicated().any():
-            print(f"  {log_prefix}警告: 检测到重复列名，正在去重...")
+            logger.warning("%s检测到重复列名，正在去重...", log_prefix)
             df = df.loc[:, ~df.columns.duplicated(keep='first')]
-            print(f"  {log_prefix}去重后形状: {df.shape}")
+            logger.info("%s去重后形状: %s", log_prefix, df.shape)
 
         cols_to_remove = []
 
@@ -219,24 +219,24 @@ class DataCleaner:
                     if not block_counts.empty:
                         max_consecutive_nan = block_counts.max()
                 except Exception as e_nan_count:
-                     print(f"    {log_prefix}警告: 计算 '{col}' 的 NaN 块时出错: {e_nan_count}. 跳过此列检查.")
+                     logger.warning("%s计算 '%s' 的 NaN 块时出错: %s. 跳过此列检查.", log_prefix, col, e_nan_count)
                      continue
 
             if max_consecutive_nan >= threshold:
                 cols_to_remove.append(col)
-                print(f"    {log_prefix}标记移除变量: '{col}' (最大连续 NaN: {max_consecutive_nan} >= {threshold})")
+                logger.info("%s标记移除变量: '%s' (最大连续 NaN: %d >= %d)", log_prefix, col, max_consecutive_nan, threshold)
                 self.removed_variables_log.append({
                     'Variable': col,
                     'Reason': f'{log_prefix}consecutive_nan'
                 })
 
         if cols_to_remove:
-            print(f"    {log_prefix}正在移除 {len(cols_to_remove)} 个连续缺失值超标的变量...")
+            logger.info("%s正在移除 %d 个连续缺失值超标的变量...", log_prefix, len(cols_to_remove))
             df_cleaned = df.drop(columns=cols_to_remove)
-            print(f"      {log_prefix}移除后 Shape: {df_cleaned.shape}")
+            logger.info("%s移除后 Shape: %s", log_prefix, df_cleaned.shape)
             return df_cleaned
         else:
-            print(f"    {log_prefix}所有变量的连续缺失值均低于阈值。")
+            logger.info("%s所有变量的连续缺失值均低于阈值。", log_prefix)
             return df
 
     def _apply_time_range_filter(
@@ -275,7 +275,7 @@ class DataCleaner:
                 if not block_counts.empty:
                     max_consecutive_nan = block_counts.max()
             except Exception as e:
-                print(f"    警告: 计算连续NaN时出错: {e}")
+                logger.warning("计算连续NaN时出错: %s", e)
                 return 0
 
         return max_consecutive_nan
@@ -334,7 +334,7 @@ class DataCleaner:
                 return max_consecutive_nan, None, None
 
         except Exception as e:
-            print(f"    警告: 查找最大连续NaN时间段时出错: {e}")
+            logger.warning("查找最大连续NaN时间段时出错: %s", e)
             return 0, None, None
 
     def clean_zero_values(self, df: pd.DataFrame, log_prefix: str = "") -> pd.DataFrame:
@@ -352,7 +352,7 @@ class DataCleaner:
             return df
             
         df_cleaned = df.replace(0, np.nan)
-        print(f"      {log_prefix}将 0 值替换为 NaN。")
+        logger.info("%s将 0 值替换为 NaN。", log_prefix)
         return df_cleaned
     
     def remove_unnamed_columns(self, df: pd.DataFrame, log_prefix: str = "") -> pd.DataFrame:
@@ -370,9 +370,9 @@ class DataCleaner:
             return df
             
         unnamed_cols = [col for col in df.columns if isinstance(col, str) and col.startswith('Unnamed:')]
-        
+
         if unnamed_cols:
-            print(f"      {log_prefix}发现并移除 Unnamed 列: {unnamed_cols}")
+            logger.info("%s发现并移除 Unnamed 列: %s", log_prefix, unnamed_cols)
             df_cleaned = df.drop(columns=unnamed_cols)
             
             # 记录移除的列
@@ -405,25 +405,7 @@ class DataCleaner:
         removed_cols = cols_before - set(df_cleaned.columns)
 
         if removed_cols:
-            print(f"  {log_prefix}移除了 {len(removed_cols)} 个全 NaN 列: {list(removed_cols)[:10]}{'...' if len(removed_cols)>10 else ''}")
-
-            # 添加调试信息，检查关键变量
-            debug_vars = [
-                '中国:日产量:尿素',
-                '中国:开工率:聚丙烯下游:塑编',
-                '中国:开工率:聚丙烯下游:双向拉伸聚丙烯薄膜',
-                '中国:开工率:聚丙烯下游:共聚注塑',
-                '中国:开工率:纯苯:下游行业'
-            ]
-            for var in debug_vars:
-                if var in removed_cols:
-                    print(f"    [DEBUG] 关键变量被移除: '{var}'")
-                    if var in df.columns:
-                        non_nan_count = df[var].notna().sum()
-                        total_count = len(df[var])
-                        print(f"      非NaN值数量: {non_nan_count}/{total_count}")
-                        if non_nan_count > 0:
-                            print(f"      前5个非NaN值索引: {df[var].dropna().head().index.tolist()}")
+            logger.info("%s移除了 %d 个全 NaN 列: %s%s", log_prefix, len(removed_cols), list(removed_cols)[:10], '...' if len(removed_cols)>10 else '')
 
             # 记录移除的列
             for col in removed_cols:
@@ -450,9 +432,9 @@ class DataCleaner:
             
         original_rows = df.shape[0]
         df_cleaned = df.dropna(how='all')
-        
+
         if df_cleaned.shape[0] < original_rows:
-            print(f"    {log_prefix}移除全NaN行: {original_rows} → {df_cleaned.shape[0]} 行")
+            logger.info("%s移除全NaN行: %d → %d 行", log_prefix, original_rows, df_cleaned.shape[0])
         
         return df_cleaned
     

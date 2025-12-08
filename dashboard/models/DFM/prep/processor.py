@@ -20,13 +20,12 @@ import logging
 from dashboard.models.DFM.prep.modules.data_loader import DataLoader
 from dashboard.models.DFM.prep.modules.data_aligner import DataAligner
 from dashboard.models.DFM.prep.modules.data_cleaner import DataCleaner, clean_dataframe
+from dashboard.models.DFM.prep.modules.config_constants import FREQ_ORDER
+from dashboard.models.DFM.prep.modules.publication_calibrator import PublicationCalibrator
 from dashboard.models.DFM.prep.utils.date_utils import standardize_date
 from dashboard.models.DFM.utils.text_utils import normalize_text
 from dashboard.models.DFM.prep.config import PrepParallelConfig, create_default_prep_config
-from dashboard.models.DFM.prep.parallel.frequency_processor import (
-    parallel_process_frequencies,
-    serial_process_frequencies
-)
+from dashboard.models.DFM.prep.parallel.frequency_processor import parallel_process_frequencies
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +42,6 @@ class DataPreparationProcessor:
     6. 合并数据形成最终表
     7. 输出处理结果
     """
-
-    # 频率优先级顺序（数字越小频率越高）
-    FREQ_ORDER = {
-        'D': 1,     # 日度
-        'W': 2,     # 周度
-        '10D': 2.5, # 旬度（2025-11-15新增）
-        'M': 3,     # 月度
-        'Q': 4,     # 季度
-        'Y': 5      # 年度
-    }
 
     def __init__(
         self,
@@ -164,11 +153,7 @@ class DataPreparationProcessor:
     def _apply_publication_date_calibration(self, df: pd.DataFrame, freq_type: str) -> pd.DataFrame:
         """应用发布日期校准
 
-        根据频率类型采用不同的校准逻辑：
-        - 日度/周度：数据日期 + 滞后天数 = 实际发布日期
-        - 月度：对齐到当月最后一个周五（周度目标）或当月最后一日（日度目标）
-        - 季度：对齐到当季最后一个周五（周度目标）或当季最后一日（日度目标）
-        - 年度：对齐到当年最后一个周五（周度目标）或当年最后一日（日度目标）
+        委托给PublicationCalibrator处理，根据频率类型采用不同的校准逻辑。
 
         Args:
             df: 输入DataFrame，索引为数据日期
@@ -180,219 +165,8 @@ class DataPreparationProcessor:
         if not self.enable_publication_calibration or not self.var_publication_lag_map:
             return df
 
-        if df is None or df.empty:
-            return df
-
-        logger.info(f"  应用发布日期校准 ({freq_type})...")
-        calibration_count = 0
-
-        # 创建结果DataFrame
-        result_columns = {}
-
-        for col in df.columns:
-            col_norm = normalize_text(col)
-            lag_days = self.var_publication_lag_map.get(col_norm)
-
-            if lag_days is not None and lag_days != 0:
-                # 提取该列数据
-                series = df[col].dropna()
-                if series.empty:
-                    result_columns[col] = df[col]
-                    continue
-
-                # 根据频率类型计算校准后的日期
-                if freq_type in ['daily', 'weekly', 'dekad']:
-                    # 日度/周度/旬度：直接加滞后天数
-                    new_index = series.index + pd.Timedelta(days=lag_days)
-                elif freq_type == 'monthly':
-                    # 月度：对齐到当月最后一个周五
-                    new_index = series.index.map(lambda d: self._get_month_end_friday(d, lag_days))
-                elif freq_type == 'quarterly':
-                    # 季度：对齐到当季最后一个周五
-                    new_index = series.index.map(lambda d: self._get_quarter_end_friday(d, lag_days))
-                elif freq_type == 'yearly':
-                    # 年度：对齐到当年最后一个周五
-                    new_index = series.index.map(lambda d: self._get_year_end_friday(d, lag_days))
-                else:
-                    # 未知频率：直接加滞后天数
-                    new_index = series.index + pd.Timedelta(days=lag_days)
-
-                calibrated_series = pd.Series(series.values, index=new_index, name=col)
-                result_columns[col] = calibrated_series
-                calibration_count += 1
-                logger.debug(f"    {col}: 滞后{lag_days}天 ({freq_type})")
-            else:
-                # 不需要校准的变量，保持原样
-                result_columns[col] = df[col]
-
-        if calibration_count > 0:
-            # 合并所有列，自动扩展索引
-            result_df = pd.DataFrame(result_columns)
-            # 重新排序索引
-            result_df = result_df.sort_index()
-            logger.info(f"  发布日期校准完成: {calibration_count}个变量 ({freq_type})")
-            return result_df
-        else:
-            return df
-
-    def _get_month_end_friday(self, data_date: pd.Timestamp, lag_days: int) -> pd.Timestamp:
-        """获取发布日期附近的周五（在发布月份内，不跨月）
-
-        逻辑：
-        1. 数据日期 + 滞后天数 = 发布日期
-        2. 对齐到发布日期最近的周五
-        3. 如果最近周五跨月，则调整到发布月份内的周五
-
-        Args:
-            data_date: 数据日期（如月度数据的月末日期）
-            lag_days: 滞后天数（如15表示下月15日发布）
-
-        Returns:
-            pd.Timestamp: 发布日期附近的周五（在发布月份内）
-        """
-        from calendar import monthrange
-
-        # 实际发布日期 = 数据日期 + 滞后天数
-        pub_date = data_date + pd.Timedelta(days=lag_days)
-        year, month = pub_date.year, pub_date.month
-        weekday = pub_date.weekday()
-
-        # 计算最近周五
-        if weekday <= 4:  # 周一到周五
-            days_to_friday = 4 - weekday
-        else:  # 周六日
-            days_to_friday = -(weekday - 4)
-
-        target_friday = pub_date + pd.Timedelta(days=days_to_friday)
-
-        # 检查是否跨月，如果跨月则调整到发布月份内的周五
-        if target_friday.month != month:
-            if target_friday.month > month or (target_friday.month == 1 and month == 12):
-                # 跨到下个月 -> 发布月份的最后一个周五
-                last_day = monthrange(year, month)[1]
-                last_date = pd.Timestamp(year, month, last_day)
-                last_wd = last_date.weekday()
-                if last_wd >= 4:
-                    days_back = last_wd - 4
-                else:
-                    days_back = last_wd + 3
-                target_friday = last_date - pd.Timedelta(days=days_back)
-            else:
-                # 跨到上个月 -> 发布月份的第一个周五
-                first_date = pd.Timestamp(year, month, 1)
-                first_wd = first_date.weekday()
-                if first_wd <= 4:
-                    days_forward = 4 - first_wd
-                else:
-                    days_forward = 11 - first_wd
-                target_friday = first_date + pd.Timedelta(days=days_forward)
-
-        return target_friday
-
-    def _get_quarter_end_friday(self, data_date: pd.Timestamp, lag_days: int) -> pd.Timestamp:
-        """获取发布日期附近的周五（在发布季度内，不跨季）
-
-        Args:
-            data_date: 数据日期
-            lag_days: 滞后天数
-
-        Returns:
-            pd.Timestamp: 发布日期附近的周五（在发布季度内）
-        """
-        from calendar import monthrange
-
-        # 实际发布日期 = 数据日期 + 滞后天数
-        pub_date = data_date + pd.Timedelta(days=lag_days)
-        year = pub_date.year
-        month = pub_date.month
-        quarter = (month - 1) // 3 + 1
-        quarter_start_month = (quarter - 1) * 3 + 1
-        quarter_end_month = quarter * 3
-        weekday = pub_date.weekday()
-
-        # 计算最近周五
-        if weekday <= 4:
-            days_to_friday = 4 - weekday
-        else:
-            days_to_friday = -(weekday - 4)
-
-        target_friday = pub_date + pd.Timedelta(days=days_to_friday)
-        target_quarter = (target_friday.month - 1) // 3 + 1
-
-        # 检查是否跨季
-        if target_friday.year != year or target_quarter != quarter:
-            if (target_friday.year > year) or (target_friday.year == year and target_quarter > quarter):
-                # 跨到下个季度 -> 发布季度的最后一个周五
-                last_day = monthrange(year, quarter_end_month)[1]
-                last_date = pd.Timestamp(year, quarter_end_month, last_day)
-                last_wd = last_date.weekday()
-                if last_wd >= 4:
-                    days_back = last_wd - 4
-                else:
-                    days_back = last_wd + 3
-                target_friday = last_date - pd.Timedelta(days=days_back)
-            else:
-                # 跨到上个季度 -> 发布季度的第一个周五
-                first_date = pd.Timestamp(year, quarter_start_month, 1)
-                first_wd = first_date.weekday()
-                if first_wd <= 4:
-                    days_forward = 4 - first_wd
-                else:
-                    days_forward = 11 - first_wd
-                target_friday = first_date + pd.Timedelta(days=days_forward)
-
-        return target_friday
-
-    def _get_year_end_friday(self, data_date: pd.Timestamp, lag_days: int) -> pd.Timestamp:
-        """获取发布日期附近的周五（在发布年份内，不跨年）
-
-        逻辑：
-        1. 数据日期 + 滞后天数 = 发布日期
-        2. 对齐到发布日期最近的周五
-        3. 如果最近周五跨年，则调整到发布年份内的周五
-
-        Args:
-            data_date: 数据日期
-            lag_days: 滞后天数
-
-        Returns:
-            pd.Timestamp: 发布日期附近的周五（在发布年份内）
-        """
-        # 实际发布日期 = 数据日期 + 滞后天数
-        pub_date = data_date + pd.Timedelta(days=lag_days)
-        year = pub_date.year
-        weekday = pub_date.weekday()
-
-        # 计算最近周五
-        if weekday <= 4:  # 周一到周五
-            days_to_friday = 4 - weekday
-        else:  # 周六日
-            days_to_friday = -(weekday - 4)
-
-        target_friday = pub_date + pd.Timedelta(days=days_to_friday)
-
-        # 检查是否跨年，如果跨年则调整到发布年份内的周五
-        if target_friday.year != year:
-            if target_friday.year > year:
-                # 跨到下一年 -> 发布年份的最后一个周五
-                year_end = pd.Timestamp(year, 12, 31)
-                year_end_wd = year_end.weekday()
-                if year_end_wd >= 4:
-                    days_back = year_end_wd - 4
-                else:
-                    days_back = year_end_wd + 3
-                target_friday = year_end - pd.Timedelta(days=days_back)
-            else:
-                # 跨到上一年 -> 发布年份的第一个周五
-                year_start = pd.Timestamp(year, 1, 1)
-                year_start_wd = year_start.weekday()
-                if year_start_wd <= 4:
-                    days_forward = 4 - year_start_wd
-                else:
-                    days_forward = 11 - year_start_wd
-                target_friday = year_start + pd.Timedelta(days=days_forward)
-
-        return target_friday
+        calibrator = PublicationCalibrator(self.var_publication_lag_map)
+        return calibrator.calibrate(df, freq_type)
 
     def execute(self) -> Tuple[pd.DataFrame, Dict[str, str], Dict, List[Dict]]:
         """执行完整的7步数据准备流程
@@ -618,36 +392,18 @@ class DataPreparationProcessor:
         # 统计有数据的频率数量
         active_freqs = sum(1 for f in data_by_freq.values() if f)
 
-        # 决定是否使用并行处理
-        if self.parallel_config.should_parallelize_frequencies(active_freqs):
-            try:
-                logger.info(f"  使用并行频率处理 ({active_freqs}个频率, n_jobs={self.parallel_config.get_effective_n_jobs()})...")
-                aligned_data, all_borrowing_log, removal_log = parallel_process_frequencies(
-                    data_by_freq=data_by_freq,
-                    target_level=target_level,
-                    consecutive_nan_threshold=self.consecutive_nan_threshold,
-                    data_start_date=self.data_start_date,
-                    data_end_date=self.data_end_date,
-                    target_freq=self.target_freq,
-                    enable_borrowing=self.enable_borrowing,
-                    n_jobs=self.parallel_config.get_effective_n_jobs(),
-                    backend=self.parallel_config.backend
-                )
-                self.removal_log.extend(removal_log)
-                return aligned_data, all_borrowing_log
-            except Exception as e:
-                logger.warning(f"  并行频率处理失败，降级到串行: {e}")
-
-        # 串行处理（默认或降级）
-        logger.info(f"  使用串行频率处理 ({active_freqs}个频率)...")
-        aligned_data, all_borrowing_log, removal_log = serial_process_frequencies(
+        # 使用并行频率处理
+        logger.info(f"  使用并行频率处理 ({active_freqs}个频率, n_jobs={self.parallel_config.get_effective_n_jobs()})...")
+        aligned_data, all_borrowing_log, removal_log = parallel_process_frequencies(
             data_by_freq=data_by_freq,
             target_level=target_level,
             consecutive_nan_threshold=self.consecutive_nan_threshold,
             data_start_date=self.data_start_date,
             data_end_date=self.data_end_date,
             target_freq=self.target_freq,
-            enable_borrowing=self.enable_borrowing
+            enable_borrowing=self.enable_borrowing,
+            n_jobs=self.parallel_config.get_effective_n_jobs(),
+            backend=self.parallel_config.backend
         )
         self.removal_log.extend(removal_log)
         return aligned_data, all_borrowing_log
@@ -703,79 +459,6 @@ class DataPreparationProcessor:
 
         return result_data, {}  # 不借调，返回空日志
 
-    def _process_frequency_data(
-        self,
-        data_dict: Dict[str, pd.DataFrame],
-        original_freq: str,
-        target_level: int,
-        freq_name: str
-    ) -> Tuple[pd.DataFrame, Dict]:
-        """处理特定频率的数据（智能缺失值检测）
-
-        Args:
-            data_dict: 该频率的所有DataFrame字典
-            original_freq: 原始频率代码（'D', 'W', 'M'等）
-            target_level: 目标频率等级
-            freq_name: 频率名称（用于日志）
-
-        Returns:
-            Tuple[pd.DataFrame, Dict]: (对齐后的合并DataFrame, 借调日志字典)
-        """
-        original_level = self._get_freq_level(original_freq)
-        borrowing_log = {}
-
-        # 合并所有同频率的DataFrame
-        dfs = list(data_dict.values())
-        if not dfs:
-            return pd.DataFrame(), borrowing_log
-
-        combined_df = pd.concat(dfs, axis=1)
-
-        # 移除重复列
-        combined_df = self.data_cleaner.remove_duplicate_columns(combined_df, f"[{freq_name}] ")
-        self.removal_log.extend(self.data_cleaner.get_removed_variables_log())
-        self.data_cleaner.clear_log()
-
-        logger.info(f"    合并后形状: {combined_df.shape}")
-
-        # 根据频率关系选择检测时机
-        if original_level <= target_level:
-            # 原始频率 >= 目标频率（需要降频）：先对齐再检测
-            logger.info(f"    先对齐到目标频率...")
-            aligned_df, borrowing_log = self._align_by_type(combined_df, freq_name)
-
-            logger.info(f"    再检测连续缺失值（对齐后）...")
-            aligned_df = self.data_cleaner.handle_consecutive_nans(
-                aligned_df,
-                self.consecutive_nan_threshold,
-                f"[{freq_name}对齐后] ",
-                self.data_start_date,
-                self.data_end_date
-            )
-            self.removal_log.extend(self.data_cleaner.get_removed_variables_log())
-            self.data_cleaner.clear_log()
-
-        else:
-            # 原始频率 < 目标频率（需要升频）：先检测再对齐
-            logger.info(f"    先检测连续缺失值（原始{freq_name}频率）...")
-            cleaned_df = self.data_cleaner.handle_consecutive_nans(
-                combined_df,
-                self.consecutive_nan_threshold,
-                f"[{freq_name}原始频率] ",
-                self.data_start_date,
-                self.data_end_date
-            )
-            self.removal_log.extend(self.data_cleaner.get_removed_variables_log())
-            self.data_cleaner.clear_log()
-            logger.info(f"    检测后形状: {cleaned_df.shape}")
-
-            # 对齐到目标频率
-            logger.info(f"    对齐到目标频率...")
-            aligned_df, borrowing_log = self._align_by_type(cleaned_df, freq_name)
-
-        logger.info(f"    最终形状: {aligned_df.shape}")
-        return aligned_df, borrowing_log
-
     def _align_by_type(self, df: pd.DataFrame, freq_type: str) -> Tuple[pd.DataFrame, Dict]:
         """根据频率类型对齐数据
 
@@ -786,30 +469,9 @@ class DataPreparationProcessor:
         Returns:
             Tuple[pd.DataFrame, Dict]: (对齐后的DataFrame, 借调日志字典)
         """
-        borrowing_log = {}
-
-        if freq_type == 'daily':
-            return self.data_aligner.convert_daily_to_weekly([df]), borrowing_log
-        elif freq_type == 'weekly':
-            # align_weekly_data 现在返回 Tuple[pd.DataFrame, Dict]，传递用户日期范围
-            aligned_df, borrowing_log = self.data_aligner.align_weekly_data(
-                [df], self.data_start_date, self.data_end_date
-            )
-            return aligned_df, borrowing_log
-        elif freq_type == 'dekad':
-            # convert_dekad_to_weekly 现在返回 Tuple[pd.DataFrame, Dict]，传递用户日期范围
-            aligned_df, borrowing_log = self.data_aligner.convert_dekad_to_weekly(
-                [df], self.data_start_date, self.data_end_date
-            )
-            return aligned_df, borrowing_log
-        elif freq_type == 'monthly':
-            return self.data_aligner.align_monthly_to_last_friday(df), borrowing_log
-        elif freq_type == 'quarterly':
-            return self.data_aligner.align_quarterly_to_friday(df), borrowing_log
-        elif freq_type == 'yearly':
-            return self.data_aligner.align_yearly_to_friday(df), borrowing_log
-        else:
-            raise ValueError(f"不支持的频率类型: {freq_type}")
+        return self.data_aligner.align_by_type(
+            df, freq_type, self.data_start_date, self.data_end_date
+        )
 
     def _step6_merge_all_data(
         self,
@@ -984,41 +646,4 @@ class DataPreparationProcessor:
         else:
             freq_code = freq[0] if freq else 'W'
 
-        return self.FREQ_ORDER.get(freq_code, 2)  # 默认为周度
-
-    def _run_stationarity_check(self, df: pd.DataFrame, alpha: float = 0.05) -> Dict[str, str]:
-        """执行平稳性检验（ADF检验）
-
-        在最终数据上一次性执行，避免UI层重复调用
-
-        Args:
-            df: 待检验的DataFrame
-            alpha: 显著性水平，默认0.05
-
-        Returns:
-            Dict[str, str]: {变量名: "是"/"否"/"数据不足"}
-        """
-        from statsmodels.tsa.stattools import adfuller
-
-        results = {}
-        for col in df.columns:
-            series = df[col].dropna()
-
-            # 检查样本量（ADF检验需要足够的样本）
-            if len(series) < 12:
-                results[col] = "数据不足"
-                continue
-
-            try:
-                adf_result = adfuller(series)
-                p_value = adf_result[1]
-                results[col] = "是" if p_value < alpha else "否"
-            except Exception as e:
-                logger.warning(f"  变量 '{col}' ADF检验失败: {e}")
-                results[col] = "检验失败"
-
-        # 统计
-        stationary_count = sum(1 for v in results.values() if v == "是")
-        logger.info(f"  平稳性检验完成: {stationary_count}/{len(results)} 个变量平稳")
-
-        return results
+        return FREQ_ORDER.get(freq_code, 2)  # 默认为周度

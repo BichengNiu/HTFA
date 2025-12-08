@@ -5,6 +5,7 @@
 包括ADF检验、差分转换、对数差分等功能
 """
 
+import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, Tuple, Optional, Set, Any
@@ -13,6 +14,8 @@ from statsmodels.tsa.stattools import adfuller
 
 from dashboard.models.DFM.prep.modules.config_constants import ADF_P_THRESHOLD
 from dashboard.models.DFM.utils.text_utils import normalize_text
+
+logger = logging.getLogger(__name__)
 
 def ensure_stationarity(
     df: pd.DataFrame,
@@ -40,7 +43,7 @@ def ensure_stationarity(
     Returns:
         Tuple[pd.DataFrame, Dict, Dict]: (转换后的数据, 转换日志, 移除列信息)
     """
-    print(f"\n--- [Stationarity Check] 开始检查和转换平稳性 (ADF p<{adf_p_threshold}) --- ")
+    logger.info("[Stationarity Check] 开始检查和转换平稳性 (ADF p<%s)", adf_p_threshold)
 
     transformed_data = pd.DataFrame(index=df.index)
     transform_log = {}
@@ -50,7 +53,7 @@ def ensure_stationarity(
     skip_cols_normalized = set()
     if skip_cols:
         skip_cols_normalized = {normalize_text(c) for c in skip_cols}
-        print(f"    [Stationarity Check] 标准化后的跳过列表 (首5项): {list(skip_cols_normalized)[:5]}")
+        logger.debug("[Stationarity Check] 标准化后的跳过列表 (首5项): %s", list(skip_cols_normalized)[:5])
 
     for col in df.columns:
         # 检查是否在跳过列表中
@@ -58,7 +61,7 @@ def ensure_stationarity(
         if col_normalized in skip_cols_normalized:
             transformed_data[col] = df[col].copy()
             transform_log[col] = {'status': 'skipped_by_request'}
-            print(f"    - {col}: 根据请求跳过平稳性检查 (匹配到规范化名称 '{col_normalized}').")
+            logger.debug("    - %s: 根据请求跳过平稳性检查 (匹配到规范化名称 '%s')", col, col_normalized)
             continue
 
         series = df[col]
@@ -68,14 +71,14 @@ def ensure_stationarity(
         if series_dropna.empty:
             transform_log[col] = {'status': 'skipped_empty'}
             removed_cols_info['skipped_empty'].append(col)
-            print(f"    - {col}: 数据为空或全为 NaN，已移除.")
+            logger.debug("    - %s: 数据为空或全为 NaN，已移除", col)
             continue
 
         # 检查常量数据
         if series_dropna.nunique() == 1:
             transform_log[col] = {'status': 'skipped_constant'}
             removed_cols_info['skipped_constant'].append(col)
-            print(f"    - {col}: 列为常量，已移除.")
+            logger.debug("    - %s: 列为常量，已移除", col)
             continue
 
         # 进行平稳性检查和转换
@@ -103,7 +106,7 @@ def ensure_stationarity(
                         series_transformed = np.log(series_orig).diff(1)
                         transform_type = 'log_diff'
                     except Exception as e_log:
-                         print(f"    - {col}: 对数差分出错: {e_log}. 回退到普通差分。")
+                         logger.warning("    - %s: 对数差分出错: %s. 回退到普通差分", col, e_log)
                          series_transformed = series_orig.diff(1)
                          transform_type = 'diff'
                 else:
@@ -117,13 +120,13 @@ def ensure_stationarity(
                 if series_transformed_dropna.empty:
                      transform_log[col] = {'status': f'skipped_{transform_type}_empty', 'original_pval': original_pval}
                      removed_cols_info[f'skipped_{transform_type}_empty'].append(col)
-                     print(f"    - {col}: {transform_type.capitalize()} 后为空，已移除.")
+                     logger.debug("    - %s: %s 后为空，已移除", col, transform_type.capitalize())
                      continue
                      
                 if series_transformed_dropna.nunique() == 1:
                      transform_log[col] = {'status': f'skipped_{transform_type}_constant', 'original_pval': original_pval}
                      removed_cols_info[f'skipped_{transform_type}_constant'].append(col)
-                     print(f"    - {col}: {transform_type.capitalize()} 后为常量，已移除.")
+                     logger.debug("    - %s: %s 后为常量，已移除", col, transform_type.capitalize())
                      continue
 
                 # 对转换后的序列进行ADF检验
@@ -135,28 +138,28 @@ def ensure_stationarity(
 
                     if diff_pval < adf_p_threshold:
                         transform_log[col] = {'status': transform_type, 'original_pval': original_pval, 'diff_pval': diff_pval}
-                        print(f"    - {col}: {transform_type.capitalize()} 后平稳 (p={diff_pval:.3f}), 使用 {transform_type.capitalize()}.")
+                        logger.debug("    - %s: %s 后平稳 (p=%.3f), 使用 %s", col, transform_type.capitalize(), diff_pval, transform_type.capitalize())
                     else:
                         transform_log[col] = {'status': f'{transform_type}_still_nonstat', 'original_pval': original_pval, 'diff_pval': diff_pval}
-                        print(f"    - {col}: {transform_type.capitalize()} 后仍不平稳 (p={diff_pval:.3f}), 使用 {transform_type.capitalize()}.")
+                        logger.debug("    - %s: %s 后仍不平稳 (p=%.3f), 使用 %s", col, transform_type.capitalize(), diff_pval, transform_type.capitalize())
 
                 except Exception as e_diff:
-                    print(f"    - {col}: 对 {transform_type.capitalize()} 序列 ADF 检验出错: {e_diff}. 保留 {transform_type.capitalize()} 序列.")
+                    logger.warning("    - %s: 对 %s 序列 ADF 检验出错: %s. 保留 %s 序列", col, transform_type.capitalize(), e_diff, transform_type.capitalize())
                     transformed_data[col] = series_transformed
                     transform_log[col] = {'status': f'{transform_type}_test_error', 'original_pval': original_pval}
 
         except Exception as e_level:
-            print(f"    - {col}: Level ADF 检验或处理时出错: {e_level}. 保留 Level (不推荐). ")
+            logger.warning("    - %s: Level ADF 检验或处理时出错: %s. 保留 Level (不推荐)", col, e_level)
             transformed_data[col] = series
             transform_log[col] = {'status': 'level_test_error'}
 
-    print(f"--- [Stationarity Check] 检查和转换完成. 输出 Shape: {transformed_data.shape} ---")
+    logger.info("[Stationarity Check] 检查和转换完成. 输出 Shape: %s", transformed_data.shape)
     total_removed = sum(len(v) for v in removed_cols_info.values())
     if total_removed > 0:
-        print(f"  [!] 共移除了 {total_removed} 个变量:")
+        logger.info("  [!] 共移除了 %d 个变量:", total_removed)
         for reason, cols in removed_cols_info.items():
              if cols:
-                 print(f"      - 因 '{reason}' 移除 ({len(cols)} 个): {', '.join(cols[:5])}{'...' if len(cols)>5 else ''}")
+                 logger.info("      - 因 '%s' 移除 (%d 个): %s%s", reason, len(cols), ', '.join(cols[:5]), '...' if len(cols)>5 else '')
 
     return transformed_data, transform_log, removed_cols_info
 
@@ -177,7 +180,7 @@ def apply_stationarity_transforms(
     Returns:
         pd.DataFrame: 应用转换后的DataFrame
     """
-    print(f"\n--- [Apply Stationarity V2] 开始根据提供的规则应用平稳性转换 ---")
+    logger.info("[Apply Stationarity V2] 开始根据提供的规则应用平稳性转换")
     transformed_data = pd.DataFrame(index=data.index)
     applied_count = 0
     level_kept_count = 0
@@ -211,25 +214,25 @@ def apply_stationarity_transforms(
                 level_kept_count += 1
 
         except Exception as e:
-            print(f"    错误: 应用规则 '{status}' 到变量 '{col}' 时出错: {e}")
+            logger.error("    错误: 应用规则 '%s' 到变量 '%s' 时出错: %s", status, col, e)
             raise RuntimeError(f"应用规则 '{status}' 到变量 '{col}' 失败") from e
 
-    print(f"--- [Apply Stationarity V2] 转换应用完成. ---")
-    print(f"    成功应用 'diff'/'log_diff': {applied_count} 个变量")
-    print(f"    保留 Level (无规则或规则指示): {level_kept_count} 个变量")
-    print(f"    转换时出错/回退 (保留 Level 或应用 Diff): {error_count} 个变量")
-    print(f"    输入 Shape: {data.shape}, 输出 Shape: {transformed_data.shape}")
+    logger.info("[Apply Stationarity V2] 转换应用完成")
+    logger.info("    成功应用 'diff'/'log_diff': %d 个变量", applied_count)
+    logger.info("    保留 Level (无规则或规则指示): %d 个变量", level_kept_count)
+    logger.info("    转换时出错/回退 (保留 Level 或应用 Diff): %d 个变量", error_count)
+    logger.info("    输入 Shape: %s, 输出 Shape: %s", data.shape, transformed_data.shape)
 
     # 移除转换后全为NaN的列
     all_nan_cols = transformed_data.columns[transformed_data.isnull().all()].tolist()
     if all_nan_cols:
-        print(f"    警告：以下列在转换后全为 NaN，将被移除: {all_nan_cols}")
+        logger.warning("    警告：以下列在转换后全为 NaN，将被移除: %s", all_nan_cols)
         transformed_data = transformed_data.drop(columns=all_nan_cols)
-        print(f"    移除全 NaN 列后 Shape: {transformed_data.shape}")
+        logger.info("    移除全 NaN 列后 Shape: %s", transformed_data.shape)
 
     # 确保输出包含所有原始列（即使转换失败也保留原列）
     if set(transformed_data.columns) != set(data.columns):
-         print("    警告：输出列与输入列不完全匹配！正在尝试重新对齐...")
+         logger.warning("    警告：输出列与输入列不完全匹配！正在尝试重新对齐...")
          transformed_data = transformed_data.reindex(columns=data.columns, fill_value=np.nan)
 
     return transformed_data

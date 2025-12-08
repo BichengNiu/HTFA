@@ -12,8 +12,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# 频率等级映射
-FREQ_ORDER = {'D': 1, 'W': 2, '10D': 2.5, 'M': 3, 'Q': 4, 'Y': 5}
+# 频率等级映射（从统一常量导入）
+from dashboard.models.DFM.prep.modules.config_constants import FREQ_ORDER
 
 
 def _get_freq_level(freq_code: str) -> int:
@@ -96,9 +96,8 @@ def _process_single_frequency(
         if original_level <= target_level:
             # 原始频率 >= 目标频率（需要降频）：先对齐再检测
             logger.info(f"    [并行-{freq_name}] 先对齐到目标频率...")
-            aligned_df, borrowing_log = _align_by_type(
-                combined_df, freq_name, data_aligner,
-                data_start_date, data_end_date
+            aligned_df, borrowing_log = data_aligner.align_by_type(
+                combined_df, freq_name, data_start_date, data_end_date
             )
 
             logger.info(f"    [并行-{freq_name}] 再检测连续缺失值（对齐后）...")
@@ -128,9 +127,8 @@ def _process_single_frequency(
 
             # 对齐到目标频率
             logger.info(f"    [并行-{freq_name}] 对齐到目标频率...")
-            aligned_df, borrowing_log = _align_by_type(
-                cleaned_df, freq_name, data_aligner,
-                data_start_date, data_end_date
+            aligned_df, borrowing_log = data_aligner.align_by_type(
+                cleaned_df, freq_name, data_start_date, data_end_date
             )
 
         logger.info(f"  [并行-{freq_name}] 完成, 形状: {aligned_df.shape}")
@@ -151,38 +149,6 @@ def _process_single_frequency(
         import traceback
         traceback.print_exc()
         return (freq_name, None, {}, [])
-
-
-def _align_by_type(
-    df: pd.DataFrame,
-    freq_type: str,
-    data_aligner,
-    data_start_date: Optional[str],
-    data_end_date: Optional[str]
-) -> Tuple[pd.DataFrame, Dict]:
-    """根据频率类型对齐数据（辅助函数）"""
-    borrowing_log = {}
-
-    if freq_type == 'daily':
-        return data_aligner.convert_daily_to_weekly([df]), borrowing_log
-    elif freq_type == 'weekly':
-        aligned_df, borrowing_log = data_aligner.align_weekly_data(
-            [df], data_start_date, data_end_date
-        )
-        return aligned_df, borrowing_log
-    elif freq_type == 'dekad':
-        aligned_df, borrowing_log = data_aligner.convert_dekad_to_weekly(
-            [df], data_start_date, data_end_date
-        )
-        return aligned_df, borrowing_log
-    elif freq_type == 'monthly':
-        return data_aligner.align_monthly_to_last_friday(df), borrowing_log
-    elif freq_type == 'quarterly':
-        return data_aligner.align_quarterly_to_friday(df), borrowing_log
-    elif freq_type == 'yearly':
-        return data_aligner.align_yearly_to_friday(df), borrowing_log
-    else:
-        raise ValueError(f"不支持的频率类型: {freq_type}")
 
 
 def _serialize_freq_data(freq_data: Dict[str, pd.DataFrame]) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
@@ -297,83 +263,7 @@ def parallel_process_frequencies(
     return aligned_data, all_borrowing_log, all_removal_log
 
 
-def serial_process_frequencies(
-    data_by_freq: Dict[str, Dict],
-    target_level: int,
-    consecutive_nan_threshold: int,
-    data_start_date: Optional[str],
-    data_end_date: Optional[str],
-    target_freq: str,
-    enable_borrowing: bool
-) -> Tuple[Dict[str, pd.DataFrame], Dict, List[Dict]]:
-    """
-    串行处理所有频率（回退方案）
-
-    Args:
-        data_by_freq: 按频率分类的数据
-        target_level: 目标频率等级
-        consecutive_nan_threshold: 连续NaN阈值
-        data_start_date: 数据开始日期
-        data_end_date: 数据结束日期
-        target_freq: 目标频率
-        enable_borrowing: 是否启用借调
-
-    Returns:
-        Tuple[Dict, Dict, List]: (对齐后的数据, 借调日志, 移除日志)
-    """
-    freq_configs = [
-        ('daily', 'D'),
-        ('weekly', 'W'),
-        ('dekad', 'M'),
-        ('monthly', 'M'),
-        ('quarterly', 'Q'),
-        ('yearly', 'Y')
-    ]
-
-    aligned_data = {}
-    all_borrowing_log = {}
-    all_removal_log = []
-
-    for freq_name, original_freq in freq_configs:
-        freq_data = data_by_freq.get(freq_name)
-        if not freq_data:
-            continue
-
-        serialized_data = _serialize_freq_data(freq_data)
-        if not serialized_data:
-            continue
-
-        freq_name, result_data, borrowing_log, removal_log = _process_single_frequency(
-            freq_name,
-            serialized_data,
-            original_freq,
-            target_level,
-            consecutive_nan_threshold,
-            data_start_date,
-            data_end_date,
-            target_freq,
-            enable_borrowing
-        )
-
-        if result_data is not None:
-            values, index, columns = result_data
-            aligned_df = pd.DataFrame(
-                values,
-                index=pd.to_datetime(index),
-                columns=columns
-            )
-            if not aligned_df.empty:
-                aligned_data[freq_name] = aligned_df
-
-        if borrowing_log:
-            all_borrowing_log.update(borrowing_log)
-        all_removal_log.extend(removal_log)
-
-    return aligned_data, all_borrowing_log, all_removal_log
-
-
 __all__ = [
     '_process_single_frequency',
-    'parallel_process_frequencies',
-    'serial_process_frequencies'
+    'parallel_process_frequencies'
 ]

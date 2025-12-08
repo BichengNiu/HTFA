@@ -187,37 +187,7 @@ def parallel_detect_consecutive_nans(
         return df, []
 
 
-def serial_detect_consecutive_nans(
-    df: pd.DataFrame,
-    threshold: int,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    log_prefix: str = ""
-) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
-    """
-    串行检测连续NaN（回退方案）
-
-    Args:
-        df: 输入DataFrame
-        threshold: 连续NaN阈值
-        start_date: 开始日期
-        end_date: 结束日期
-        log_prefix: 日志前缀
-
-    Returns:
-        Tuple[pd.DataFrame, List[Dict]]: (清理后的数据, 移除变量日志)
-    """
-    from dashboard.models.DFM.prep.modules.data_cleaner import DataCleaner
-
-    cleaner = DataCleaner()
-    result_df = cleaner.handle_consecutive_nans(
-        df, threshold, log_prefix, start_date, end_date
-    )
-    return result_df, cleaner.get_removed_variables_log()
-
-
 __all__ = [
     '_detect_consecutive_nans_single_column',
-    'parallel_detect_consecutive_nans',
-    'serial_detect_consecutive_nans'
+    'parallel_detect_consecutive_nans'
 ]

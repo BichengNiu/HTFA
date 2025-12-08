@@ -5,6 +5,7 @@
 遵循单一职责原则，每个函数只做一件事
 """
 
+import logging
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional, Set
@@ -12,6 +13,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from dashboard.models.DFM.prep.modules.data_loader import DataLoader
+
+logger = logging.getLogger(__name__)
 from dashboard.models.DFM.prep.modules.data_aligner import DataAligner
 from dashboard.models.DFM.prep.modules.data_cleaner import clean_dataframe
 from dashboard.models.DFM.prep.modules.format_detection import parse_sheet_info
@@ -65,7 +68,7 @@ def load_reference_variables(
     reference_predictor_variables = set()
 
     if reference_sheet_name not in available_sheets:
-        print(f"  [Data Prep] 警告: 未找到参考 Sheet '{reference_sheet_name}'。")
+        logger.warning("[Data Prep] 未找到参考 Sheet '%s'。", reference_sheet_name)
         return reference_predictor_variables
 
     try:
@@ -74,7 +77,7 @@ def load_reference_variables(
         clean_reference_column_name = reference_column_name.strip()
 
         if clean_reference_column_name not in ref_df.columns:
-            print(f"  [Data Prep] 警告: 在 '{reference_sheet_name}' 未找到参考列 '{clean_reference_column_name}'。")
+            logger.warning("[Data Prep] 在 '%s' 未找到参考列 '%s'。", reference_sheet_name, clean_reference_column_name)
             return reference_predictor_variables
 
         raw_reference_vars = (
@@ -86,10 +89,10 @@ def load_reference_variables(
             normalize_text(var)
             for var in raw_reference_vars
         )
-        print(f"  [Data Prep] 从 '{reference_sheet_name}' 加载并规范化了 {len(reference_predictor_variables)} 个参考变量名。")
+        logger.info("[Data Prep] 从 '%s' 加载并规范化了 %d 个参考变量名。", reference_sheet_name, len(reference_predictor_variables))
 
     except Exception as e_ref:
-        print(f"  [Data Prep] 警告: 读取参考 Sheet '{reference_sheet_name}' 出错: {e_ref}。")
+        logger.warning("[Data Prep] 读取参考 Sheet '%s' 出错: %s。", reference_sheet_name, e_ref)
 
     return reference_predictor_variables
 
@@ -116,7 +119,7 @@ def load_all_sheets(
     Returns:
         LoadedData: 加载的数据集合
     """
-    print("\n--- [Data Prep V3 ] 步骤 1: 加载数据 ---")
+    logger.info("[Data Prep V3] 步骤 1: 加载数据")
 
     # 初始化数据存储
     data_parts = defaultdict(list)
@@ -129,7 +132,7 @@ def load_all_sheets(
 
     # 遍历sheets加载数据
     for sheet_name in available_sheets:
-        print(f"    [Data Prep] 正在检查 Sheet: {sheet_name}...")
+        logger.debug("[Data Prep] 正在检查 Sheet: %s...", sheet_name)
         is_target_sheet = (sheet_name == target_sheet_name)
         sheet_info = parse_sheet_info(sheet_name, target_sheet_name)
         freq_type = sheet_info['freq_type']
@@ -168,7 +171,7 @@ def load_all_sheets(
             if df_monthly is not None:
                 # 检查并处理重复索引
                 if df_monthly.index.duplicated().any():
-                    print(f"      警告: Sheet '{sheet_name}' 包含重复的日期索引，保留第一个值")
+                    logger.warning("Sheet '%s' 包含重复的日期索引，保留第一个值", sheet_name)
                     df_monthly = df_monthly[~df_monthly.index.duplicated(keep='first')]
 
                 if df_other_monthly_predictors_pubdate.empty:
@@ -176,7 +179,7 @@ def load_all_sheets(
                 else:
                     # 确保现有数据也没有重复索引
                     if df_other_monthly_predictors_pubdate.index.duplicated().any():
-                        print(f"      警告: 现有月度数据包含重复索引，正在清理")
+                        logger.warning("现有月度数据包含重复索引，正在清理")
                         df_other_monthly_predictors_pubdate = df_other_monthly_predictors_pubdate[~df_other_monthly_predictors_pubdate.index.duplicated(keep='first')]
 
                     df_other_monthly_predictors_pubdate = pd.concat(
@@ -186,17 +189,17 @@ def load_all_sheets(
                     )
         else:
             if sheet_name != reference_sheet_name:
-                print(f"      Sheet '{sheet_name}' 不符合要求或非目标 Sheet，已跳过。")
+                logger.debug("Sheet '%s' 不符合要求或非目标 Sheet，已跳过。", sheet_name)
             continue
 
     # 汇总加载结果
-    print(f"\n--- [Data Prep V3 ] 数据加载完成 ---")
-    print(f"  目标变量: {actual_target_variable_name}")
-    print(f"  目标Sheet预测变量: {df_target_sheet_predictors_pubdate.shape[1]} 个")
-    print(f"  其他月度预测变量: {df_other_monthly_predictors_pubdate.shape[1]} 个")
-    print(f"  日度数据表格: {len(data_parts['daily'])} 个")
-    print(f"  周度数据表格: {len(data_parts['weekly'])} 个")
-    print(f"  旬度数据表格: {len(data_parts['dekad'])} 个")
+    logger.info("[Data Prep V3] 数据加载完成")
+    logger.info("  目标变量: %s", actual_target_variable_name)
+    logger.info("  目标Sheet预测变量: %d 个", df_target_sheet_predictors_pubdate.shape[1])
+    logger.info("  其他月度预测变量: %d 个", df_other_monthly_predictors_pubdate.shape[1])
+    logger.info("  日度数据表格: %d 个", len(data_parts['daily']))
+    logger.info("  周度数据表格: %d 个", len(data_parts['weekly']))
+    logger.info("  旬度数据表格: %d 个", len(data_parts['dekad']))
 
     return LoadedData(
         raw_target_values=raw_target_values,
@@ -227,7 +230,7 @@ def align_all_frequencies(
     Returns:
         AlignedData: 对齐后的数据集合
     """
-    print("\n--- [Data Prep V3 ] 步骤 2: 数据对齐 ---")
+    logger.info("[Data Prep V3] 步骤 2: 数据对齐")
 
     removed_variables_log = []
 
@@ -316,18 +319,18 @@ def combine_daily_weekly_data(
     Returns:
         Tuple[pd.DataFrame, List[Dict]]: (合并后的数据, 移除变量日志)
     """
-    print("\n--- [Data Prep V3 ] 步骤 3: 合并日度/旬度/周度数据 ---")
+    logger.info("[Data Prep V3] 步骤 3: 合并日度/旬度/周度数据")
 
     parts_to_combine = []
     if not df_daily_weekly.empty:
         parts_to_combine.append(df_daily_weekly)
-        print(f"    添加日度转周度数据: Shape {df_daily_weekly.shape}")
+        logger.debug("    添加日度转周度数据: Shape %s", df_daily_weekly.shape)
     if not df_dekad_weekly.empty:
         parts_to_combine.append(df_dekad_weekly)
-        print(f"    添加旬度转周度数据: Shape {df_dekad_weekly.shape}")
+        logger.debug("    添加旬度转周度数据: Shape %s", df_dekad_weekly.shape)
     if not df_weekly_aligned.empty:
         parts_to_combine.append(df_weekly_aligned)
-        print(f"    添加周度对齐数据: Shape {df_weekly_aligned.shape}")
+        logger.debug("    添加周度对齐数据: Shape %s", df_weekly_aligned.shape)
 
     if not parts_to_combine:
         return pd.DataFrame(), []
@@ -341,7 +344,7 @@ def combine_daily_weekly_data(
         log_prefix="[日度/旬度/周度合并] "
     )
 
-    print(f"    合并后日度/旬度/周度数据 Shape: {df_combined.shape}")
+    logger.info("    合并后日度/旬度/周度数据 Shape: %s", df_combined.shape)
 
     return df_combined, removed_log
 
@@ -375,13 +378,13 @@ def collect_data_parts(
         target_df = target_series_aligned.to_frame()
         all_final_weekly_parts.append(target_df)
         target_variable_added = True
-        print(f"  添加目标变量 '{actual_target_variable_name}' (最近周五对齐)...")
-        print(f"    目标变量DataFrame形状: {target_df.shape}, 列: {list(target_df.columns)}")
+        logger.info("  添加目标变量 '%s' (最近周五对齐)...", actual_target_variable_name)
+        logger.debug("    目标变量DataFrame形状: %s, 列: %s", target_df.shape, list(target_df.columns))
 
     # 添加目标Sheet预测变量（检查重复）
     if target_sheet_predictors_aligned is not None and not target_sheet_predictors_aligned.empty:
         if actual_target_variable_name in target_sheet_predictors_aligned.columns:
-            print(f"  [WARNING] 警告：目标Sheet预测变量中包含目标变量 '{actual_target_variable_name}'")
+            logger.warning("目标Sheet预测变量中包含目标变量 '%s'", actual_target_variable_name)
             if target_variable_added:
                 target_sheet_predictors_aligned = target_sheet_predictors_aligned.drop(
                     columns=[actual_target_variable_name]
@@ -389,31 +392,31 @@ def collect_data_parts(
 
         if not target_sheet_predictors_aligned.empty:
             all_final_weekly_parts.append(target_sheet_predictors_aligned)
-            print(f"  添加目标 Sheet 预测变量 ({target_sheet_predictors_aligned.shape[1]} 个)...")
+            logger.info("  添加目标 Sheet 预测变量 (%d 个)...", target_sheet_predictors_aligned.shape[1])
             cols_preview = list(target_sheet_predictors_aligned.columns[:5])
             if len(target_sheet_predictors_aligned.columns) > 5:
                 cols_preview.append(f"...还有{len(target_sheet_predictors_aligned.columns)-5}个")
-            print(f"    列预览: {cols_preview}")
+            logger.debug("    列预览: %s", cols_preview)
 
     # 添加日度/周度数据（检查重复）
     if df_combined_dw_weekly is not None and not df_combined_dw_weekly.empty:
         if actual_target_variable_name in df_combined_dw_weekly.columns:
-            print(f"  [WARNING] 警告：日度/周度数据中包含目标变量 '{actual_target_variable_name}'")
+            logger.warning("日度/周度数据中包含目标变量 '%s'", actual_target_variable_name)
             if target_variable_added:
                 df_combined_dw_weekly = df_combined_dw_weekly.drop(columns=[actual_target_variable_name])
 
         if not df_combined_dw_weekly.empty:
             all_final_weekly_parts.append(df_combined_dw_weekly)
-            print(f"  添加日度/周度预测变量 (Shape: {df_combined_dw_weekly.shape})...")
+            logger.info("  添加日度/周度预测变量 (Shape: %s)...", df_combined_dw_weekly.shape)
             cols_preview = list(df_combined_dw_weekly.columns[:5])
             if len(df_combined_dw_weekly.columns) > 5:
                 cols_preview.append(f"...还有{len(df_combined_dw_weekly.columns)-5}个")
-            print(f"    列预览: {cols_preview}")
+            logger.debug("    列预览: %s", cols_preview)
 
     # 添加月度预测变量（检查重复）
     if monthly_predictors_aligned is not None and not monthly_predictors_aligned.empty:
         if actual_target_variable_name in monthly_predictors_aligned.columns:
-            print(f"  [WARNING] 警告：月度预测变量中包含目标变量 '{actual_target_variable_name}'")
+            logger.warning("月度预测变量中包含目标变量 '%s'", actual_target_variable_name)
             if target_variable_added:
                 monthly_predictors_aligned = monthly_predictors_aligned.drop(
                     columns=[actual_target_variable_name]
@@ -421,11 +424,11 @@ def collect_data_parts(
 
         if not monthly_predictors_aligned.empty:
             all_final_weekly_parts.append(monthly_predictors_aligned)
-            print(f"  添加其他月度预测变量 (Shape: {monthly_predictors_aligned.shape})...")
+            logger.info("  添加其他月度预测变量 (Shape: %s)...", monthly_predictors_aligned.shape)
             cols_preview = list(monthly_predictors_aligned.columns[:5])
             if len(monthly_predictors_aligned.columns) > 5:
                 cols_preview.append(f"...还有{len(monthly_predictors_aligned.columns)-5}个")
-            print(f"    列预览: {cols_preview}")
+            logger.debug("    列预览: %s", cols_preview)
 
     return all_final_weekly_parts
 
@@ -448,46 +451,46 @@ def merge_and_align_parts(
     aligned_parts = []
     for i, part in enumerate(data_parts):
         if part is not None and not part.empty:
-            print(f"  数据部分 {i+1} 重新索引前: Shape {part.shape}, 索引范围 {part.index.min()} 到 {part.index.max()}")
+            logger.debug("  数据部分 %d 重新索引前: Shape %s, 索引范围 %s 到 %s", i+1, part.shape, part.index.min(), part.index.max())
             aligned_part = part.reindex(full_date_range)
             aligned_parts.append(aligned_part)
-            print(f"  数据部分 {i+1} 重新索引后: Shape {aligned_part.shape}, 索引范围 {aligned_part.index.min()} 到 {aligned_part.index.max()}")
+            logger.debug("  数据部分 %d 重新索引后: Shape %s, 索引范围 %s 到 %s", i+1, aligned_part.shape, aligned_part.index.min(), aligned_part.index.max())
         else:
-            print(f"  数据部分 {i+1} 为空，跳过")
+            logger.debug("  数据部分 %d 为空，跳过", i+1)
 
     # 检查并清理重复列
-    print(f"\n  [调试] 检查合并前各部分的列情况:")
+    logger.debug("[调试] 检查合并前各部分的列情况:")
     for i, part in enumerate(aligned_parts):
         dup_cols = part.columns[part.columns.duplicated(keep=False)].tolist()
         if dup_cols:
             unique_dups = list(set(dup_cols))
-            print(f"    部分{i+1}: {part.shape[1]}列，有重复: {unique_dups}")
+            logger.debug("    部分%d: %d列，有重复: %s", i+1, part.shape[1], unique_dups)
         else:
-            print(f"    部分{i+1}: {part.shape[1]}列，无重复")
+            logger.debug("    部分%d: %d列，无重复", i+1, part.shape[1])
 
     # 去除各部分内部的重复列
     cleaned_parts = []
     for i, part in enumerate(aligned_parts):
         if part.columns.duplicated().any():
             part_cleaned = part.loc[:, ~part.columns.duplicated(keep='first')]
-            print(f"    部分{i+1}去重: {part.shape[1]} -> {part_cleaned.shape[1]}列")
+            logger.debug("    部分%d去重: %d -> %d列", i+1, part.shape[1], part_cleaned.shape[1])
             cleaned_parts.append(part_cleaned)
         else:
             cleaned_parts.append(part)
 
     # 合并所有部分
     combined_data = pd.concat(cleaned_parts, axis=1)
-    print(f"  合并所有 {len(aligned_parts)} 个已对齐的周度数据部分. 合并后 Shape: {combined_data.shape}")
+    logger.info("  合并所有 %d 个已对齐的周度数据部分. 合并后 Shape: %s", len(aligned_parts), combined_data.shape)
 
     # 检查合并后的重复列
     dup_after_concat = combined_data.columns[combined_data.columns.duplicated(keep=False)].tolist()
     if dup_after_concat:
         from collections import Counter
         col_counts = Counter(combined_data.columns)
-        print(f"\n  [警告] pd.concat后产生重复列:")
+        logger.warning("pd.concat后产生重复列:")
         for col, count in col_counts.items():
             if count > 1:
-                print(f"    '{col}': 出现{count}次")
+                logger.warning("    '%s': 出现%d次", col, count)
 
     return combined_data
 

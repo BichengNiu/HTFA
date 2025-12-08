@@ -222,30 +222,7 @@ def parallel_adf_check(
     return transformed_data, transform_log, dict(removed_cols_info)
 
 
-def serial_adf_check(
-    df: pd.DataFrame,
-    skip_cols: Optional[Set[str]] = None,
-    adf_p_threshold: float = 0.05
-) -> Tuple[pd.DataFrame, Dict[str, Any], Dict[str, List[str]]]:
-    """
-    串行ADF检验（回退方案）
-
-    直接调用原有的ensure_stationarity函数
-
-    Args:
-        df: 输入DataFrame
-        skip_cols: 跳过的列名集合
-        adf_p_threshold: p值阈值
-
-    Returns:
-        Tuple[pd.DataFrame, Dict, Dict]: 与原函数返回值相同
-    """
-    from dashboard.models.DFM.prep.modules.stationarity_processor import ensure_stationarity
-    return ensure_stationarity(df, skip_cols, adf_p_threshold)
-
-
 __all__ = [
     '_adf_check_single_column',
-    'parallel_adf_check',
-    'serial_adf_check'
+    'parallel_adf_check'
 ]

@@ -19,6 +19,26 @@ DEFAULT_INDICATOR_COL = '指标名称'
 DEFAULT_TYPE_COL = '类型'
 DEFAULT_INDUSTRY_COL = '行业'
 
+# 频率优先级顺序（数字越小频率越高）
+FREQ_ORDER = {
+    'D': 1,      # 日度
+    'W': 2,      # 周度
+    '10D': 2.5,  # 旬度
+    'M': 3,      # 月度
+    'Q': 4,      # 季度
+    'Y': 5       # 年度
+}
+
+# 频率周期映射（天数）- 用于统计计算
+FREQ_DAYS_MAP = {
+    '日度': 1, '日': 1, 'daily': 1, 'd': 1,
+    '周度': 7, '周': 7, 'weekly': 7, 'w': 7,
+    '旬度': 10, '旬': 10, 'dekad': 10,
+    '月度': 30, '月': 30, 'monthly': 30, 'm': 30,
+    '季度': 90, '季': 90, 'quarterly': 90, 'q': 90,
+    '年度': 365, '年': 365, 'yearly': 365, 'annual': 365, 'y': 365
+}
+
 # 导出的常量
 __all__ = [
     'DEFAULT_CONSECUTIVE_NAN_THRESHOLD',
@@ -29,5 +49,7 @@ __all__ = [
     'DEFAULT_REFERENCE_COLUMN_NAME',
     'DEFAULT_INDICATOR_COL',
     'DEFAULT_TYPE_COL',
-    'DEFAULT_INDUSTRY_COL'
+    'DEFAULT_INDUSTRY_COL',
+    'FREQ_ORDER',
+    'FREQ_DAYS_MAP'
 ]

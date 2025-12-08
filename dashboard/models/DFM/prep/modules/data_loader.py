@@ -7,8 +7,11 @@
 - 月度预测变量数据
 """
 
+import logging
 import pandas as pd
 import numpy as np
+
+logger = logging.getLogger(__name__)
 from typing import Dict, List, Tuple, Optional, Any, Set
 from collections import defaultdict
 
@@ -57,11 +60,11 @@ class DataLoader:
         Returns:
             Tuple: (发布日期, 目标变量值, 预测变量DataFrame, 目标表格列名集合)
         """
-        print(f"      检测到目标 Sheet，行业: '{industry_name}'...")
+        logger.info("检测到目标 Sheet，行业: '%s'...", industry_name)
 
         # 删除try-except包装，让异常直接抛出
         # 使用统一格式读取数据
-        print(f"    [目标Sheet读取] 使用统一格式，第一行为列名，第一列为时间列")
+        logger.info("[目标Sheet读取] 使用统一格式，第一行为列名，第一列为时间列")
 
         df_raw = pd.read_excel(excel_file, sheet_name=sheet_name, header=0)
 
@@ -73,8 +76,8 @@ class DataLoader:
         actual_target_variable_name = df_raw.columns[1]
         target_sheet_cols = {actual_target_variable_name}
 
-        print(f"      确认目标变量 (B列): '{actual_target_variable_name}'")
-        print(f"      解析发布日期 (A列: '{date_col_name}')...")
+        logger.info("确认目标变量 (B列): '%s'", actual_target_variable_name)
+        logger.info("解析发布日期 (A列: '%s')...", date_col_name)
 
         publication_dates = pd.to_datetime(df_raw[date_col_name], errors='coerce')
         valid_date_mask = publication_dates.notna()
@@ -90,7 +93,7 @@ class DataLoader:
         publication_dates = publication_dates[valid_date_mask]
 
         # 提取目标变量值
-        print(f"      提取目标变量原始值...")
+        logger.info("提取目标变量原始值...")
         target_values = pd.to_numeric(df_raw.loc[valid_date_mask, actual_target_variable_name], errors='coerce')
         target_values.index = publication_dates
 
@@ -107,7 +110,7 @@ class DataLoader:
         # 提取月度预测变量 (C列及以后)
         target_sheet_predictors = pd.DataFrame()
         if df_raw.shape[1] > 2:
-            print(f"      提取目标 Sheet 的月度预测变量 (C列及以后)...")
+            logger.info("提取目标 Sheet 的月度预测变量 (C列及以后)...")
 
             # 移除Unnamed列
             df_raw = self.cleaner.remove_unnamed_columns(df_raw, "[目标Sheet预测变量] ")
@@ -125,7 +128,7 @@ class DataLoader:
                 if valid_date_mask.any():
                     pred_valid_ratio = predictor_values[valid_date_mask].notna().sum() / valid_date_mask.sum()
                     if pred_valid_ratio < 0.3:
-                        print(f"        警告: 变量 '{col_name}' 数值转换质量较低 ({pred_valid_ratio:.1%})")
+                        logger.warning("变量 '%s' 数值转换质量较低 (%.1f%%)", col_name, pred_valid_ratio * 100)
 
                 # 创建按发布日期索引的序列
                 temp_monthly_predictors[col_name] = pd.Series(
@@ -143,9 +146,9 @@ class DataLoader:
             target_sheet_predictors = pd.DataFrame(temp_monthly_predictors).sort_index()
             target_sheet_predictors = target_sheet_predictors.dropna(axis=1, how='all')
 
-            print(f"      提取了 {target_sheet_predictors.shape[1]} 个有效的月度预测变量 (按发布日期索引)。")
+            logger.info("提取了 %d 个有效的月度预测变量 (按发布日期索引)。", target_sheet_predictors.shape[1])
         else:
-            print(f"      目标 Sheet 仅含 A, B 列。")
+            logger.info("目标 Sheet 仅含 A, B 列。")
 
         return publication_dates, target_values, target_sheet_predictors, target_sheet_cols
     
@@ -168,11 +171,11 @@ class DataLoader:
         Returns:
             Optional[pd.DataFrame]: 加载的数据，如果失败返回None
         """
-        print(f"      检测到预测变量 Sheet ('{freq_type}', 行业: '{industry_name}')...")
+        logger.info("检测到预测变量 Sheet ('%s', 行业: '%s')...", freq_type, industry_name)
 
         # 删除try-except包装，让异常直接抛出
         # 使用统一格式读取数据
-        print(f"        [使用统一格式] 第一行为列名，第一列为时间列")
+        logger.info("[使用统一格式] 第一行为列名，第一列为时间列")
 
         # 统一格式读取：第一行是列名，第一列是时间
         df = pd.read_excel(excel_file, sheet_name=sheet_name, header=0, index_col=0, parse_dates=True)
@@ -181,7 +184,7 @@ class DataLoader:
         df = self.cleaner.remove_unnamed_columns(df, f"[{freq_type}] ")
 
         # 强制索引转换为日期时间
-        print(f"      尝试将 '{sheet_name}' 的索引转换为日期时间...")
+        logger.info("尝试将 '%s' 的索引转换为日期时间...", sheet_name)
         original_index_len = len(df.index)
         df.index = pd.to_datetime(df.index, errors='coerce')
 
@@ -192,7 +195,7 @@ class DataLoader:
         filtered_index_len = len(df.index)
 
         if filtered_index_len < original_index_len:
-            print(f"      警告: 在 '{sheet_name}' 中移除了 {original_index_len - filtered_index_len} 行，因为它们的索引无法解析为有效日期。")
+            logger.warning("在 '%s' 中移除了 %d 行，因为它们的索引无法解析为有效日期。", sheet_name, original_index_len - filtered_index_len)
 
         df = df.dropna(axis=1, how='all')
         if df.empty:
@@ -202,7 +205,7 @@ class DataLoader:
         if df_numeric.empty or df_numeric.isnull().all().all():
             return None
 
-        print(f"      Sheet '{sheet_name}' ({industry_name}, {freq_type}) 加载完成。 Shape: {df_numeric.shape}")
+        logger.info("Sheet '%s' (%s, %s) 加载完成。Shape: %s", sheet_name, industry_name, freq_type, df_numeric.shape)
 
         # 更新映射
         for col in df_numeric.columns:
@@ -231,11 +234,11 @@ class DataLoader:
         Returns:
             Optional[pd.DataFrame]: 加载的数据，如果失败返回None
         """
-        print(f"      检测到旬度预测变量 Sheet (行业: '{industry_name}')...")
+        logger.info("检测到旬度预测变量 Sheet (行业: '%s')...", industry_name)
 
         # 删除try-except包装，让异常直接抛出
         # 使用统一格式读取数据
-        print(f"        [使用统一格式] 第一行为列名，第一列为时间列")
+        logger.info("[使用统一格式] 第一行为列名，第一列为时间列")
 
         # 统一格式读取：第一行是列名，第一列是时间
         df = pd.read_excel(excel_file, sheet_name=sheet_name, header=0, index_col=0, parse_dates=True)
@@ -244,7 +247,7 @@ class DataLoader:
         df = self.cleaner.remove_unnamed_columns(df, f"[旬度] ")
 
         # 强制索引转换为日期时间
-        print(f"      尝试将 '{sheet_name}' 的索引转换为日期时间...")
+        logger.info("尝试将 '%s' 的索引转换为日期时间...", sheet_name)
         original_index_len = len(df.index)
         df.index = pd.to_datetime(df.index, errors='coerce')
 
@@ -255,7 +258,7 @@ class DataLoader:
         filtered_index_len = len(df.index)
 
         if filtered_index_len < original_index_len:
-            print(f"      警告: 在 '{sheet_name}' 中移除了 {original_index_len - filtered_index_len} 行，因为它们的索引无法解析为有效日期。")
+            logger.warning("在 '%s' 中移除了 %d 行，因为它们的索引无法解析为有效日期。", sheet_name, original_index_len - filtered_index_len)
 
         df = df.dropna(axis=1, how='all')
         if df.empty:
@@ -265,7 +268,7 @@ class DataLoader:
         if df_numeric.empty or df_numeric.isnull().all().all():
             return None
 
-        print(f"      Sheet '{sheet_name}' ({industry_name}, dekad) 加载完成。 Shape: {df_numeric.shape}")
+        logger.info("Sheet '%s' (%s, dekad) 加载完成。Shape: %s", sheet_name, industry_name, df_numeric.shape)
 
         # 更新映射
         for col in df_numeric.columns:
@@ -294,11 +297,11 @@ class DataLoader:
         Returns:
             Optional[pd.DataFrame]: 加载的数据，如果失败返回None
         """
-        print(f"      检测到非目标月度预测 Sheet，行业: '{industry_name}'...")
+        logger.info("检测到非目标月度预测 Sheet，行业: '%s'...", industry_name)
 
         # 删除try-except包装，让异常直接抛出
         # 使用统一格式读取数据
-        print(f"        [使用统一格式] 第一行为列名，第一列为时间列")
+        logger.info("[使用统一格式] 第一行为列名，第一列为时间列")
 
         df_raw_pred = pd.read_excel(excel_file, sheet_name=sheet_name, header=0)
 
@@ -306,22 +309,22 @@ class DataLoader:
         df_raw_pred = self.cleaner.remove_unnamed_columns(df_raw_pred, "[月度预测] ")
 
         if df_raw_pred.shape[1] < 2:
-            print(f"      错误: 月度预测 Sheet '{sheet_name}' 列数 < 2。跳过。")
+            logger.error("月度预测 Sheet '%s' 列数 < 2。跳过。", sheet_name)
             return None
 
         date_col_name_pred = df_raw_pred.columns[0]
-        print(f"      解析发布日期 (A列: '{date_col_name_pred}')...")
+        logger.info("解析发布日期 (A列: '%s')...", date_col_name_pred)
 
         publication_dates_predictor = pd.to_datetime(df_raw_pred[date_col_name_pred], errors='coerce')
         valid_date_mask_pred = publication_dates_predictor.notna()
 
         if not valid_date_mask_pred.any():
-            print(f"      错误: 无法从列 '{date_col_name_pred}' 解析任何有效日期。跳过此Sheet。")
+            logger.error("无法从列 '%s' 解析任何有效日期。跳过此Sheet。", date_col_name_pred)
             return None
 
         publication_dates_predictor = publication_dates_predictor[valid_date_mask_pred]
 
-        print(f"      提取月度预测变量 (B列及以后)...")
+        logger.info("提取月度预测变量 (B列及以后)...")
         temp_monthly_predictors_sheet = {}
 
         for col_idx_pred in range(1, df_raw_pred.shape[1]):  # 从B列开始
@@ -348,10 +351,10 @@ class DataLoader:
         df_monthly_pred_sheet = df_monthly_pred_sheet.dropna(axis=1, how='all')
 
         if not df_monthly_pred_sheet.empty:
-            print(f"      提取了 {df_monthly_pred_sheet.shape[1]} 个有效的月度预测变量 (按发布日期索引)。")
+            logger.info("提取了 %d 个有效的月度预测变量 (按发布日期索引)。", df_monthly_pred_sheet.shape[1])
             return df_monthly_pred_sheet
         else:
-            print("      此 Sheet 未包含有效的月度预测变量数据。")
+            logger.warning("此 Sheet 未包含有效的月度预测变量数据。")
             return None
 
     def get_var_industry_map(self) -> Dict[str, str]:

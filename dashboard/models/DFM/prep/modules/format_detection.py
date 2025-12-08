@@ -5,8 +5,11 @@
 支持同花顺、Wind、Mysteel等不同数据源的格式
 """
 
+import logging
 import pandas as pd
 from typing import Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 def detect_sheet_format(excel_file, sheet_name: str) -> Dict[str, Any]:
     """
@@ -37,7 +40,7 @@ def detect_sheet_format(excel_file, sheet_name: str) -> Dict[str, Any]:
             }
 
         # 所有其他数据sheet都使用统一格式
-        print(f"      [格式检测] 使用统一格式处理数据sheet: {sheet_name}")
+        logger.debug("[格式检测] 使用统一格式处理数据sheet: %s", sheet_name)
         return {
             'format': 'unified_new',
             'skiprows': None,      # 不跳过任何行
@@ -47,7 +50,7 @@ def detect_sheet_format(excel_file, sheet_name: str) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        print(f"      [格式检测] 检测格式时出错: {e}，使用统一格式")
+        logger.warning("[格式检测] 检测格式时出错: %s，使用统一格式", e)
         return {
             'format': 'unified_new',
             'skiprows': None,

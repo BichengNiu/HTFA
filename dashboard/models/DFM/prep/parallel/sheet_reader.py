@@ -187,57 +187,7 @@ def parallel_read_sheets(
     return merged_data, all_var_industry_map
 
 
-def serial_read_sheets(
-    excel_path: str,
-    sheet_names: List[str],
-    reference_frequency_map: Dict[str, str]
-) -> Tuple[Dict[str, Dict[str, pd.Series]], Dict[str, str]]:
-    """
-    串行读取工作表（回退方案）
-
-    Args:
-        excel_path: Excel文件路径
-        sheet_names: 工作表名称列表
-        reference_frequency_map: 频率映射字典
-
-    Returns:
-        Tuple[Dict, Dict]:
-            - 按频率分类的合并数据
-            - 变量-行业映射
-    """
-    merged_data = {
-        'daily': {},
-        'weekly': {},
-        'dekad': {},
-        'monthly': {},
-        'quarterly': {},
-        'yearly': {}
-    }
-    all_var_industry_map = {}
-
-    for sheet_name in sheet_names:
-        sheet_name, data_by_freq, var_map = _read_single_sheet(
-            excel_path, sheet_name, reference_frequency_map
-        )
-        if data_by_freq is None:
-            continue
-
-        for freq_name, freq_data in data_by_freq.items():
-            for var_name, (values, index) in freq_data.items():
-                # 重建Series
-                series = pd.Series(values, index=pd.to_datetime(index), name=var_name)
-                merged_data[freq_name][var_name] = series
-
-        all_var_industry_map.update(var_map)
-
-    # 清理空的频率字典
-    merged_data = {k: v for k, v in merged_data.items() if v}
-
-    return merged_data, all_var_industry_map
-
-
 __all__ = [
     '_read_single_sheet',
-    'parallel_read_sheets',
-    'serial_read_sheets'
+    'parallel_read_sheets'
 ]

@@ -9,6 +9,7 @@
 - data_cleaner: 数据清理
 - detrend_processor: 去趋势处理
 - variable_transformer: 变量转换
+- publication_calibrator: 发布日期校准
 """
 
 # 数据加载
@@ -47,6 +48,12 @@ from dashboard.models.DFM.prep.modules.variable_transformer import (
     FREQUENCY_PERIOD_MAP
 )
 
+# 发布日期校准
+from dashboard.models.DFM.prep.modules.publication_calibrator import (
+    PublicationCalibrator,
+    calibrate_publication_dates
+)
+
 __version__ = "2.1.0"
 __author__ = "Data Preparation Module"
 
@@ -71,4 +78,7 @@ __all__ = [
     'VariableTransformer',
     'get_default_transform_config',
     'FREQUENCY_PERIOD_MAP',
+    # 发布日期校准
+    'PublicationCalibrator',
+    'calibrate_publication_dates',
 ]

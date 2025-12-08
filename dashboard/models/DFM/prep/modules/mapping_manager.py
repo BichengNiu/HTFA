@@ -4,11 +4,14 @@
 负责加载和管理变量类型映射和行业映射
 """
 
+import logging
 import pandas as pd
 import io
 from typing import Dict, Tuple, Optional, Union
 
 from dashboard.models.DFM.utils.text_utils import normalize_text
+
+logger = logging.getLogger(__name__)
 
 def load_mappings(
     excel_path: Union[str, io.BytesIO, pd.ExcelFile, object],
@@ -48,19 +51,19 @@ def load_mappings(
     var_first_stage_target_map = {}
     var_second_stage_target_map = {}
 
-    print(f"\n--- [Mappings] Loading type/industry/estimation maps from: ")
-    print(f"    Excel: {excel_path}")
-    print(f"    Sheet: {sheet_name}")
-    print(f"    Indicator Col: '{indicator_col}', Type Col: '{type_col}', Industry Col: '{industry_col}'")
-    print(f"    Single Stage Col: '{single_stage_col}', First Stage Pred Col: '{first_stage_pred_col}'")
-    print(f"    First Stage Target Col: '{first_stage_target_col}', Second Stage Target Col: '{second_stage_target_col}'")
+    logger.info("[Mappings] Loading type/industry/estimation maps from:")
+    logger.info("    Excel: %s", excel_path)
+    logger.info("    Sheet: %s", sheet_name)
+    logger.info("    Indicator Col: '%s', Type Col: '%s', Industry Col: '%s'", indicator_col, type_col, industry_col)
+    logger.info("    Single Stage Col: '%s', First Stage Pred Col: '%s'", single_stage_col, first_stage_pred_col)
+    logger.info("    First Stage Target Col: '%s', Second Stage Target Col: '%s'", first_stage_target_col, second_stage_target_col)
 
     try:
         # 处理不同类型的输入
         if isinstance(excel_path, pd.ExcelFile):
             # 已经是ExcelFile对象，直接使用
             excel_file_obj = excel_path
-            print(f"  [Mappings] 使用已有的ExcelFile对象")
+            logger.debug("[Mappings] 使用已有的ExcelFile对象")
         elif isinstance(excel_path, str):
             # 字符串路径
             excel_file_obj = pd.ExcelFile(excel_path)
@@ -111,7 +114,7 @@ def load_mappings(
             if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
             and pd.notna(v) and str(v).strip().lower() not in ['', 'nan']
         }
-        print(f"  [Mappings] Successfully created type map with {len(var_type_map)} entries.")
+        logger.info("[Mappings] Successfully created type map with %d entries.", len(var_type_map))
 
         # 创建行业映射（可选）
         if industry_col and industry_col in indicator_sheet.columns:
@@ -127,11 +130,11 @@ def load_mappings(
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
                 and pd.notna(v) and str(v).strip().lower() not in ['', 'nan']
             }
-            print(f"  [Mappings] Successfully created industry map with {len(var_industry_map)} entries.")
+            logger.info("[Mappings] Successfully created industry map with %d entries.", len(var_industry_map))
         elif industry_col:
-             print(f"  [Mappings] Warning: Industry column '{industry_col}' not found in sheet '{sheet_name}'. Industry map will be empty.")
+            logger.warning("[Mappings] Industry column '%s' not found in sheet '%s'. Industry map will be empty.", industry_col, sheet_name)
         else:
-             print(f"  [Mappings] Industry column not specified. Industry map will be empty.")
+            logger.debug("[Mappings] Industry column not specified. Industry map will be empty.")
 
         # 创建一次估计默认选择映射
         if single_stage_col and single_stage_col in indicator_sheet.columns:
@@ -147,9 +150,9 @@ def load_mappings(
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
                 and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] 从一次估计列加载了 {len(var_dfm_single_stage_map)} 个标记为'是'的变量")
+            logger.info("[Mappings] 从一次估计列加载了 %d 个标记为'是'的变量", len(var_dfm_single_stage_map))
         else:
-            print(f"  [Mappings] Warning: 一次估计列未找到")
+            logger.warning("[Mappings] 一次估计列未找到")
 
         # 创建一阶段预测默认选择映射
         if first_stage_pred_col and first_stage_pred_col in indicator_sheet.columns:
@@ -165,9 +168,9 @@ def load_mappings(
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
                 and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] 从一阶段预测列加载了 {len(var_first_stage_pred_map)} 个标记为'是'的变量")
+            logger.info("[Mappings] 从一阶段预测列加载了 %d 个标记为'是'的变量", len(var_first_stage_pred_map))
         else:
-            print(f"  [Mappings] Warning: 一阶段预测列未找到")
+            logger.warning("[Mappings] 一阶段预测列未找到")
 
         # 创建一阶段目标映射
         if first_stage_target_col and first_stage_target_col in indicator_sheet.columns:
@@ -183,9 +186,9 @@ def load_mappings(
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
                 and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] 从一阶段目标列加载了 {len(var_first_stage_target_map)} 个标记为'是'的变量")
+            logger.info("[Mappings] 从一阶段目标列加载了 %d 个标记为'是'的变量", len(var_first_stage_target_map))
         else:
-            print(f"  [Mappings] Warning: 一阶段目标列未找到")
+            logger.warning("[Mappings] 一阶段目标列未找到")
 
         # 创建二阶段目标默认选择映射
         if second_stage_target_col and second_stage_target_col in indicator_sheet.columns:
@@ -201,21 +204,22 @@ def load_mappings(
                 if pd.notna(k) and str(k).strip().lower() not in ['', 'nan']
                 and pd.notna(v) and str(v).strip() == '是'
             }
-            print(f"  [Mappings] 从二阶段目标列加载了 {len(var_second_stage_target_map)} 个标记为'是'的变量")
+            logger.info("[Mappings] 从二阶段目标列加载了 %d 个标记为'是'的变量", len(var_second_stage_target_map))
         else:
-            print(f"  [Mappings] Warning: 二阶段目标列未找到")
+            logger.warning("[Mappings] 二阶段目标列未找到")
 
     except FileNotFoundError as e:
-        print(f"Error loading mappings: {e}")
+        logger.error("Error loading mappings: %s", e)
         # Return empty maps on file/sheet not found
     except ValueError as e:
-        print(f"Error processing mapping sheet: {e}")
+        logger.error("Error processing mapping sheet: %s", e)
         # Return empty maps on column errors
     except Exception as e:
-        print(f"An unexpected error occurred while loading mappings: {e}")
+        logger.error("An unexpected error occurred while loading mappings: %s", e)
         # Return empty maps on other errors
 
-    print(f"--- [Mappings] Loading finished. Type map size: {len(var_type_map)}, Industry map size: {len(var_industry_map)}, Single stage map size: {len(var_dfm_single_stage_map)}, First stage pred map size: {len(var_first_stage_pred_map)}, First stage target map size: {len(var_first_stage_target_map)}, Second stage target map size: {len(var_second_stage_target_map)} ---")
+    logger.info("[Mappings] Loading finished. Type map size: %d, Industry map size: %d, Single stage map size: %d, First stage pred map size: %d, First stage target map size: %d, Second stage target map size: %d",
+                len(var_type_map), len(var_industry_map), len(var_dfm_single_stage_map), len(var_first_stage_pred_map), len(var_first_stage_target_map), len(var_second_stage_target_map))
     return var_type_map, var_industry_map, var_dfm_single_stage_map, var_first_stage_pred_map, var_first_stage_target_map, var_second_stage_target_map
 
 def create_industry_map_from_data(
