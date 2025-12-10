@@ -10,7 +10,7 @@ import pandas as pd
 from typing import Optional, Tuple
 from dashboard.models.DFM.train.core.models import DFMModelResult
 from dashboard.models.DFM.train.utils.logger import get_logger
-from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT, SEASONAL_MASK_MONTHS
+from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT
 
 logger = get_logger(__name__)
 
@@ -73,17 +73,7 @@ def generate_target_forecast(
         # 步骤3: 对齐目标变量和因子的时间索引（使用标准化后的目标）
         common_index = target_data_standardized.index[:factors.shape[0]]
 
-        # 步骤3.1: 应用季节性掩码（在标准化后的数据上）
-        # 将1-2月数据掩码为NaN（春节因素）
-        target_data_masked = target_data_standardized.loc[common_index].copy()
-        month_indices = target_data_masked.index.month
-        mask_jan_feb = month_indices.isin(SEASONAL_MASK_MONTHS)
-        nan_before = target_data_masked.isna().sum()
-        target_data_masked.loc[mask_jan_feb] = np.nan
-        nan_after = target_data_masked.isna().sum()
-        logger.debug(f"季节性掩码: 1-2月数据被掩码，新增NaN: {nan_after - nan_before}")
-
-        y_std = target_data_masked.values  # 标准化尺度 + 季节性掩码
+        y_std = target_data_standardized.loc[common_index].values  # 标准化尺度
         X = factors[:len(common_index), :]
 
         # 步骤4: 严格限制在训练期（匹配老代码）

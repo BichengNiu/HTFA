@@ -785,6 +785,22 @@ def render_dfm_model_training_page(st_instance):
 
     # 变量选择完成
 
+    # 显示变量选择汇总信息
+    current_target_var = _state.get('dfm_target_variable', None)
+    current_selected_indicators = _state.get('dfm_selected_indicators', [])
+    current_selected_industries_for_display = _state.get('dfm_selected_industries', [])
+    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
+
+    # 计算总预测变量数（包含第二阶段额外变量）
+    total_predictor_count = len(current_selected_indicators)
+    if current_estimation_method == 'two_stage':
+        second_stage_extra_predictors = _state.get('dfm_second_stage_extra_predictors', [])
+        total_predictor_count += len(second_stage_extra_predictors)
+
+    st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
+    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
+    st_instance.text(f" - 选定预测指标总数: {total_predictor_count}")
+
     st_instance.markdown("--- ")
     st_instance.subheader("模型参数")
 
@@ -820,15 +836,15 @@ def render_dfm_model_training_page(st_instance):
                         print(f"[WARNING] 警告: 数据包含未来日期 {data_last_date}，将使用今天作为最后日期")
                         data_last_date = today
 
-                    # 使用统一配置类的默认日期
-                    training_start_date = UIConfig.DEFAULT_TRAINING_START
+                    # 训练开始日期默认为数据的第一期
+                    training_start_date = data_first_date
                     validation_start_date = UIConfig.DEFAULT_VALIDATION_START
                     validation_end_date = UIConfig.DEFAULT_VALIDATION_END
 
                     return {
-                        'training_start': training_start_date,       # [HOT] 训练开始日：优先使用数据准备页面设置
-                        'validation_start': validation_start_date,   # 验证开始日：计算得出
-                        'validation_end': validation_end_date        # [HOT] 验证结束日：优先使用数据准备页面设置
+                        'training_start': training_start_date,       # 训练开始日：默认为数据的开始日期
+                        'validation_start': validation_start_date,   # 验证开始日：使用配置默认值
+                        'validation_end': validation_end_date        # 验证结束日：使用配置默认值
                     }
                 else:
                     return static_defaults
@@ -874,7 +890,7 @@ def render_dfm_model_training_page(st_instance):
             "训练期开始日期 (Training Start Date)",
             value=_state.get('dfm_training_start_date', date_defaults['training_start']),
             key='dfm_training_start_date_input',
-            help="选择模型训练数据的起始日期。默认为数据的第一期。"
+            help="选择模型训练数据的起始日期。默认为上传数据的开始日期。"
         )
         _state.set('dfm_training_start_date', training_start_value)
 
@@ -927,37 +943,6 @@ def render_dfm_model_training_page(st_instance):
         # 手动同步状态（确保即使回调未触发也能保持一致）
         _state.set('dfm_estimation_method', estimation_method)
 
-        # 变量处理选择（2025-11-16新增）
-        variable_processing_options = {
-            'none': "不处理",
-            'detrend': "去趋势(线性)",
-            'stationary': "平稳化"
-        }
-
-        # 获取当前变量处理方法（默认为平稳化）
-        current_var_processing = _state.get('dfm_var_processing_method', 'stationary')
-
-        var_processing_value = st_instance.selectbox(
-            "变量处理",
-            options=list(variable_processing_options.keys()),
-            format_func=lambda x: variable_processing_options[x],
-            index=list(variable_processing_options.keys()).index(current_var_processing),
-            key='dfm_var_processing_method_selector',
-            help=(
-                "选择变量预处理方法：\n"
-                "- 不处理: 直接使用原始值训练\n"
-                "- 去趋势(线性): 对所有变量进行线性回归去趋势（y = α + β*t + ε）\n"
-                "- 平稳化: 自动执行ADF检验，非平稳变量依次尝试差分→对数差分，仍不平稳则丢弃"
-            )
-        )
-        _state.set('dfm_var_processing_method', var_processing_value)
-
-        # 根据变量处理方法设置enable_detrend和enable_stationarity_processing
-        enable_detrend = (var_processing_value == 'detrend')
-        enable_stationarity_processing = (var_processing_value == 'stationary')
-        _state.set('dfm_enable_detrend', enable_detrend)
-        _state.set('dfm_enable_stationarity_processing', enable_stationarity_processing)
-
         variable_selection_options = {
             'none': "无筛选 (使用全部已选变量)",
             'global_backward': "全局后向剔除 (在已选变量中筛选)"
@@ -983,6 +968,29 @@ def render_dfm_model_training_page(st_instance):
 
         enable_var_selection = (var_method_value != 'none')
         _state.set('dfm_enable_variable_selection', enable_var_selection)
+
+        # 目标变量配对模式（2025-12新增）
+        target_alignment_options = {
+            'next_month': "下月值 (m月nowcast预测m+1月目标)",
+            'current_month': "本月值 (m月nowcast预测m月目标)"
+        }
+        default_alignment = 'next_month'
+
+        current_alignment = _state.get('dfm_target_alignment_mode', default_alignment)
+
+        alignment_value = st_instance.selectbox(
+            "目标变量配对方式",
+            options=list(target_alignment_options.keys()),
+            format_func=lambda x: target_alignment_options[x],
+            index=list(target_alignment_options.keys()).index(current_alignment),
+            key='dfm_target_alignment_mode_input',
+            help=(
+                "选择nowcast预测值与目标变量实际值的配对方式：\n"
+                "- 下月值: m月的nowcast与m+1月的target配对（默认）\n"
+                "- 本月值: m月的nowcast与m月的target配对"
+            )
+        )
+        _state.set('dfm_target_alignment_mode', alignment_value)
 
         # 后向剔除基于性能比较（HR和RMSE），不使用统计显著性阈值
 
@@ -1214,28 +1222,10 @@ def render_dfm_model_training_page(st_instance):
 
                 _state.set('dfm_second_stage_extra_predictors', extra_predictors)
 
-    st_instance.markdown("--- ")
-    st_instance.subheader("模型训练")
-
-    # 显示变量选择汇总信息
+    # 第四行：开始训练按钮（左对齐）
+    # 重新获取变量选择状态（用于训练条件检查）
     current_target_var = _state.get('dfm_target_variable', None)
     current_selected_indicators = _state.get('dfm_selected_indicators', [])
-    current_selected_industries_for_display = _state.get('dfm_selected_industries', [])
-    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
-
-    # 计算总预测变量数（包含第二阶段额外变量）
-    total_predictor_count = len(current_selected_indicators)
-    if current_estimation_method == 'two_stage':
-        second_stage_extra_predictors = _state.get('dfm_second_stage_extra_predictors', [])
-        total_predictor_count += len(second_stage_extra_predictors)
-
-    st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
-    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
-    st_instance.text(f" - 选定预测指标总数: {total_predictor_count}")
-    if current_estimation_method == 'two_stage':
-        second_stage_extra_count = len(_state.get('dfm_second_stage_extra_predictors', []))
-        st_instance.text(f"   - 第一阶段预测指标: {len(current_selected_indicators)}")
-        st_instance.text(f"   - 第二阶段额外指标: {second_stage_extra_count}")
 
     # 日期验证
     training_start_value = _state.get('dfm_training_start_date')
@@ -1269,169 +1259,158 @@ def render_dfm_model_training_page(st_instance):
 
     # 开始训练按钮
     if training_ready:
-        if st_instance.button("开始训练",
+        train_btn_clicked = st_instance.button("开始训练",
                             key="dfm_start_training",
                             help="开始DFM模型训练",
-                            type="primary"):
-
-
-                current_status = _state.get('dfm_training_status', '等待开始')
-                if current_status in ['正在训练...', '准备启动训练...']:
-                    st_instance.warning("[WARNING] 训练已在进行中，请勿重复启动")
-                    return
-
-                try:
-                    # 使用TrainingConfigBuilder构建配置
-                    state_manager = StateManager('train_model')
-                    config_builder = TrainingConfigBuilder(state_manager)
-
-                    training_config = config_builder.build(
-                        input_df=input_df,
-                        var_industry_map=_state.get('dfm_industry_map_obj', {}),
-                        var_frequency_map=var_frequency_map,
-                        var_unit_map=var_unit_map
-                    )
-
-                    print(f"[TRAIN_CONFIG] 因子选择策略: {training_config.factor_config}")
-                    print(f"[TRAIN_CONFIG] 最大迭代次数: {training_config.max_iterations}")
-                    print(f"[TRAIN_CONFIG] AR阶数: {training_config.max_lags}")
-                    print(f"[TRAIN_CONFIG] 训练期: {training_config.training_start} 至 {training_config.train_end}")
-                    print(f"[TRAIN_CONFIG] 验证期: {training_config.validation_start} 至 {training_config.validation_end}")
-                    print(f"[TRAIN_CONFIG] 选择的指标数: {len(training_config.selected_indicators)}")
-                    print(f"[TRAIN_CONFIG] 变量选择: {training_config.enable_variable_selection}")
-
-                    # 创建进度回调函数
-                    def progress_callback(message: str):
-                        """进度回调函数"""
-                        print(f"[TRAIN_REF] {message}")
-                        # 更新训练日志
-                        training_log = _state.get('dfm_training_log', [])
-                        training_log.append(message)
-                        _state.set('dfm_training_log', training_log)
-
-                    # 设置训练状态
-                    _state.set('dfm_training_status', '正在训练...')
-                    _state.set('dfm_training_log', ['[TRAIN_REF] 开始训练...'])
-
-                    # 根据估计方法选择训练器并训练（同步执行）
-                    if estimation_method == 'single_stage':
-                        trainer = DFMTrainer(training_config)
-                        result = trainer.train(
-                            progress_callback=progress_callback,
-                            enable_export=True,
-                            export_dir=None
-                        )
-                    else:  # two_stage
-                        from dashboard.models.DFM.train.training.two_stage_trainer import TwoStageTrainer
-                        st_instance.info("[LOADING] 正在训练模型（二次估计法），请稍候...")
-                        trainer = TwoStageTrainer(training_config)
-                        result = trainer.train(
-                            progress_callback=progress_callback,
-                            enable_export=True,
-                            export_dir=None
-                        )
-
-                    # 处理训练结果并保存
-                    from dashboard.models.DFM.train.core.models import TwoStageTrainingResult
-
-                    # 判断结果类型并提取关键信息
-                    if isinstance(result, TwoStageTrainingResult):
-                        # 二次估计法结果：从second_stage_result中提取
-                        final_result = result.second_stage_result
-                        result_summary = {
-                            'estimation_method': 'two_stage',
-                            'selected_variables': final_result.selected_variables,
-                            'k_factors': final_result.k_factors,
-                            'metrics': {
-                                'is_rmse': final_result.metrics.is_rmse if final_result.metrics else None,
-                                'oos_rmse': final_result.metrics.oos_rmse if final_result.metrics else None,
-                                'is_hit_rate': final_result.metrics.is_hit_rate if final_result.metrics else None,
-                                'oos_hit_rate': final_result.metrics.oos_hit_rate if final_result.metrics else None
-                            },
-                            'training_time': result.total_training_time,
-                            'first_stage_count': len(result.first_stage_results),
-                            'industry_k_factors': result.industry_k_factors_used
-                        }
-
-                        training_time_display = result.total_training_time
-                        selected_variables = final_result.selected_variables
-                        k_factors_display = final_result.k_factors
-                        metrics_obj = final_result.metrics
-
-                    else:
-                        # 一次估计法结果
-                        result_summary = {
-                            'estimation_method': 'single_stage',
-                            'selected_variables': result.selected_variables,
-                            'k_factors': result.k_factors,
-                            'metrics': {
-                                'is_rmse': result.metrics.is_rmse if result.metrics else None,
-                                'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
-                                'is_hit_rate': result.metrics.is_hit_rate if result.metrics else None,
-                                'oos_hit_rate': result.metrics.oos_hit_rate if result.metrics else None
-                            },
-                            'training_time': result.training_time
-                        }
-
-                        training_time_display = result.training_time
-                        selected_variables = result.selected_variables
-                        k_factors_display = result.k_factors
-                        metrics_obj = result.metrics
-
-                    # 保存到状态管理器
-                    _state.set('dfm_training_result', result_summary)
-                    _state.set('dfm_model_results_paths', result.export_files)
-                    _state.set('dfm_training_status', '训练完成')
-                    _state.set('dfm_training_completed_timestamp', time.time())
-
-                    # 添加完成日志
-                    training_log = _state.get('dfm_training_log', [])
-
-                    if isinstance(result, TwoStageTrainingResult):
-                        training_log.append(f"[SUCCESS] 二次估计法训练完成！总耗时: {training_time_display:.2f}秒")
-                        training_log.append(f"[STAGE1] 成功训练 {len(result.first_stage_results)} 个行业模型")
-                        training_log.append(f"[STAGE2] 总量模型训练完成")
-                    else:
-                        pass
-
-                    training_log.append(f"[RESULT] 选中变量数: {len(selected_variables)}")
-                    training_log.append(f"[RESULT] 因子数: {k_factors_display}")
-
-                    if metrics_obj:
-                        training_log.append(f"[METRICS] 样本外RMSE: {metrics_obj.oos_rmse:.4f}")
-                        # 检查Hit Rate是否有效
-                        import numpy as np
-                        hit_rate_value = metrics_obj.oos_hit_rate
-                        if np.isnan(hit_rate_value) or np.isinf(hit_rate_value):
-                            hit_rate_str = "N/A (数据不足)"
-                        else:
-                            hit_rate_str = f"{hit_rate_value:.2f}%"
-                        training_log.append(f"[METRICS] 样本外Hit Rate: {hit_rate_str}")
-
-                    _state.set('dfm_training_log', training_log)
-
-                    # 清理临时文件
-                    try:
-                        os.unlink(temp_data_path)
-                    except:
-                        pass
-
-                    st_instance.success("[SUCCESS] 训练完成！")
-                    # 删除rerun：训练是同步的，完成后自然显示结果，无需刷新
-
-                except Exception as e:
-                    import traceback
-                    error_msg = f"启动训练失败: {str(e)}\n{traceback.format_exc()}"
-                    print(f"[ERROR] {error_msg}")
-                    _state.set('dfm_training_status', f'训练失败: {str(e)}')
-                    _state.set('dfm_training_error', error_msg)
-                    st_instance.error(f"[ERROR] {error_msg}")
+                            type="primary")
     else:
-        st_instance.button("开始训练",
+        train_btn_clicked = st_instance.button("开始训练",
                          disabled=True,
                          key="dfm_start_training_disabled",
                          help="请先满足所有训练条件",
                          type="primary")
+
+    # 训练逻辑
+    if training_ready and train_btn_clicked:
+        current_status = _state.get('dfm_training_status', '等待开始')
+        if current_status in ['正在训练...', '准备启动训练...']:
+            st_instance.warning("[WARNING] 训练已在进行中，请勿重复启动")
+        else:
+            try:
+                # 使用TrainingConfigBuilder构建配置
+                state_manager = StateManager('train_model')
+                config_builder = TrainingConfigBuilder(state_manager)
+
+                training_config = config_builder.build(
+                    input_df=input_df,
+                    var_industry_map=_state.get('dfm_industry_map_obj', {})
+                )
+
+                print(f"[TRAIN_CONFIG] 因子选择策略: {training_config.factor_selection_method}")
+                print(f"[TRAIN_CONFIG] 最大迭代次数: {training_config.max_iterations}")
+                print(f"[TRAIN_CONFIG] AR阶数: {training_config.max_lags}")
+                print(f"[TRAIN_CONFIG] 训练期: {training_config.training_start} 至 {training_config.train_end}")
+                print(f"[TRAIN_CONFIG] 验证期: {training_config.validation_start} 至 {training_config.validation_end}")
+                print(f"[TRAIN_CONFIG] 选择的指标数: {len(training_config.selected_indicators)}")
+                print(f"[TRAIN_CONFIG] 变量选择: {training_config.enable_variable_selection}")
+
+                # 创建进度回调函数
+                def progress_callback(message: str):
+                    """进度回调函数"""
+                    print(f"[TRAIN_REF] {message}")
+                    # 更新训练日志
+                    training_log = _state.get('dfm_training_log', [])
+                    training_log.append(message)
+                    _state.set('dfm_training_log', training_log)
+
+                # 设置训练状态
+                _state.set('dfm_training_status', '正在训练...')
+                _state.set('dfm_training_log', ['[TRAIN_REF] 开始训练...'])
+
+                # 根据估计方法选择训练器并训练（同步执行）
+                if estimation_method == 'single_stage':
+                    trainer = DFMTrainer(training_config)
+                    result = trainer.train(
+                        progress_callback=progress_callback,
+                        enable_export=True,
+                        export_dir=None
+                    )
+                else:  # two_stage
+                    from dashboard.models.DFM.train.training.two_stage_trainer import TwoStageTrainer
+                    st_instance.info("[LOADING] 正在训练模型（二次估计法），请稍候...")
+                    trainer = TwoStageTrainer(training_config)
+                    result = trainer.train(
+                        progress_callback=progress_callback,
+                        enable_export=True,
+                        export_dir=None
+                    )
+
+                # 处理训练结果并保存
+                from dashboard.models.DFM.train.core.models import TwoStageTrainingResult
+
+                # 判断结果类型并提取关键信息
+                if isinstance(result, TwoStageTrainingResult):
+                    # 二次估计法结果：从second_stage_result中提取
+                    final_result = result.second_stage_result
+                    result_summary = {
+                        'estimation_method': 'two_stage',
+                        'selected_variables': final_result.selected_variables,
+                        'k_factors': final_result.k_factors,
+                        'metrics': {
+                            'is_rmse': final_result.metrics.is_rmse if final_result.metrics else None,
+                            'oos_rmse': final_result.metrics.oos_rmse if final_result.metrics else None,
+                            'is_hit_rate': final_result.metrics.is_hit_rate if final_result.metrics else None,
+                            'oos_hit_rate': final_result.metrics.oos_hit_rate if final_result.metrics else None
+                        },
+                        'training_time': result.total_training_time,
+                        'first_stage_count': len(result.first_stage_results),
+                        'industry_k_factors': result.industry_k_factors_used
+                    }
+
+                    training_time_display = result.total_training_time
+                    selected_variables = final_result.selected_variables
+                    k_factors_display = final_result.k_factors
+                    metrics_obj = final_result.metrics
+
+                else:
+                    # 一次估计法结果
+                    result_summary = {
+                        'estimation_method': 'single_stage',
+                        'selected_variables': result.selected_variables,
+                        'k_factors': result.k_factors,
+                        'metrics': {
+                            'is_rmse': result.metrics.is_rmse if result.metrics else None,
+                            'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
+                            'is_hit_rate': result.metrics.is_hit_rate if result.metrics else None,
+                            'oos_hit_rate': result.metrics.oos_hit_rate if result.metrics else None
+                        },
+                        'training_time': result.training_time
+                    }
+
+                    training_time_display = result.training_time
+                    selected_variables = result.selected_variables
+                    k_factors_display = result.k_factors
+                    metrics_obj = result.metrics
+
+                # 保存到状态管理器
+                _state.set('dfm_training_result', result_summary)
+                _state.set('dfm_model_results_paths', result.export_files)
+                _state.set('dfm_training_status', '训练完成')
+                _state.set('dfm_training_completed_timestamp', time.time())
+
+                # 添加完成日志
+                training_log = _state.get('dfm_training_log', [])
+
+                if isinstance(result, TwoStageTrainingResult):
+                    training_log.append(f"[SUCCESS] 二次估计法训练完成！总耗时: {training_time_display:.2f}秒")
+                    training_log.append(f"[STAGE1] 成功训练 {len(result.first_stage_results)} 个行业模型")
+                    training_log.append(f"[STAGE2] 总量模型训练完成")
+
+                training_log.append(f"[RESULT] 选中变量数: {len(selected_variables)}")
+                training_log.append(f"[RESULT] 因子数: {k_factors_display}")
+
+                if metrics_obj:
+                    training_log.append(f"[METRICS] 样本外RMSE: {metrics_obj.oos_rmse:.4f}")
+                    # 检查Hit Rate是否有效
+                    import numpy as np
+                    hit_rate_value = metrics_obj.oos_hit_rate
+                    if np.isnan(hit_rate_value) or np.isinf(hit_rate_value):
+                        hit_rate_str = "N/A (数据不足)"
+                    else:
+                        hit_rate_str = f"{hit_rate_value:.2f}%"
+                    training_log.append(f"[METRICS] 样本外Hit Rate: {hit_rate_str}")
+
+                _state.set('dfm_training_log', training_log)
+
+                st_instance.success("[SUCCESS] 训练完成！")
+
+            except Exception as e:
+                import traceback
+                error_msg = f"启动训练失败: {str(e)}\n{traceback.format_exc()}"
+                print(f"[ERROR] {error_msg}")
+                _state.set('dfm_training_status', f'训练失败: {str(e)}')
+                _state.set('dfm_training_error', error_msg)
+                st_instance.error(f"[ERROR] {error_msg}")
 
     st_instance.markdown("---")
 
@@ -1500,35 +1479,32 @@ def render_dfm_model_training_page(st_instance):
                         print(f"[UI状态检查] 文件不存在或路径为空: {file_key}")
 
                 if available_files:
-                    download_col1, download_col2, _ = st_instance.columns([1, 1, 8])
+                    # 创建ZIP压缩包
+                    import zipfile
+                    import io
+                    from datetime import datetime
 
-                    for idx, (file_key, file_path, file_name) in enumerate(available_files):
-                        try:
-                            with open(file_path, 'rb') as f:
-                                file_data = f.read()
+                    zip_buffer = io.BytesIO()
+                    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                        for file_key, file_path, file_name in available_files:
+                            zip_file.write(file_path, file_name)
 
-                            if file_key == 'final_model_joblib':
-                                display_name = "模型文件"
-                                col = download_col1
-                            elif file_key == 'metadata':
-                                display_name = "元数据文件"
-                                col = download_col2
-                            else:
-                                display_name = file_name
-                                col = download_col1 if idx % 2 == 0 else download_col2
+                    zip_buffer.seek(0)
+                    zip_data = zip_buffer.getvalue()
 
-                            with col:
-                                st_instance.download_button(
-                                    label=display_name,
-                                    data=file_data,
-                                    file_name=file_name,
-                                    mime="application/octet-stream",
-                                    key=f"dfm_download_{file_key}",
-                                    type="primary"
-                                )
+                    # 生成压缩包文件名（包含时间戳）
+                    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    zip_filename = f"dfm_model_{timestamp}.zip"
 
-                        except Exception as e:
-                            st_instance.warning(f"[WARNING] {file_name} 文件读取失败: {e}")
+                    # 单一下载按钮
+                    st_instance.download_button(
+                        label="文件下载",
+                        data=zip_data,
+                        file_name=zip_filename,
+                        mime="application/zip",
+                        key="dfm_download_zip",
+                        type="primary"
+                    )
                 else:
                     st_instance.warning("[WARNING] 未找到可用的结果文件")
             else:

@@ -110,6 +110,7 @@ def _evaluate_variable_selection_model(
     validation_end: str,
     max_iterations: int,
     tolerance: float,
+    alignment_mode: str = 'next_month',
     **kwargs
 ) -> Tuple[float, float, float, float, float, float, bool, None, None]:
     """
@@ -126,6 +127,7 @@ def _evaluate_variable_selection_model(
         validation_end: 验证结束日期
         max_iter: 最大迭代次数
         tolerance: 容差
+        alignment_mode: 目标配对模式 ('current_month' 或 'next_month')
         **kwargs: 其他参数
 
     Returns:
@@ -158,8 +160,8 @@ def _evaluate_variable_selection_model(
             progress_callback=None
         )
 
-        # 计算下月配对RMSE
-        from dashboard.models.DFM.train.evaluation.metrics import calculate_next_month_rmse
+        # 计算配对RMSE（根据alignment_mode选择配对模式）
+        from dashboard.models.DFM.train.evaluation.metrics import calculate_aligned_rmse
 
         # 样本内RMSE（训练期）
         if model_result.forecast_is is not None and len(model_result.forecast_is) > 0:
@@ -169,7 +171,7 @@ def _evaluate_variable_selection_model(
                 model_result.forecast_is,
                 index=train_index
             )
-            is_rmse = calculate_next_month_rmse(train_nowcast, target_data)
+            is_rmse = calculate_aligned_rmse(train_nowcast, target_data, alignment_mode)
         else:
             is_rmse = np.inf
 
@@ -183,7 +185,7 @@ def _evaluate_variable_selection_model(
                     model_result.forecast_oos,
                     index=val_index
                 )
-                oos_rmse = calculate_next_month_rmse(val_nowcast, target_data)
+                oos_rmse = calculate_aligned_rmse(val_nowcast, target_data, alignment_mode)
             else:
                 logger.warning(f"[VarSelectionEvaluator] 验证期索引长度不匹配: {len(val_index)} vs {len(model_result.forecast_oos)}")
                 oos_rmse = np.inf
@@ -332,7 +334,8 @@ def extract_serializable_config(config: 'TrainingConfig') -> Dict[str, Any]:
         'validation_start': config.validation_start,
         'validation_end': config.validation_end,
         'max_iterations': config.max_iterations,
-        'tolerance': config.tolerance
+        'tolerance': config.tolerance,
+        'alignment_mode': config.target_alignment_mode
     }
 
 

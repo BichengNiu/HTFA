@@ -58,6 +58,10 @@ class DataPrepStateKeys:
     TRANSFORM_CONFIG_DF = f'{PREFIX}.transform_config_df'
     VARIABLE_TRANSFORM_DETAILS = f'{PREFIX}.variable_transform_details'
 
+    # 值替换
+    VALUE_REPLACEMENT_HISTORY = f'{PREFIX}.value_replacement_history'  # List[Dict] 替换历史
+    BASE_PREPARED_DATA_DF = f'{PREFIX}.base_prepared_data_df'  # 基准数据（用于撤销所有替换）
+
     # 导出
     EXPORT_BASE_NAME = f'{PREFIX}.export_base_name'
 

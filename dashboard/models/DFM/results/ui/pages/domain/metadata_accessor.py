@@ -71,35 +71,53 @@ class DFMMetadataAccessor:
             target_variable=self._metadata.get('target_variable', '规模以上工业增加值:当月同比'),
             estimation_method=self._metadata.get('estimation_method', 'N/A'),
             n_variables=n_vars,
-            n_factors=self._metadata.get('k_factors', 'N/A')
+            n_factors=self._get_k_factors()
         )
+
+    def _get_k_factors(self) -> Any:
+        """从metadata中获取k_factors，支持新旧两种存储格式"""
+        # 新格式：best_params.k_factors
+        best_params = self._metadata.get('best_params', {})
+        if isinstance(best_params, dict) and 'k_factors' in best_params:
+            return best_params['k_factors']
+        # 旧格式：直接存储
+        return self._metadata.get('k_factors', 'N/A')
 
     @property
     def training_metrics(self) -> ModelMetrics:
         """获取训练期指标"""
         return ModelMetrics(
-            mae=self._metadata.get('is_mae_original'),
-            rmse=self._metadata.get('is_rmse_original'),
-            hit_rate=self._metadata.get('is_hit_rate_original')
+            mae=self._get_metric('is_mae'),
+            rmse=self._get_metric('is_rmse'),
+            hit_rate=self._get_metric('is_hit_rate')
         )
 
     @property
     def validation_metrics(self) -> ModelMetrics:
         """获取验证期指标"""
         return ModelMetrics(
-            mae=self._metadata.get('oos_mae_original'),
-            rmse=self._metadata.get('oos_rmse_original'),
-            hit_rate=self._metadata.get('oos_hit_rate_original')
+            mae=self._get_metric('oos_mae'),
+            rmse=self._get_metric('oos_rmse'),
+            hit_rate=self._get_metric('oos_hit_rate')
         )
 
     @property
     def observation_metrics(self) -> ModelMetrics:
         """获取观察期指标"""
         return ModelMetrics(
-            mae=self._metadata.get('obs_mae_original'),
-            rmse=self._metadata.get('obs_rmse_original'),
-            hit_rate=self._metadata.get('obs_hit_rate_original')
+            mae=self._get_metric('obs_mae'),
+            rmse=self._get_metric('obs_rmse'),
+            hit_rate=self._get_metric('obs_hit_rate')
         )
+
+    def _get_metric(self, base_key: str) -> Optional[float]:
+        """获取指标值，支持新旧两种字段名格式"""
+        # 新格式（无_original后缀）
+        val = self._metadata.get(base_key)
+        if val is not None:
+            return val
+        # 旧格式（带_original后缀）
+        return self._metadata.get(f'{base_key}_original')
 
     @property
     def has_observation_metrics(self) -> bool:

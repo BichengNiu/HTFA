@@ -320,3 +320,289 @@ def calculate_next_month_hit_rate(
     except Exception as e:
         logger.error(f"[next_month_hit_rate] 计算失败: {e}")
         return np.nan
+
+
+# ==================== 本月配对评估函数（2025-12新增）====================
+
+def align_current_month_weekly_data(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> pd.DataFrame:
+    """对齐m月所有周的nowcast与m月target（用于本月配对RMSE计算）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        pd.DataFrame: 对齐后数据，列['month', 'week_date', 'nowcast', 'current_month_target']
+    """
+    # 确保索引是DatetimeIndex
+    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
+        nowcast_series.index = pd.to_datetime(nowcast_series.index)
+    if not isinstance(target_series.index, pd.DatetimeIndex):
+        target_series.index = pd.to_datetime(target_series.index)
+
+    # 转换为DataFrame并添加月份列
+    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
+    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
+
+    target_df = target_series.to_frame('Target').copy()
+    target_df['TargetMonth'] = target_df.index.to_period('M')
+    target_df = target_df.groupby('TargetMonth').last()
+
+    weekly_data = []
+
+    # 按月遍历nowcast数据
+    for period, group in nowcast_df.groupby('NowcastMonth'):
+        # 检查当月是否有target数据
+        if period in target_df.index:
+            current_month_target = target_df.loc[period, 'Target']
+
+            # 该月所有周的nowcast都与当月target配对
+            for date, row in group.iterrows():
+                weekly_data.append({
+                    'month': period,
+                    'week_date': date,
+                    'nowcast': row['Nowcast'],
+                    'current_month_target': current_month_target
+                })
+
+    if not weekly_data:
+        logger.warning("[align_current_month_weekly] 未找到有效的周度-当月配对数据")
+        return pd.DataFrame(columns=['month', 'week_date', 'nowcast', 'current_month_target'])
+
+    return pd.DataFrame(weekly_data)
+
+
+def align_current_month_last_friday(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> pd.DataFrame:
+    """对齐m月最后周五nowcast与m月target、m-1月target（用于本月配对Hit Rate和MAE计算）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        pd.DataFrame: 对齐后数据，列['month', 'last_friday_date', 'nowcast', 'prev_target', 'current_target']
+    """
+    # 确保索引是DatetimeIndex
+    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
+        nowcast_series.index = pd.to_datetime(nowcast_series.index)
+    if not isinstance(target_series.index, pd.DatetimeIndex):
+        target_series.index = pd.to_datetime(target_series.index)
+
+    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
+    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
+
+    target_df = target_series.to_frame('Target').copy()
+    target_df['TargetMonth'] = target_df.index.to_period('M')
+    target_df = target_df.groupby('TargetMonth').last()
+
+    monthly_friday_data = []
+
+    for period, group in nowcast_df.groupby('NowcastMonth'):
+        # 找到该月的所有周五 (weekday=4)
+        fridays = group[group.index.weekday == 4]
+        if fridays.empty:
+            continue
+
+        last_friday_date = fridays.index.max()
+        last_friday_nowcast = fridays.loc[last_friday_date, 'Nowcast']
+
+        # 获取上月��当月的target
+        prev_period = period - 1
+
+        if prev_period in target_df.index and period in target_df.index:
+            prev_target = target_df.loc[prev_period, 'Target']
+            current_target = target_df.loc[period, 'Target']
+
+            monthly_friday_data.append({
+                'month': period,
+                'last_friday_date': last_friday_date,
+                'nowcast': last_friday_nowcast,
+                'prev_target': prev_target,
+                'current_target': current_target
+            })
+
+    if not monthly_friday_data:
+        logger.warning("[align_current_month_last_friday] 未找到有效的月度最后周五配对数据")
+        return pd.DataFrame(columns=['month', 'last_friday_date', 'nowcast', 'prev_target', 'current_target'])
+
+    df = pd.DataFrame(monthly_friday_data)
+    df = df.set_index('last_friday_date').sort_index()
+
+    return df
+
+
+def calculate_current_month_rmse(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> float:
+    """计算m月所有周nowcast与m月target配对的RMSE（本月配对）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        float: RMSE值，失败返回np.inf
+    """
+    try:
+        aligned_df = align_current_month_weekly_data(nowcast_series, target_series)
+
+        if aligned_df.empty or len(aligned_df) < 2:
+            logger.warning(f"[current_month_rmse] 配对数据不足: {len(aligned_df)}个数据点")
+            return np.inf
+
+        squared_errors = (aligned_df['nowcast'] - aligned_df['current_month_target']) ** 2
+        rmse = np.sqrt(squared_errors.mean())
+        return float(rmse)
+
+    except Exception as e:
+        logger.error(f"[current_month_rmse] 计算失败: {e}")
+        return np.inf
+
+
+def calculate_current_month_mae(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> float:
+    """计算m月最后周五nowcast与m月target配对的MAE（本月配对）
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        float: MAE值，失败返回np.inf
+    """
+    try:
+        aligned_df = align_current_month_last_friday(nowcast_series, target_series)
+
+        if aligned_df.empty or len(aligned_df) < 2:
+            logger.warning(f"[current_month_mae] 配对数据不足: {len(aligned_df)}个数据点")
+            return np.inf
+
+        abs_errors = np.abs(aligned_df['nowcast'] - aligned_df['current_target'])
+        mae = abs_errors.mean()
+        return float(mae)
+
+    except Exception as e:
+        logger.error(f"[current_month_mae] 计算失败: {e}")
+        return np.inf
+
+
+def calculate_current_month_hit_rate(
+    nowcast_series: pd.Series,
+    target_series: pd.Series
+) -> float:
+    """计算本月配对Hit Rate
+
+    对每个月m：
+    - 预测变化：target_m - nowcast_m（m月最后周五）
+    - 实际变化：target_m - target_{m-1}
+    - 命中条件：两个变化符号相同
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+
+    Returns:
+        float: Hit Rate百分比（0-100），失败返回np.nan
+    """
+    try:
+        aligned_df = align_current_month_last_friday(nowcast_series, target_series)
+
+        if aligned_df.empty or len(aligned_df) < 2:
+            logger.warning(f"[current_month_hit_rate] 配对数据不足: {len(aligned_df)}个数据点")
+            return np.nan
+
+        # 计算预测变化：当月target - 当月最后周五nowcast
+        aligned_df['pred_change'] = aligned_df['current_target'] - aligned_df['nowcast']
+
+        # 计算实际变化：当月target - 上月target
+        aligned_df['actual_change'] = aligned_df['current_target'] - aligned_df['prev_target']
+
+        # 判断符号是否相同
+        aligned_df['hit'] = (
+            np.sign(aligned_df['pred_change']) ==
+            np.sign(aligned_df['actual_change'])
+        )
+
+        hits = aligned_df['hit'].sum()
+        total = len(aligned_df)
+        hit_rate = (hits / total) * 100.0
+
+        return float(hit_rate)
+
+    except Exception as e:
+        logger.error(f"[current_month_hit_rate] 计算失败: {e}")
+        return np.nan
+
+
+# ==================== 统一调度函数 ====================
+
+def calculate_aligned_rmse(
+    nowcast_series: pd.Series,
+    target_series: pd.Series,
+    alignment_mode: str = 'next_month'
+) -> float:
+    """根据配对模式计算RMSE
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+        alignment_mode: 配对模式 ('current_month' 或 'next_month')
+
+    Returns:
+        float: RMSE值
+    """
+    if alignment_mode == 'current_month':
+        return calculate_current_month_rmse(nowcast_series, target_series)
+    else:
+        return calculate_next_month_rmse(nowcast_series, target_series)
+
+
+def calculate_aligned_mae(
+    nowcast_series: pd.Series,
+    target_series: pd.Series,
+    alignment_mode: str = 'next_month'
+) -> float:
+    """根据配对模式计算MAE
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+        alignment_mode: 配对模式 ('current_month' 或 'next_month')
+
+    Returns:
+        float: MAE值
+    """
+    if alignment_mode == 'current_month':
+        return calculate_current_month_mae(nowcast_series, target_series)
+    else:
+        return calculate_next_month_mae(nowcast_series, target_series)
+
+
+def calculate_aligned_hit_rate(
+    nowcast_series: pd.Series,
+    target_series: pd.Series,
+    alignment_mode: str = 'next_month'
+) -> float:
+    """根据配对模式计算Hit Rate
+
+    Args:
+        nowcast_series: 周度nowcast序列
+        target_series: 月度target序列
+        alignment_mode: 配对模式 ('current_month' 或 'next_month')
+
+    Returns:
+        float: Hit Rate百分比
+    """
+    if alignment_mode == 'current_month':
+        return calculate_current_month_hit_rate(nowcast_series, target_series)
+    else:
+        return calculate_next_month_hit_rate(nowcast_series, target_series)

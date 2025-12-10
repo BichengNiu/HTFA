@@ -32,9 +32,7 @@ class TrainingConfigBuilder:
     def build(
         self,
         input_df: pd.DataFrame,
-        var_industry_map: Dict[str, str],
-        var_frequency_map: Dict[str, str],
-        var_unit_map: Dict[str, str]
+        var_industry_map: Dict[str, str]
     ) -> TrainingConfig:
         """
         构建TrainingConfig对象
@@ -42,8 +40,6 @@ class TrainingConfigBuilder:
         Args:
             input_df: 输入数据DataFrame
             var_industry_map: 变量到行业的映射
-            var_frequency_map: 变量频率映射
-            var_unit_map: 变量单位映射
 
         Returns:
             TrainingConfig对象
@@ -98,6 +94,9 @@ class TrainingConfigBuilder:
             if not var_industry_map:
                 raise ValueError("二次估计法需要提供行业映射")
 
+        # 7.5 获取目标变量配对模式（2025-12新增）
+        target_alignment_mode = self.state.get('dfm_target_alignment_mode', 'next_month')
+
         # 8. 保存DataFrame到临时文件
         temp_data_path = self._save_dataframe_to_temp(input_df)
 
@@ -127,19 +126,13 @@ class TrainingConfigBuilder:
             # 因子数选择配置
             factor_selection_method=factor_selection_method,
             pca_threshold=factor_params.get('pca_threshold'),
+            kaiser_threshold=factor_params.get('kaiser_threshold'),
 
             # 并行计算配置
             enable_parallel=True,
             n_jobs=-1,
             parallel_backend='loky',
             min_variables_for_parallel=5,
-
-            # 变量处理配置
-            enable_detrend=self.state.get('dfm_enable_detrend', False),
-            detrend_method='linear',
-            detrend_variables=None,
-            enable_stationarity_processing=self.state.get('dfm_enable_stationarity_processing', True),
-            stationarity_alpha=0.05,
 
             # 行业映射
             industry_map=var_industry_map,
@@ -149,12 +142,8 @@ class TrainingConfigBuilder:
             industry_k_factors=industry_k_factors_dict,
             second_stage_extra_predictors=second_stage_extra_predictors,
 
-            # 混频配置
-            enable_mixed_frequency=True,
-            var_freq_map=var_frequency_map,
-
-            # 变量单位映射
-            var_unit_map=var_unit_map
+            # 目标变量配对模式（2025-12新增）
+            target_alignment_mode=target_alignment_mode,
         )
 
         return training_config

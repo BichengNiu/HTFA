@@ -592,7 +592,9 @@ def render_dfm_tab(st):
     # 原 with st.expander("详细分析结果", expanded=False):
     st.markdown("**PCA结果分析**")
     pca_results = metadata.get('pca_results_df')
-    # 使用之前获取的k_factors变量
+    # 从metadata中提取k_factors
+    best_params = metadata.get('best_params', {})
+    k_factors = best_params.get('k_factors', 0) if isinstance(best_params, dict) else 0
     k = k_factors if isinstance(k_factors, (int, np.integer)) else 0
     if k <= 0 and pca_results is not None and isinstance(pca_results, pd.DataFrame):
         k = len(pca_results.index)

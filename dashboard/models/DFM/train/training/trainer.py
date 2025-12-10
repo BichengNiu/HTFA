@@ -93,6 +93,11 @@ class DFMTrainer:
                 progress_callback=progress_callback
             )
 
+            # 确保索引排序（pandas切片要求单调索引）
+            if not data.index.is_monotonic_increasing:
+                data = data.sort_index()
+                target_data = data[self.config.target_variable]
+
             # 输出训练配置摘要
             # 根据training_start切分训练数据
             train_data = data.loc[self.config.training_start:self.config.train_end]
@@ -130,8 +135,8 @@ class DFMTrainer:
                 if self.config.factor_selection_method == 'fixed':
                     # 如果使用固定因子数策略，直接使用用户设置的k_factors
                     k_for_selection = self.config.k_factors
-                else:  # cumulative
-                    # 如果使用累积方差贡献策略，计算合理的k_factors用于变量选择
+                else:  # cumulative, kaiser
+                    # 如果使用累积方差贡献策略或Kaiser准则，计算合理的k_factors用于变量选择
                     # 最终的k_factors会在阶段2通过PCA确定
                     k_for_selection = max(2, min(len(predictor_vars) // 2, len(predictor_vars) - 2))
 
@@ -169,13 +174,14 @@ class DFMTrainer:
                 selection_history = []
 
             # 步骤3: 阶段2因子数选择
-            print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}")
+            print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}, kaiser_threshold={self.config.kaiser_threshold or 1.0}")
             k_factors, pca_analysis = select_num_factors(
                 data=data,
                 selected_vars=selected_vars,
                 method=self.config.factor_selection_method,
                 fixed_k=self.config.k_factors,
                 pca_threshold=self.config.pca_threshold or 0.9,
+                kaiser_threshold=self.config.kaiser_threshold or 1.0,
                 train_end=self.config.train_end,
                 progress_callback=progress_callback
             )

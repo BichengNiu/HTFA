@@ -60,6 +60,7 @@ class PrepStateKeys:
     REMOVED_VARS_LOG_OBJ = "removed_vars_log_obj"
     PROCESSED_OUTPUTS = "processed_outputs"
     MAPPING_VALIDATION_RESULT = "mapping_validation_result"
+    VALUE_REPLACEMENT_HISTORY = "value_replacement_history"  # 值替换历史
 
     # ============================================================================
     # 变量转换配置
@@ -171,6 +172,7 @@ class PrepStateManager:
             PrepStateKeys.INDUSTRY_MAP_OBJ,
             PrepStateKeys.REMOVED_VARS_LOG_OBJ,
             PrepStateKeys.VARIABLE_TRANSFORM_DETAILS,
+            PrepStateKeys.VALUE_REPLACEMENT_HISTORY,
         ]
         for key in result_keys:
             self.set(key, None)

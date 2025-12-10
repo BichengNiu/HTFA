@@ -600,7 +600,8 @@ def _process_success_result(st_obj, result: dict, excel_file_like_object) -> boo
                 industry_map=industry_map,
                 mappings=mappings,
                 removed_vars_log=removed_variables_log,
-                transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS)
+                transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS),
+                replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY)
             )
 
             logger.info("导出Excel文件: 数据形状 %s, 映射 %d 条记录",
@@ -681,6 +682,15 @@ def _render_data_preview(st_obj):
     if prepared_data is None:
         return
 
+    # === 值替换功能 ===
+    from dashboard.models.DFM.prep.ui.components.value_replacement import render_value_replacement_section
+    updated_data = render_value_replacement_section(prepared_data)
+    if updated_data is not None:
+        _set_state(PrepStateKeys.PREPARED_DATA_DF, updated_data)
+        st.rerun()
+    # 重新获取可能已更新的数据
+    prepared_data = _get_state(PrepStateKeys.PREPARED_DATA_DF)
+    # === 值替换功能结束 ===
 
     # 按时间由近及远排列（降序）
     display_data = prepared_data.copy()
@@ -1202,7 +1212,8 @@ def _regenerate_export_file(st_obj, transformed_df):
             industry_map=industry_map,
             mappings=mappings,
             removed_vars_log=_get_state(PrepStateKeys.REMOVED_VARS_LOG_OBJ),
-            transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS)
+            transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS),
+            replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY)
         )
 
         processed_outputs = _get_state(PrepStateKeys.PROCESSED_OUTPUTS) or {}
@@ -1298,7 +1309,6 @@ def render_dfm_data_prep_page(st_obj):
 
     # 8. 处理结果区域
     st_obj.markdown("---")
-    st_obj.markdown("#### 处理结果")
 
     # 9. 数据预览（显示最终处理后的数据）
     _render_data_preview(st_obj)

@@ -45,8 +45,9 @@ class TrainingConfig:
     min_variables_after_selection: Optional[int] = None
 
     # 因子数选择配置
-    factor_selection_method: str = 'fixed'  # fixed, cumulative
+    factor_selection_method: str = 'fixed'  # fixed, cumulative, kaiser
     pca_threshold: Optional[float] = 0.9  # cumulative方法的阈值
+    kaiser_threshold: Optional[float] = 1.0  # kaiser方法的特征值阈值
 
     # 并行计算配置（2025-11-08重构后默认启用）
     enable_parallel: bool = True  # 是否启用并行计算（重构后已解决序列化问题）
@@ -69,6 +70,9 @@ class TrainingConfig:
     enable_first_stage_parallel: bool = True  # 是否启用第一阶段（分行业训练）并行计算
     first_stage_n_jobs: int = -1  # 第一阶段并行任务数（-1=所有核心，1=串行）
     min_industries_for_parallel: int = 3  # 启用第一阶段并行的最小行业数
+
+    # 目标变量配对模式（2025-12新增）
+    target_alignment_mode: str = 'next_month'  # 'current_month'(本月) 或 'next_month'(下月)
 
     def __post_init__(self):
         """后初始化验证"""
@@ -96,7 +100,7 @@ class TrainingConfig:
             raise ValueError(f"max_lags必须>=1,当前值: {self.max_lags}")
 
         # 验证因子选择方法
-        valid_methods = ['fixed', 'cumulative']
+        valid_methods = ['fixed', 'cumulative', 'kaiser']
         if self.factor_selection_method not in valid_methods:
             raise ValueError(
                 f"factor_selection_method必须是{valid_methods}之一,"
@@ -143,6 +147,14 @@ class TrainingConfig:
             raise ValueError("first_stage_n_jobs不能为0，使用-1表示所有核心，1表示串行")
         if self.min_industries_for_parallel < 1:
             raise ValueError(f"min_industries_for_parallel必须>=1，当前值: {self.min_industries_for_parallel}")
+
+        # 验证目标配对模式（2025-12）
+        valid_alignment_modes = ['current_month', 'next_month']
+        if self.target_alignment_mode not in valid_alignment_modes:
+            raise ValueError(
+                f"target_alignment_mode必须是{valid_alignment_modes}之一,"
+                f"当前值: {self.target_alignment_mode}"
+            )
 
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':

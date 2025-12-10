@@ -44,6 +44,7 @@ def evaluate_single_variable_removal(
             - validation_end: 验证结束日期
             - max_iterations: 最大迭代次数
             - tolerance: 容差
+            - alignment_mode: 目标配对模式 ('current_month' 或 'next_month')
 
     Returns:
         (变量名, 评估结果字典) 或 (变量名, None) 如果评估失败
@@ -78,7 +79,8 @@ def evaluate_single_variable_removal(
             validation_start=evaluator_config['validation_start'],
             validation_end=evaluator_config['validation_end'],
             max_iterations=evaluator_config['max_iterations'],
-            tolerance=evaluator_config['tolerance']
+            tolerance=evaluator_config['tolerance'],
+            alignment_mode=evaluator_config.get('alignment_mode', 'next_month')
         )
 
         if len(result_tuple) != 9:

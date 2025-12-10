@@ -13,8 +13,9 @@ from dashboard.models.DFM.train.core.models import DFMModelResult, EvaluationMet
 from dashboard.models.DFM.train.core.factor_model import DFMModel
 from dashboard.models.DFM.train.core.prediction import generate_target_forecast
 from dashboard.models.DFM.train.evaluation.metrics import (
-    calculate_next_month_mae,
-    calculate_next_month_hit_rate
+    calculate_aligned_rmse,
+    calculate_aligned_mae,
+    calculate_aligned_hit_rate
 )
 
 logger = get_logger(__name__)
@@ -129,7 +130,8 @@ def evaluate_model_performance(
     target_data: pd.Series,
     train_end: str,
     validation_start: str,
-    validation_end: str
+    validation_end: str,
+    alignment_mode: str = 'next_month'
 ) -> EvaluationMetrics:
     """
     统一的模型性能评估函数
@@ -145,6 +147,7 @@ def evaluate_model_performance(
         train_end: 训练集结束日期（必填）
         validation_start: 验证集开始日期（必填）
         validation_end: 验证集结束日期（必填）
+        alignment_mode: 目标配对模式 ('current_month' 或 'next_month')
 
     Returns:
         EvaluationMetrics: 包含所有评估指标的对象
@@ -172,7 +175,8 @@ def evaluate_model_performance(
                 metrics=metrics,
                 forecast=model_result.forecast_is,
                 actual=train_data,
-                period_type="is"
+                period_type="is",
+                alignment_mode=alignment_mode
             )
 
         # 3. 样本外评估
@@ -181,7 +185,8 @@ def evaluate_model_performance(
                 metrics=metrics,
                 forecast=model_result.forecast_oos,
                 actual=val_data,
-                period_type="oos"
+                period_type="oos",
+                alignment_mode=alignment_mode
             )
 
     except Exception as e:
@@ -196,21 +201,22 @@ def _evaluate_performance(
     metrics: EvaluationMetrics,
     forecast: np.ndarray,
     actual: pd.Series,
-    period_type: str
+    period_type: str,
+    alignment_mode: str = 'next_month'
 ) -> None:
     """
     计算评估指标（统一的样本内/样本外评估逻辑）
 
-    使用统一的"下月配对"评估方式：
-    - RMSE: m月所有周的nowcast与m+1月target配对
-    - MAE: m月最后周五nowcast与m+1月target配对
-    - Hit Rate: m月最后周五nowcast与m+1月target配对
+    根据alignment_mode选择配对评估方式：
+    - next_month: m月nowcast与m+1月target配对（默认）
+    - current_month: m月nowcast与m月target配对
 
     Args:
         metrics: 要更新的EvaluationMetrics对象
         forecast: 预测值数组
         actual: 真实值Series
         period_type: 时间段类型，'is'表示样本内，'oos'表示样本外
+        alignment_mode: 配对模式 ('current_month' 或 'next_month')
     """
     min_len = min(len(forecast), len(actual))
     forecast_aligned = forecast[:min_len]
@@ -221,24 +227,23 @@ def _evaluate_performance(
 
     log_prefix = "IS" if period_type == "is" else "OOS"
 
-    # 使用下月配对RMSE（与变量选择阶段保持一致）
-    from dashboard.models.DFM.train.evaluation.metrics import calculate_next_month_rmse
+    # 使用统一调度函数根据配对模式计算指标
     try:
-        rmse = calculate_next_month_rmse(pred_series, actual_series)
+        rmse = calculate_aligned_rmse(pred_series, actual_series, alignment_mode)
         logger.debug(f"[{log_prefix}] RMSE计算成功: {rmse:.4f}")
     except Exception as e:
         logger.error(f"[{log_prefix}] RMSE计算失败: {e}")
         rmse = np.inf
 
     try:
-        mae = calculate_next_month_mae(pred_series, actual_series)
+        mae = calculate_aligned_mae(pred_series, actual_series, alignment_mode)
         logger.debug(f"[{log_prefix}] MAE计算成功: {mae:.4f}")
     except Exception as e:
         logger.error(f"[{log_prefix}] MAE计算失败: {e}")
         mae = np.inf
 
     try:
-        hit_rate = calculate_next_month_hit_rate(pred_series, actual_series)
+        hit_rate = calculate_aligned_hit_rate(pred_series, actual_series, alignment_mode)
         logger.debug(f"[{log_prefix}] Hit Rate计算成功: {hit_rate:.2f}%")
     except Exception as e:
         logger.error(f"[{log_prefix}] Hit Rate计算失败: {e}")

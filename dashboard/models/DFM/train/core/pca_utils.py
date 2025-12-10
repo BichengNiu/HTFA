@@ -21,24 +21,27 @@ def select_num_factors(
     fixed_k: int,
     pca_threshold: float = 0.9,
     elbow_threshold: float = 0.1,
+    kaiser_threshold: float = 1.0,
     train_end: Optional[str] = None,
     progress_callback: Optional[Callable] = None
 ) -> Tuple[int, Optional[Dict]]:
     """
     因子数选择
 
-    支持三种方法：
+    支持四种方法：
     1. fixed: 固定因子数
     2. cumulative: PCA累积方差贡献率
     3. elbow: Elbow方法（边际方差阈值）
+    4. kaiser: Kaiser准则（特征值>阈值）
 
     Args:
         data: 完整数据 (DataFrame)
         selected_vars: 选中的变量列表
-        method: 选择方法 ('fixed', 'cumulative', 'elbow')
+        method: 选择方法 ('fixed', 'cumulative', 'elbow', 'kaiser')
         fixed_k: 固定因子数（method='fixed'时使用）
         pca_threshold: PCA累积方差阈值（method='cumulative'时使用，默认0.9）
         elbow_threshold: Elbow边际方差阈值（method='elbow'时使用，默认0.1）
+        kaiser_threshold: Kaiser特征值阈值（method='kaiser'时使用，默认1.0）
         train_end: 训练集结束日期（用于标准化参数计算，避免数据泄露）
         progress_callback: 进度回调函数
 
@@ -60,6 +63,12 @@ def select_num_factors(
         ...     fixed_k=None, pca_threshold=0.85
         ... )
         >>> print(f"选定因子数: {k}, 累积方差: {analysis['cumsum_variance'][k-1]:.1%}")
+
+        >>> # Kaiser准则
+        >>> k, analysis = select_num_factors(
+        ...     data, vars, 'kaiser',
+        ...     fixed_k=None, kaiser_threshold=1.0
+        ... )
     """
     logger.info("=" * 60)
     logger.info("因子数选择")
@@ -147,6 +156,17 @@ def select_num_factors(
         marginal_variance = np.diff(explained_variance)
         k = np.argmax(marginal_variance < elbow_threshold) + 1
         logger.info(f"Elbow方法: 阈值={elbow_threshold:.1%}, k={k}")
+
+    # 方法4: Kaiser准则（特征值>阈值）
+    elif method == 'kaiser':
+        eigenvalues = pca.explained_variance_
+        k = np.sum(eigenvalues > kaiser_threshold)
+        if k == 0:
+            k = 1  # 至少选择1个因子
+            logger.warning(f"Kaiser准则: 没有特征值大于{kaiser_threshold}，默认使用k=1")
+        else:
+            logger.info(f"Kaiser准则: 阈值={kaiser_threshold}, k={k}")
+            logger.info(f"特征值分布: {eigenvalues[:min(10, len(eigenvalues))]}")
 
     else:
         raise ValueError(f"未知的因子选择方法: {method}")

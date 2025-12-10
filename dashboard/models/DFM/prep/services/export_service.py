@@ -19,7 +19,8 @@ class ExportService:
     def build_processing_log(
         removed_vars_log: Optional[List[Dict]] = None,
         prepared_data: Optional[pd.DataFrame] = None,
-        transform_details: Optional[Dict] = None
+        transform_details: Optional[Dict] = None,
+        replacement_history: Optional[List[Dict]] = None
     ) -> pd.DataFrame:
         """
         构建处理日志DataFrame
@@ -28,6 +29,7 @@ class ExportService:
             removed_vars_log: 被删除变量的日志列表
             prepared_data: 处理后的数据
             transform_details: 变量转换详情
+            replacement_history: 值替换历史记录
 
         Returns:
             DataFrame: [变量名, 状态, 处理详情]
@@ -35,6 +37,7 @@ class ExportService:
         log_data = []
         removed_vars_log = removed_vars_log or []
         transform_details = transform_details or {}
+        replacement_history = replacement_history or []
 
         # 添加被删除的变量
         for entry in removed_vars_log:
@@ -51,6 +54,14 @@ class ExportService:
                 '变量名': var_name,
                 '状态': '删除',
                 '处理详情': detail_str
+            })
+
+        # 添加值替换记录
+        for h in replacement_history:
+            log_data.append({
+                '变量名': h.get('variable', ''),
+                '状态': '值替换',
+                '处理详情': f"规则: {h.get('rule', '')}, 替换为: {h.get('new_value', '')}, 影响{h.get('affected_count', 0)}行"
             })
 
         # 添加保留的变量
@@ -76,7 +87,8 @@ class ExportService:
         industry_map: Dict[str, str],
         mappings: Dict[str, Any],
         removed_vars_log: Optional[List[Dict]] = None,
-        transform_details: Optional[Dict] = None
+        transform_details: Optional[Dict] = None,
+        replacement_history: Optional[List[Dict]] = None
     ) -> bytes:
         """
         生成导出Excel文件
@@ -87,6 +99,7 @@ class ExportService:
             mappings: 完整映射字典
             removed_vars_log: 被删除变量日志
             transform_details: 变量转换详情
+            replacement_history: 值替换历史记录
 
         Returns:
             bytes: Excel文件字节内容
@@ -125,7 +138,7 @@ class ExportService:
 
         # 构建处理日志
         df_processing_log = ExportService.build_processing_log(
-            removed_vars_log, prepared_data, transform_details
+            removed_vars_log, prepared_data, transform_details, replacement_history
         )
 
         # 写入Excel
