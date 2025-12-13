@@ -414,6 +414,30 @@ def prepare_dfm_data_simple(
 
         processed_data, variable_mapping, transform_log, removal_log = processor.execute()
 
+        # 步骤8: 执行平稳性检验
+        logger.info("\n" + "="*60)
+        logger.info("步骤8/8: 执行平稳性检验...")
+        logger.info("="*60)
+        from dashboard.models.DFM.prep.utils.stationarity_checker import StationarityChecker
+
+        stationarity_check_results = {}
+        try:
+            if processed_data.empty:
+                logger.warning("prepared_data为空，跳过平稳性检验")
+            elif len(processed_data.columns) == 0:
+                logger.warning("prepared_data没有列，跳过平稳性检验")
+            else:
+                stationarity_check_results = StationarityChecker.batch_check_variables(
+                    processed_data,
+                    variables=list(processed_data.columns),
+                    alpha=0.05,
+                    parallel=False
+                )
+                logger.info(f"平稳性检验完成: {len(stationarity_check_results)}个变量")
+        except Exception as e:
+            logger.error(f"平稳性检验执行失败: {e}", exc_info=True)
+            logger.warning("平稳性检验异常，返回空结果字典，数据准备流程继续")
+
         # 构建元数据
         processing_time = (datetime.now() - start_time).total_seconds()
 
@@ -421,6 +445,7 @@ def prepare_dfm_data_simple(
             'variable_mapping': variable_mapping,
             'transform_log': transform_log,
             'removal_log': removal_log,
+            'stationarity_check_results': stationarity_check_results,
             'data_shape': processed_data.shape,
             'time_range': (
                 str(processed_data.index.min()) if not processed_data.empty else None,

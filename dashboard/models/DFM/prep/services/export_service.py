@@ -20,7 +20,8 @@ class ExportService:
         removed_vars_log: Optional[List[Dict]] = None,
         prepared_data: Optional[pd.DataFrame] = None,
         transform_details: Optional[Dict] = None,
-        replacement_history: Optional[List[Dict]] = None
+        replacement_history: Optional[List[Dict]] = None,
+        stationarity_check_results: Optional[Dict[str, Dict]] = None
     ) -> pd.DataFrame:
         """
         构建处理日志DataFrame
@@ -30,14 +31,16 @@ class ExportService:
             prepared_data: 处理后的数据
             transform_details: 变量转换详情
             replacement_history: 值替换历史记录
+            stationarity_check_results: 平稳性检验结果
 
         Returns:
-            DataFrame: [变量名, 状态, 处理详情]
+            DataFrame: [变量名, 状态, 处理详情, 平稳性检验]
         """
         log_data = []
         removed_vars_log = removed_vars_log or []
         transform_details = transform_details or {}
         replacement_history = replacement_history or []
+        stationarity_check_results = stationarity_check_results or {}
 
         # 添加被删除的变量
         for entry in removed_vars_log:
@@ -53,15 +56,27 @@ class ExportService:
             log_data.append({
                 '变量名': var_name,
                 '状态': '删除',
-                '处理详情': detail_str
+                '处理详情': detail_str,
+                '平稳性检验': '-'
             })
 
         # 添加值替换记录
         for h in replacement_history:
+            var_name = h.get('variable', '')
+
+            # 优先使用检验结果，如果没有检验结果则显示"未检验"
+            if var_name in stationarity_check_results:
+                stat_result = stationarity_check_results[var_name]
+                stat_str = stat_result.get('formatted', '未检验')
+            else:
+                logger.warning(f"值替换变量 '{var_name}' 没有检验结果，可能未在prepared_data中")
+                stat_str = '未检验'
+
             log_data.append({
-                '变量名': h.get('variable', ''),
+                '变量名': var_name,
                 '状态': '值替换',
-                '处理详情': f"规则: {h.get('rule', '')}, 替换为: {h.get('new_value', '')}, 影响{h.get('affected_count', 0)}行"
+                '处理详情': f"规则: {h.get('rule', '')}, 替换为: {h.get('new_value', '')}, 影响{h.get('affected_count', 0)}行",
+                '平稳性检验': stat_str
             })
 
         # 添加保留的变量
@@ -73,13 +88,22 @@ class ExportService:
                 else:
                     ops_str = '不处理'
 
+                # 获取平稳性检验结果
+                if col in stationarity_check_results:
+                    stat_result = stationarity_check_results[col]
+                    stat_str = stat_result.get('formatted', '未检验')
+                else:
+                    logger.warning(f"保留变量 '{col}' 没有检验结果，可能检验失败或被跳过")
+                    stat_str = '未检验'
+
                 log_data.append({
                     '变量名': col,
                     '状态': '保留',
-                    '处理详情': ops_str
+                    '处理详情': ops_str,
+                    '平稳性检验': stat_str
                 })
 
-        return pd.DataFrame(log_data, columns=['变量名', '状态', '处理详情'])
+        return pd.DataFrame(log_data, columns=['变量名', '状态', '处理详情', '平稳性检验'])
 
     @staticmethod
     def generate_excel(
@@ -88,7 +112,8 @@ class ExportService:
         mappings: Dict[str, Any],
         removed_vars_log: Optional[List[Dict]] = None,
         transform_details: Optional[Dict] = None,
-        replacement_history: Optional[List[Dict]] = None
+        replacement_history: Optional[List[Dict]] = None,
+        stationarity_check_results: Optional[Dict[str, Dict]] = None
     ) -> bytes:
         """
         生成导出Excel文件
@@ -100,6 +125,7 @@ class ExportService:
             removed_vars_log: 被删除变量日志
             transform_details: 变量转换详情
             replacement_history: 值替换历史记录
+            stationarity_check_results: 平稳性检验结果
 
         Returns:
             bytes: Excel文件字节内容
@@ -138,7 +164,8 @@ class ExportService:
 
         # 构建处理日志
         df_processing_log = ExportService.build_processing_log(
-            removed_vars_log, prepared_data, transform_details, replacement_history
+            removed_vars_log, prepared_data, transform_details, replacement_history,
+            stationarity_check_results
         )
 
         # 写入Excel

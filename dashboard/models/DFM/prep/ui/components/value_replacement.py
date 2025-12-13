@@ -104,7 +104,10 @@ def render_value_replacement_section(prepared_data: pd.DataFrame) -> Optional[pd
     with col2:
         preview_clicked = st.button("预览影响", key="value_replace_preview_btn")
 
-    # 预览结果显示（紧跟在按钮下方）
+    # 显示替换历史表格（紧跟在按钮下方）
+    history_updated_data = _render_replacement_history_inline(prepared_data)
+
+    # 预览结果显示
     if preview_clicked and rule:
         _handle_preview(prepared_data, rule, selected_var)
 
@@ -117,8 +120,7 @@ def render_value_replacement_section(prepared_data: pd.DataFrame) -> Optional[pd
     if apply_clicked and rule:
         updated_data = _handle_apply(prepared_data, rule)
 
-    # 显示替换历史
-    history_updated_data = _render_replacement_history(prepared_data)
+    # 如果历史操作触发了更新，优先返回
     if history_updated_data is not None:
         return history_updated_data
 
@@ -264,17 +266,23 @@ def _handle_preview(prepared_data: pd.DataFrame, rule: ReplacementRule, selected
             max_show = 50
             indices_to_show = result.affected_indices[:max_show]
             preview_df = prepared_data.loc[indices_to_show, [selected_var]].copy()
-            preview_df['替换后'] = result.new_value
+
+            # 处理new_value的类型，确保'NaN'字符串转换为实际的NaN值
+            new_val = np.nan if result.new_value == 'NaN' else result.new_value
+            preview_df['替换后'] = new_val
             preview_df.columns = ['原值', '替换后']
 
             # 格式化时间索引为 年-月-日
             if isinstance(preview_df.index, pd.DatetimeIndex):
                 preview_df.index = preview_df.index.strftime('%Y-%m-%d')
 
+            # 重置索引以避免Arrow序列化问题
+            preview_df.reset_index(drop=True, inplace=True)
+
             if result.affected_count > max_show:
                 st.caption(f"（仅显示前{max_show}条，共{result.affected_count}条）")
 
-            st.dataframe(preview_df, use_container_width=True)
+            st.dataframe(preview_df, width='stretch')
     except ValueError as e:
         st.error(str(e))
 
@@ -313,8 +321,8 @@ def _handle_apply(prepared_data: pd.DataFrame, rule: ReplacementRule) -> Optiona
         return None
 
 
-def _render_replacement_history(prepared_data: pd.DataFrame) -> Optional[pd.DataFrame]:
-    """渲染替换历史记录"""
+def _render_replacement_history_inline(prepared_data: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """渲染替换历史记录（紧跟在应用替换按钮下方）"""
     history = prep_state.get(PrepStateKeys.VALUE_REPLACEMENT_HISTORY) or []
 
     if not history:
@@ -332,9 +340,32 @@ def _render_replacement_history(prepared_data: pd.DataFrame) -> Optional[pd.Data
         }
         for i, h in enumerate(history)
     ])
-    st.dataframe(history_df, hide_index=True, use_container_width=True)
+    st.dataframe(history_df, hide_index=True, width='stretch')
 
-    col1, col2 = st.columns(2)
+    # 使用与应用替换按钮相同的样式，让两个按钮紧挨着
+    st.markdown("""
+    <style>
+    /* 目标：包含secondary按钮的水平块，移除flex间距 */
+    div[data-testid="stHorizontalBlock"]:has(button[data-testid="stBaseButton-secondary"]) {
+        gap: 0 !important;
+        justify-content: flex-start !important;
+    }
+    /* 目标：该水平块内的所有列，设为自适应宽度 */
+    div[data-testid="stHorizontalBlock"]:has(button[data-testid="stBaseButton-secondary"]) > div[data-testid="stColumn"] {
+        width: auto !important;
+        flex: 0 0 auto !important;
+        min-width: 0 !important;
+        padding: 0 !important;
+    }
+    /* 第一列右侧加小间距 */
+    div[data-testid="stHorizontalBlock"]:has(button[data-testid="stBaseButton-secondary"]) > div[data-testid="stColumn"]:first-child {
+        padding-right: 0.5rem !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    col1, col2, _ = st.columns([1, 1, 10])
+
     with col1:
         if st.button("撤销最后一次", key="value_replace_undo"):
             if history:
@@ -362,6 +393,12 @@ def _render_replacement_history(prepared_data: pd.DataFrame) -> Optional[pd.Data
             else:
                 st.warning("没有可恢复的基准数据")
 
+    return None
+
+
+def _render_replacement_history(prepared_data: pd.DataFrame) -> Optional[pd.DataFrame]:
+    """渲染替换历史记录（保留以兼容旧代码）"""
+    # 现在历史记录已在上方显示，此函数仅保留兼容性
     return None
 
 

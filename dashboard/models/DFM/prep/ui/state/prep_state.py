@@ -61,6 +61,7 @@ class PrepStateKeys:
     PROCESSED_OUTPUTS = "processed_outputs"
     MAPPING_VALIDATION_RESULT = "mapping_validation_result"
     VALUE_REPLACEMENT_HISTORY = "value_replacement_history"  # 值替换历史
+    STATIONARITY_CHECK_RESULTS = "stationarity_check_results"  # API层平稳性检验结果
 
     # ============================================================================
     # 变量转换配置

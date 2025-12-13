@@ -106,7 +106,7 @@ def _render_raw_variable_stats_table(st_obj, uploaded_file):
             '结束日期': st.column_config.TextColumn('结束日期', width='medium')
         },
         hide_index=True,
-        use_container_width=True
+        width='stretch'
     )
 
 
@@ -555,6 +555,7 @@ def _process_success_result(st_obj, result: dict, excel_file_like_object) -> boo
     transform_log = result['metadata']['transform_log']
     removed_variables_log = result['metadata']['removal_log']
     mapping_validation = result['metadata'].get('mapping_validation', {})
+    stationarity_check_results = result['metadata'].get('stationarity_check_results', {})
 
     logger.info("准备数据形状: %s", prepared_data.shape if prepared_data is not None else 'None')
     logger.info("移除日志长度: %d", len(removed_variables_log) if removed_variables_log else 0)
@@ -569,6 +570,7 @@ def _process_success_result(st_obj, result: dict, excel_file_like_object) -> boo
     _set_state(PrepStateKeys.INDUSTRY_MAP_OBJ, industry_map)
     _set_state(PrepStateKeys.REMOVED_VARS_LOG_OBJ, removed_variables_log)
     _set_state(PrepStateKeys.MAPPING_VALIDATION_RESULT, mapping_validation)
+    _set_state(PrepStateKeys.STATIONARITY_CHECK_RESULTS, stationarity_check_results)
 
     # 生成导出文件
     processed_outputs = {'excel_file': None}
@@ -601,7 +603,8 @@ def _process_success_result(st_obj, result: dict, excel_file_like_object) -> boo
                 mappings=mappings,
                 removed_vars_log=removed_variables_log,
                 transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS),
-                replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY)
+                replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY),
+                stationarity_check_results=stationarity_check_results
             )
 
             logger.info("导出Excel文件: 数据形状 %s, 映射 %d 条记录",
@@ -700,7 +703,7 @@ def _render_data_preview(st_obj):
     if isinstance(display_data.index, pd.DatetimeIndex):
         display_data.index = display_data.index.strftime('%Y-%m-%d')
 
-    st_obj.dataframe(display_data, use_container_width=True)
+    st_obj.dataframe(display_data, width='stretch')
     st_obj.caption(f"数据形状: {prepared_data.shape[0]} 行 x {prepared_data.shape[1]} 列")
 
 
@@ -850,48 +853,26 @@ def _render_transform_details_expander(st_obj, transform_details: dict):
             st.info("没有变量被转换")
 
 
-def _render_stationarity_test_expander(st_obj, transformed_df: pd.DataFrame):
+def _render_stationarity_test_expander(st_obj, problem_variables: List[Dict]):
     """
-    渲染平稳性检验结果expander
+    仅显示平稳性检验结果（UI层纯显示，不做检验）
 
-    以表格形式展示：变量名、频率、性质、处理、P值、平稳性
-    只显示非平稳和数据不足的变量
+    Args:
+        st_obj: Streamlit对象
+        problem_variables: 后端返回的非平稳变量列表，每项格式：
+            {
+                'variable': str,
+                'frequency': str,
+                'processing': str,
+                'p_value': str,
+                'stationarity': str
+            }
     """
-    from dashboard.explore.analysis.stationarity import run_adf_test
-    from dashboard.models.DFM.utils.text_utils import normalize_text
-
-    if transformed_df is None or transformed_df.empty:
+    if not problem_variables:
         return
 
-    # 获取频率、性质映射和转换详情
-    var_frequency_map = _get_state(PrepStateKeys.VAR_FREQUENCY_MAP_OBJ) or {}
-    var_nature_map = _get_state(PrepStateKeys.VAR_NATURE_MAP_OBJ) or {}
-    transform_details = _get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS) or {}
-
-    # 对所有列进行ADF检验，只收集非平稳和数据不足的
-    problem_vars = []
-    for col in transformed_df.columns:
-        series = transformed_df[col]
-        p_value, is_stationary = run_adf_test(series, alpha=0.05)
-
-        # 跳过平稳的变量
-        if is_stationary == '是':
-            continue
-
-        # 获取频率、性质和处理操作
-        col_normalized = normalize_text(col)
-        freq = var_frequency_map.get(col_normalized, '-')
-        nature = var_nature_map.get(col_normalized, '-')
-        ops = transform_details.get(col, {}).get('operations', [])
-        ops_str = ' -> '.join(ops) if ops else '不处理'
-        p_str = f"{p_value:.4f}" if p_value is not None else '-'
-        # 转换平稳性状态显示
-        stationarity = '数据不足' if is_stationary == '数据不足' else '非平稳'
-
-        problem_vars.append((col, freq, nature, ops_str, p_str, stationarity))
-
-    var_count = len(transformed_df.columns)
-    problem_count = len(problem_vars)
+    var_count = len(_get_state(PrepStateKeys.PREPARED_DATA_DF).columns) if _get_state(PrepStateKeys.PREPARED_DATA_DF) is not None else 0
+    problem_count = len(problem_variables)
 
     with st_obj.expander(f"平稳性检验结果 ({var_count}个变量)", expanded=False):
         if problem_count == 0:
@@ -899,7 +880,14 @@ def _render_stationarity_test_expander(st_obj, transformed_df: pd.DataFrame):
             return
 
         # 构建DataFrame用于展示
-        display_df = pd.DataFrame(problem_vars, columns=['变量名', '频率', '性质', '处理', 'P值', '平稳性'])
+        display_df = pd.DataFrame(problem_variables)
+        display_df = display_df.rename(columns={
+            'variable': '变量名',
+            'frequency': '频率',
+            'processing': '处理',
+            'p_value': 'P值',
+            'stationarity': '平稳性'
+        })
 
         # 使用st.dataframe显示表格
         st.dataframe(
@@ -907,13 +895,12 @@ def _render_stationarity_test_expander(st_obj, transformed_df: pd.DataFrame):
             column_config={
                 '变量名': st.column_config.TextColumn('变量名', width='large'),
                 '频率': st.column_config.TextColumn('频率', width='small'),
-                '性质': st.column_config.TextColumn('性质', width='small'),
                 '处理': st.column_config.TextColumn('处理', width='medium'),
                 'P值': st.column_config.TextColumn('P值', width='small'),
                 '平稳性': st.column_config.TextColumn('平稳性', width='small')
             },
             hide_index=True,
-            use_container_width=True
+            width='stretch'
         )
 
 
@@ -928,11 +915,9 @@ def _render_variable_transform_section(st_obj):
     使用 st.data_editor 显示可编辑的变量转换配置表格
     """
     from dashboard.models.DFM.prep.modules.variable_transformer import (
-        VariableTransformer,
         get_default_transform_config,
         FREQUENCY_PERIOD_MAP
     )
-    from dashboard.models.DFM.utils.text_utils import normalize_text
 
     st_obj.markdown("---")
     st_obj.markdown("#### 变量处理")
@@ -1013,7 +998,7 @@ def _render_variable_transform_section(st_obj):
             )
         },
         hide_index=True,
-        use_container_width=True,
+        width='stretch',
         key="variable_transform_editor",
         num_rows="fixed"
     )
@@ -1075,15 +1060,13 @@ def _render_variable_transform_section(st_obj):
 
 def _apply_variable_transforms(st_obj, config_df):
     """
-    应用变量转换
-
-    始终基于基准数据（开始处理后的原始结果）进行转换，避免累积叠加。
+    应用变量转换和平稳性检验（调用后端服务，UI层只负责显示）
 
     Args:
         st_obj: Streamlit对象
         config_df: 配置DataFrame，包含 {变量名, 性质, 第一次处理, 第二次处理, 第三次处理}
     """
-    from dashboard.models.DFM.prep.modules.variable_transformer import VariableTransformer
+    from dashboard.models.DFM.prep.services.ui_backend_service import UIBackendService
 
     if config_df is None or config_df.empty:
         st_obj.warning("没有选择任何转换操作")
@@ -1095,8 +1078,9 @@ def _apply_variable_transforms(st_obj, config_df):
         st_obj.error("没有可处理的数据，请先点击\"开始处理\"")
         return
 
-    # 获取目标频率
+    # 获取目标频率和频率映射
     target_freq = _get_state(PrepStateKeys.PARAM_TARGET_FREQ, 'W-FRI')
+    var_frequency_map = _get_state(PrepStateKeys.VAR_FREQUENCY_MAP_OBJ) or {}
 
     # 操作名称到代码的映射
     OP_NAME_TO_CODE = {
@@ -1105,17 +1089,16 @@ def _apply_variable_transforms(st_obj, config_df):
         '环比差分': 'diff_1',
         '同比差分': 'diff_yoy'
     }
-    # 注：零值处理已在基础设置中全局配置，变量处理区只配置转换操作
 
-    # 构建转换配置字典
-    transform_config = {}
+    # 构建转换配置列表（格式为后端服务期望的格式）
+    transform_config = []
     for _, row in config_df.iterrows():
         var_name = row['变量名']
         first_op = OP_NAME_TO_CODE.get(row['第一次处理'], 'none')
         second_op = OP_NAME_TO_CODE.get(row['第二次处理'], 'none')
         third_op = OP_NAME_TO_CODE.get(row.get('第三次处理', '不处理'), 'none')
 
-        # 只有非"不处理"的操作才添加
+        # 构建操作序列
         ops = []
         if first_op != 'none':
             ops.append(first_op)
@@ -1124,48 +1107,64 @@ def _apply_variable_transforms(st_obj, config_df):
         if third_op != 'none':
             ops.append(third_op)
 
-        # 只要有任何操作，就添加到配置中
+        # 如果有任何操作，添加到配置
         if ops:
-            transform_config[var_name] = {
-                'zero_method': 'none',  # 零值已在基础设置中全局处理
-                'neg_method': 'none',   # 负值已在基础设置中全局处理
-                'operations': ops
-            }
+            # 转换为单个操作代码（取最后一个操作）
+            operation = ops[-1] if ops else 'none'
+            transform_config.append({
+                'variable': var_name,
+                'operation': operation,
+                'zero_handling': 'none',
+                'negative_handling': 'none'
+            })
 
     if not transform_config:
         st_obj.warning("没有选择任何转换操作")
         return
 
     try:
-        with st_obj.spinner("正在应用变量转换..."):
-            transformer = VariableTransformer(freq=target_freq)
-            transformed_df, transform_details = transformer.transform_dataframe(
-                base_data.copy(),  # 基于基准数据的副本进行转换
-                transform_config
+        with st_obj.spinner("正在应用转换和检验平稳性..."):
+            # 调用后端服务（纯业务逻辑，UI层只负责调用和显示）
+            result = UIBackendService.transform_and_check_stationarity(
+                base_data.copy(),
+                transform_config,
+                target_freq=target_freq,
+                var_frequency_map=var_frequency_map
             )
 
-            # 更新prepared_data
-            _set_state(PrepStateKeys.PREPARED_DATA_DF, transformed_df)
+        if result['status'] != 'success':
+            st_obj.error(f"后端处理失败: {result['message']}")
+            if result['errors']:
+                st_obj.error(f"详细错误: {result['errors']}")
+            return
 
-            # 更新transform_log（保存转换详情供处理结果区域显示）
-            transform_log = _get_state(PrepStateKeys.TRANSFORM_LOG_OBJ) or {}
-            transform_log['variable_transforms'] = transform_details
-            _set_state(PrepStateKeys.TRANSFORM_LOG_OBJ, transform_log)
+        # 获取后端返回的结果
+        transformed_df = result['data']
+        transform_details = result['transform_details']
+        stationarity_results = result['stationarity_results']
+        problem_variables = result['problem_variables']
 
-            # 保存转换详情到单独状态
-            _set_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS, transform_details)
+        # 保存结果到状态
+        _set_state(PrepStateKeys.PREPARED_DATA_DF, transformed_df)
+        _set_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS, transform_details)
+        _set_state('data_prep.ui_stationarity_results', stationarity_results)
 
-            # 重新生成导出文件
-            _regenerate_export_file(st_obj, transformed_df)
+        # 显示转换详情
+        _render_transform_details_expander(st_obj, transform_details)
 
-            # 在应用转换按钮下方显示转换详情expander
-            _render_transform_details_expander(st_obj, transform_details)
+        # 显示平稳性检验结果（UI只负责显示，检验已在后端完成）
+        _render_stationarity_test_expander(st_obj, problem_variables)
 
-            # 显示平稳性检验结果expander
-            _render_stationarity_test_expander(st_obj, transformed_df)
+        # 重新生成导出文件
+        _regenerate_export_file(st_obj, transformed_df)
+
+        st_obj.success("转换和检验完成！")
+
+        if result.get('errors'):
+            st_obj.warning(f"处理过程中有{len(result['errors'])}个错误: {result['errors'][:3]}")
 
     except Exception as e:
-        st_obj.error(f"变量转换失败: {e}")
+        st_obj.error(f"后端服务调用失败: {e}")
         import traceback
         st_obj.text_area("详细错误信息:", traceback.format_exc(), height=150)
 
@@ -1206,6 +1205,15 @@ def _regenerate_export_file(st_obj, transformed_df):
 
         mappings = result['mappings']
 
+        # 获取检验结果（优先使用UI层的结果，否则使用API层的结果）
+        ui_stationarity_results = _get_state('data_prep.ui_stationarity_results') or {}
+        api_stationarity_results = _get_state(PrepStateKeys.STATIONARITY_CHECK_RESULTS) or {}
+
+        # 优先使用UI层的检验结果（UI层在转换后立即检验），回退到API层的结果
+        stationarity_check_results = ui_stationarity_results if ui_stationarity_results else api_stationarity_results
+
+        logger.info(f"检验结果来源: {'UI层(转换后)' if ui_stationarity_results else 'API层(原始数据)'}, 共{len(stationarity_check_results)}个变量")
+
         # 调用 ExportService 生成 Excel 文件
         excel_bytes = ExportService.generate_excel(
             prepared_data=transformed_df,
@@ -1213,7 +1221,8 @@ def _regenerate_export_file(st_obj, transformed_df):
             mappings=mappings,
             removed_vars_log=_get_state(PrepStateKeys.REMOVED_VARS_LOG_OBJ),
             transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS),
-            replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY)
+            replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY),
+            stationarity_check_results=stationarity_check_results
         )
 
         processed_outputs = _get_state(PrepStateKeys.PROCESSED_OUTPUTS) or {}
