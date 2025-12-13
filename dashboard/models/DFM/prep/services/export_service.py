@@ -34,7 +34,7 @@ class ExportService:
             stationarity_check_results: 平稳性检验结果
 
         Returns:
-            DataFrame: [变量名, 状态, 处理详情, 平稳性检验]
+            DataFrame: [变量名, 状态, 处理详情, P值, 平稳性检验（0.05）]
         """
         log_data = []
         removed_vars_log = removed_vars_log or []
@@ -57,7 +57,8 @@ class ExportService:
                 '变量名': var_name,
                 '状态': '删除',
                 '处理详情': detail_str,
-                '平稳性检验': '-'
+                'P值': '-',
+                '平稳性检验（0.05）': '-'
             })
 
         # 添加值替换记录
@@ -67,16 +68,32 @@ class ExportService:
             # 优先使用检验结果，如果没有检验结果则显示"未检验"
             if var_name in stationarity_check_results:
                 stat_result = stationarity_check_results[var_name]
-                stat_str = stat_result.get('formatted', '未检验')
+                p_value = stat_result.get('p_value')
+                status = stat_result.get('status', '未检验')
+
+                # P值列：显示具体数值
+                p_value_str = f"{p_value:.3f}" if p_value is not None else '-'
+
+                # 平稳性检验列：显示平稳/非平稳/数据不足
+                if status == '是':
+                    stationarity_str = '平稳'
+                elif status == '数据不足':
+                    stationarity_str = '数据不足'
+                elif status.startswith('计算失败'):
+                    stationarity_str = status
+                else:
+                    stationarity_str = '非平稳'
             else:
                 logger.warning(f"值替换变量 '{var_name}' 没有检验结果，可能未在prepared_data中")
-                stat_str = '未检验'
+                p_value_str = '-'
+                stationarity_str = '未检验'
 
             log_data.append({
                 '变量名': var_name,
                 '状态': '值替换',
                 '处理详情': f"规则: {h.get('rule', '')}, 替换为: {h.get('new_value', '')}, 影响{h.get('affected_count', 0)}行",
-                '平稳性检验': stat_str
+                'P值': p_value_str,
+                '平稳性检验（0.05）': stationarity_str
             })
 
         # 添加保留的变量
@@ -91,19 +108,35 @@ class ExportService:
                 # 获取平稳性检验结果
                 if col in stationarity_check_results:
                     stat_result = stationarity_check_results[col]
-                    stat_str = stat_result.get('formatted', '未检验')
+                    p_value = stat_result.get('p_value')
+                    status = stat_result.get('status', '未检验')
+
+                    # P值列：显示具体数值
+                    p_value_str = f"{p_value:.3f}" if p_value is not None else '-'
+
+                    # 平稳性检验列：显示平稳/非平稳/数据不足
+                    if status == '是':
+                        stationarity_str = '平稳'
+                    elif status == '数据不足':
+                        stationarity_str = '数据不足'
+                    elif status.startswith('计算失败'):
+                        stationarity_str = status
+                    else:
+                        stationarity_str = '非平稳'
                 else:
                     logger.warning(f"保留变量 '{col}' 没有检验结果，可能检验失败或被跳过")
-                    stat_str = '未检验'
+                    p_value_str = '-'
+                    stationarity_str = '未检验'
 
                 log_data.append({
                     '变量名': col,
                     '状态': '保留',
                     '处理详情': ops_str,
-                    '平稳性检验': stat_str
+                    'P值': p_value_str,
+                    '平稳性检验（0.05）': stationarity_str
                 })
 
-        return pd.DataFrame(log_data, columns=['变量名', '状态', '处理详情', '平稳性检验'])
+        return pd.DataFrame(log_data, columns=['变量名', '状态', '处理详情', 'P值', '平稳性检验（0.05）'])
 
     @staticmethod
     def generate_excel(
