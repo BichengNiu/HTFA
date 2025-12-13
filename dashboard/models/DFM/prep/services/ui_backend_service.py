@@ -78,19 +78,28 @@ class UIBackendService:
                 try:
                     logger.debug(f"  转换: {var_name} <- {operation}")
 
+                    # 提取单个变量的 Series
+                    series = transformed_data[var_name].copy()
+
+                    # 构建操作列表
+                    operations = [operation] if operation and operation != 'none' else []
+
                     # 执行转换
-                    transformed_data, ops = transformer.transform_variable(
-                        transformed_data,
-                        variable_name=var_name,
-                        transformation=operation,
-                        zero_handling=config.get('zero_handling', 'missing'),
-                        negative_handling=config.get('negative_handling', 'missing')
+                    transformed_series = transformer.transform_variable(
+                        series=series,
+                        operations=operations,
+                        zero_method=config.get('zero_handling', 'none'),
+                        neg_method=config.get('negative_handling', 'none')
                     )
 
-                    # 记录转换详情
-                    if ops:
+                    # 更新 DataFrame
+                    transformed_data[var_name] = transformed_series
+
+                    # 记录转换详情（从 transformer 的内部记录中获取）
+                    if var_name in transformer._transform_details:
+                        detail = transformer._transform_details[var_name]
                         transform_details[var_name] = {
-                            'operations': ops,
+                            'operations': detail.get('operations', []),
                             'status': 'success'
                         }
 
