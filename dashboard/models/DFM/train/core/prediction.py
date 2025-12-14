@@ -22,6 +22,7 @@ def generate_target_forecast(
     train_end: str,
     validation_start: str,
     validation_end: str,
+    observation_end: Optional[str] = None,
     progress_callback: Optional[callable] = None
 ) -> DFMModelResult:
     """
@@ -140,6 +141,36 @@ def generate_target_forecast(
                 forecast_oos = None
         else:
             forecast_oos = None
+
+        # 步骤9: 观察期预测
+        if observation_end is not None:
+            obs_end_date = pd.to_datetime(observation_end)
+            val_end_date = pd.to_datetime(validation_end)
+
+            if obs_end_date > val_end_date:
+                obs_start_date = val_end_date + pd.DateOffset(weeks=1)
+                obs_data_filtered = target_data[obs_start_date:obs_end_date]
+
+                if len(obs_data_filtered) > 0:
+                    obs_start_idx = target_data.index.get_loc(obs_data_filtered.index[0])
+                    obs_end_idx = target_data.index.get_loc(obs_data_filtered.index[-1])
+
+                    if obs_start_idx < len(forecast_full) and obs_end_idx < len(forecast_full):
+                        forecast_obs = forecast_full[obs_start_idx:obs_end_idx + 1]
+                        model_result.forecast_obs = forecast_obs
+                        logger.debug(f"观察期预测已生成: {len(forecast_obs)} 个数据点")
+                    else:
+                        logger.warning("观察期索引超出预测范围")
+                        model_result.forecast_obs = None
+                else:
+                    logger.warning("观察期没有有效数据点")
+                    model_result.forecast_obs = None
+            else:
+                logger.info("observation_end <= validation_end，跳过观察期")
+                model_result.forecast_obs = None
+        else:
+            logger.debug("未提供observation_end，跳过观察期预测")
+            model_result.forecast_obs = None
 
         # 更新model_result
         model_result.forecast_is = forecast_is

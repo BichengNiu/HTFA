@@ -6,6 +6,7 @@ UI配置管理
 
 from datetime import date
 from typing import Dict
+import pandas as pd
 
 
 class UIConfig:
@@ -14,7 +15,7 @@ class UIConfig:
     # 日期默认值
     DEFAULT_TRAINING_START = date(2020, 1, 1)
     DEFAULT_VALIDATION_START = date(2025, 7, 1)
-    DEFAULT_VALIDATION_END = date(2025, 12, 31)
+    DEFAULT_OBSERVATION_START = date(2025, 12, 31)  # 观察期开始日期（原validation_end）
 
     # 因子选择策略
     FACTOR_STRATEGIES = {
@@ -87,10 +88,13 @@ class UIConfig:
     @classmethod
     def get_date_defaults(cls) -> Dict[str, date]:
         """获取日期默认值字典"""
+        # 计算验证期结束日期 = 观察期开始日期 - 1周
+        validation_end_timestamp = pd.Timestamp(cls.DEFAULT_OBSERVATION_START) - pd.Timedelta(weeks=1)
+
         return {
             'training_start': cls.DEFAULT_TRAINING_START,
             'validation_start': cls.DEFAULT_VALIDATION_START,
-            'validation_end': cls.DEFAULT_VALIDATION_END
+            'validation_end': validation_end_timestamp.date()  # 观察期开始的前一周
         }
 
     @classmethod

@@ -596,11 +596,17 @@ def _process_success_result(st_obj, result: dict, excel_file_like_object) -> boo
             _set_state(PrepStateKeys.VAR_NATURE_MAP_OBJ, mappings.get('var_nature_map', {}))
             _set_state(PrepStateKeys.VAR_FREQUENCY_MAP_OBJ, mappings.get('var_frequency_map', {}))
 
+            # 平稳性过滤：清除不平稳变量的"一次估计"和"一阶段预测"标记
+            updated_mappings = ExportService.clear_non_stationary_markers(
+                mappings=mappings,
+                stationarity_check_results=stationarity_check_results
+            )
+
             # 生成Excel文件
             processed_outputs['excel_file'] = ExportService.generate_excel(
                 prepared_data=prepared_data,
                 industry_map=industry_map,
-                mappings=mappings,
+                mappings=updated_mappings,
                 removed_vars_log=removed_variables_log,
                 transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS),
                 replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY),
@@ -1216,11 +1222,17 @@ def _regenerate_export_file(st_obj, transformed_df):
 
         logger.info(f"检验结果来源: {'UI层(转换后)' if ui_stationarity_results else 'API层(原始数据)'}, 共{len(stationarity_check_results)}个变量")
 
+        # 平稳性过滤：清除不平稳变量的"一次估计"和"一阶段预测"标记
+        updated_mappings = ExportService.clear_non_stationary_markers(
+            mappings=mappings,
+            stationarity_check_results=stationarity_check_results
+        )
+
         # 调用 ExportService 生成 Excel 文件
         excel_bytes = ExportService.generate_excel(
             prepared_data=transformed_df,
             industry_map=industry_map,
-            mappings=mappings,
+            mappings=updated_mappings,
             removed_vars_log=_get_state(PrepStateKeys.REMOVED_VARS_LOG_OBJ),
             transform_details=_get_state(PrepStateKeys.VARIABLE_TRANSFORM_DETAILS),
             replacement_history=_get_state(PrepStateKeys.VALUE_REPLACEMENT_HISTORY),

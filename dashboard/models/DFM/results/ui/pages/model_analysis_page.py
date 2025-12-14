@@ -462,42 +462,36 @@ def render_dfm_tab(st):
                     f'<b>{target_display_name}</b>: %{{y:.2f}}<extra></extra>'
                 ))
 
-        # 添加训练期淡绿色背景标记（2025-11-15新增）
+        # 添加训练期文字标注（不添加背景色）
         try:
-            # 从metadata获取训练期日期
             training_start = metadata.get('training_start_date')
             train_end = metadata.get('train_end_date')
 
             if training_start and train_end and training_start != 'N/A' and train_end != 'N/A':
-                # 转换为datetime对象
                 train_start_dt = pd.to_datetime(training_start)
                 train_end_dt = pd.to_datetime(train_end)
+                train_mid_dt = train_start_dt + (train_end_dt - train_start_dt) / 2
 
-                # 添加淡绿色半透明背景区域
-                fig.add_vrect(
-                    x0=train_start_dt,
-                    x1=train_end_dt,
-                    fillcolor="rgba(200, 255, 200, 0.3)",
-                    opacity=0.3,
-                    layer="below",
-                    line_width=0,
-                    annotation_text="训练期",
-                    annotation_position="top left",
-                    annotation_font_size=10,
-                    annotation_font_color="gray"
+                # 添加红色加粗文字标注
+                fig.add_annotation(
+                    x=train_mid_dt,
+                    y=1.05,
+                    yref="paper",
+                    text="<b>训练期</b>",
+                    showarrow=False,
+                    font=dict(size=12, color="red"),
+                    xanchor="center"
                 )
-                logger.info(f"已添加训练期标记: {train_start_dt} 到 {train_end_dt}")
+                logger.info(f"已添加训练期文字标注: {train_start_dt} 到 {train_end_dt}")
         except Exception as e:
-            logger.warning(f"添加训练期标记失败: {e}")
+            logger.warning(f"添加训练期文字标注失败: {e}")
 
         # 添加验证期黄色背景标记
         try:
-            # 从metadata获取验证期日期
             validation_start = metadata.get('validation_start_date')
             validation_end = metadata.get('validation_end_date')
 
             if validation_start and validation_end and validation_start != 'N/A' and validation_end != 'N/A':
-                # 转换为datetime对象
                 val_start_dt = pd.to_datetime(validation_start)
                 val_end_dt = pd.to_datetime(validation_end)
 
@@ -508,41 +502,55 @@ def render_dfm_tab(st):
                     fillcolor="yellow",
                     opacity=0.2,
                     layer="below",
-                    line_width=0,
-                    annotation_text="验证期",
-                    annotation_position="top left",
-                    annotation_font_size=10,
-                    annotation_font_color="gray"
+                    line_width=0
+                )
+
+                # 添加红色加粗文字标注（居中）
+                val_mid_dt = val_start_dt + (val_end_dt - val_start_dt) / 2
+                fig.add_annotation(
+                    x=val_mid_dt,
+                    y=1.05,
+                    yref="paper",
+                    text="<b>验证期</b>",
+                    showarrow=False,
+                    font=dict(size=12, color="red"),
+                    xanchor="center"
                 )
                 logger.info(f"已添加验证期标记: {val_start_dt} 到 {val_end_dt}")
         except Exception as e:
             logger.warning(f"添加验证期标记失败: {e}")
 
-        # 添加观察期背景色标记（2025-11-15新增）
+        # 添加观察期背景色标记
         try:
-            # 从metadata获取观察期起始日期
             observation_period_start = metadata.get('observation_period_start')
 
             if observation_period_start and observation_period_start != 'N/A':
-                # 转换为datetime对象
                 observation_start_dt = pd.to_datetime(observation_period_start)
 
                 # 获取图表数据的结束日期
                 if not comparison_df.empty and comparison_df.index.max() > observation_start_dt:
                     data_end_dt = comparison_df.index.max()
 
-                    # 添加淡蓝色半透明背景区域标识观察期
+                    # 添加浅绿色半透明背景区域标识观察期
                     fig.add_vrect(
                         x0=observation_start_dt,
                         x1=data_end_dt,
-                        fillcolor="rgba(200, 230, 255, 0.3)",
-                        opacity=0.3,
+                        fillcolor="rgba(150, 230, 150, 0.4)",
+                        opacity=0.4,
                         layer="below",
-                        line_width=0,
-                        annotation_text="观察期",
-                        annotation_position="top right",
-                        annotation_font_size=10,
-                        annotation_font_color="gray"
+                        line_width=0
+                    )
+
+                    # 添加红色加粗文字标注（居中）
+                    obs_mid_dt = observation_start_dt + (data_end_dt - observation_start_dt) / 2
+                    fig.add_annotation(
+                        x=obs_mid_dt,
+                        y=1.05,
+                        yref="paper",
+                        text="<b>观察期</b>",
+                        showarrow=False,
+                        font=dict(size=12, color="red"),
+                        xanchor="center"
                     )
                     logger.info(f"已添加观察期标记: {observation_start_dt} 到 {data_end_dt}")
         except Exception as e:
@@ -550,7 +558,12 @@ def render_dfm_tab(st):
 
         # 设置图表布局
         fig.update_layout(
-            title=f'周度 {nowcast_display_name} vs. {target_display_name}',
+            title=dict(
+                text=f'周度 {nowcast_display_name} vs. {target_display_name}',
+                x=0.5,
+                xanchor='center',
+                yanchor='top'
+            ),
             xaxis=dict(
                 title="",
                 type='date'
@@ -565,7 +578,7 @@ def render_dfm_tab(st):
             ),
             hovermode='x unified',
             height=500,
-            margin=dict(t=50, b=100, l=50, r=50)
+            margin=dict(t=100, b=100, l=50, r=50)
         )
 
         # 显示图表

@@ -75,9 +75,17 @@ def load_macro_data(uploaded_file, sheet_name: str = '分行业工业增加值�
     try:
         logger.info(f"读取{sheet_name}数据")
 
+        # 处理不同类型的文件输入
+        file_input = uploaded_file
+        if hasattr(uploaded_file, 'getvalue'):
+            file_input = BytesIO(uploaded_file.getvalue())
+        elif hasattr(uploaded_file, 'path'):
+            file_input = uploaded_file.path
+        # 如果是字符串路径，直接使用
+
         # 统一格式读取：第一行是列名，第一列是时间
         df = pd.read_excel(
-            uploaded_file,
+            file_input,
             sheet_name=sheet_name,
             header=0,
             index_col=0,
@@ -193,9 +201,17 @@ def load_overall_industrial_data(uploaded_file, sheet_name: str = '总体工业�
     try:
         logger.info(f"读取{sheet_name}数据")
 
+        # 处理不同类型的文件输入
+        file_input = uploaded_file
+        if hasattr(uploaded_file, 'getvalue'):
+            file_input = BytesIO(uploaded_file.getvalue())
+        elif hasattr(uploaded_file, 'path'):
+            file_input = uploaded_file.path
+        # 如果是字符串路径，直接使用
+
         # 统一格式读取：第一行是列名，第一列是时间
         df = pd.read_excel(
-            uploaded_file,
+            file_input,
             sheet_name=sheet_name,
             header=0,
             index_col=0,

@@ -24,6 +24,11 @@ class EvaluationMetrics:
     is_hit_rate: float = -np.inf
     oos_hit_rate: float = -np.inf
 
+    # 观察期指标
+    obs_rmse: float = np.inf
+    obs_mae: float = np.inf
+    obs_hit_rate: float = -np.inf
+
 
 @dataclass
 class MetricsResult:
@@ -66,6 +71,7 @@ class DFMModelResult:
     # 预测结果
     forecast_is: np.ndarray = None  # 样本内预测
     forecast_oos: np.ndarray = None  # 样本外预测
+    forecast_obs: np.ndarray = None  # 观察期预测
 
     # 训练信息
     converged: bool = False

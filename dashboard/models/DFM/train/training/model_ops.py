@@ -31,6 +31,7 @@ def train_dfm_with_forecast(
     train_end: str,
     validation_start: str,
     validation_end: str,
+    observation_end: Optional[str] = None,
     max_iter: int = 30,
     max_lags: int = 1,
     tolerance: float = 1e-6,
@@ -113,6 +114,7 @@ def train_dfm_with_forecast(
             train_end=train_end,
             validation_start=validation_start,
             validation_end=validation_end,
+            observation_end=observation_end,
             progress_callback=progress_callback
         )
 
@@ -131,6 +133,7 @@ def evaluate_model_performance(
     train_end: str,
     validation_start: str,
     validation_end: str,
+    observation_end: Optional[str] = None,
     alignment_mode: str = 'next_month'
 ) -> EvaluationMetrics:
     """
@@ -188,6 +191,25 @@ def evaluate_model_performance(
                 period_type="oos",
                 alignment_mode=alignment_mode
             )
+
+        # 4. 观察期评估
+        if observation_end is not None and model_result.forecast_obs is not None:
+            val_end_date = pd.to_datetime(validation_end)
+            obs_end_date = pd.to_datetime(observation_end)
+
+            if obs_end_date > val_end_date:
+                obs_start_date = val_end_date + pd.DateOffset(weeks=1)
+                obs_data = target_data.loc[obs_start_date:obs_end_date]
+
+                if len(obs_data) > 0:
+                    _evaluate_performance(
+                        metrics=metrics,
+                        forecast=model_result.forecast_obs,
+                        actual=obs_data,
+                        period_type="obs",
+                        alignment_mode=alignment_mode
+                    )
+                    logger.info(f"观察期评估完成: {len(obs_data)} 个数据点")
 
     except Exception as e:
         logger.error(f"[ModelOps] 评估过程出错: {e}")
@@ -253,10 +275,14 @@ def _evaluate_performance(
         metrics.is_rmse = rmse
         metrics.is_mae = mae
         metrics.is_hit_rate = hit_rate
-    else:
+    elif period_type == "oos":
         metrics.oos_rmse = rmse
         metrics.oos_mae = mae
         metrics.oos_hit_rate = hit_rate
+    elif period_type == "obs":
+        metrics.obs_rmse = rmse
+        metrics.obs_mae = mae
+        metrics.obs_hit_rate = hit_rate
 
     logger.debug(
         f"[{log_prefix}] RMSE={rmse:.4f}, "

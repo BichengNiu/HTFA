@@ -11,6 +11,8 @@ This module provides:
 
 import streamlit as st
 import pandas as pd
+import io
+from pathlib import Path
 from typing import Optional, Tuple
 import logging
 
@@ -68,6 +70,22 @@ def render_unified_file_upload(st_obj) -> Optional[object]:
     # 使用新的UI组件
     file_upload_component = IndustrialFileUploadComponent()
     return file_upload_component.render(st_obj)
+
+
+def load_default_monitoring_data() -> Optional[str]:
+    """
+    获取默认监测分析数据文件路径
+
+    Returns:
+        Optional[str]: 文件路径或None
+    """
+    default_path = Path(__file__).parent.parent.parent.parent / "data" / "监测分析数据库.xlsx"
+
+    if default_path.exists():
+        return str(default_path)
+
+    logger.warning(f"默认数据文件不存在: {default_path}")
+    return None
 
 
 def load_and_cache_data(uploaded_file) -> Tuple[Optional[pd.DataFrame], Optional[pd.DataFrame]]:
@@ -146,10 +164,16 @@ def render_industrial_analysis(st_obj):
     # 1. 统一文件上传（在侧边栏显示）
     uploaded_file = render_unified_file_upload(st_obj)
 
-    # 2. 加载和缓存数据
+    # 2. 如果没有用户上传，加载默认文件
+    if uploaded_file is None:
+        uploaded_file = load_default_monitoring_data()
+        if uploaded_file is not None:
+            st_obj.sidebar.info("已加载默认数据：监测分析数据库.xlsx")
+
+    # 3. 加载和缓存数据
     df_macro, df_weights = load_and_cache_data(uploaded_file)
 
-    # 3. 根据权限过滤Tab
+    # 4. 根据权限过滤Tab
     debug_mode = st_obj.session_state.get("auth.debug_mode", False)
     current_user = st_obj.session_state.get("auth.current_user", None)
 

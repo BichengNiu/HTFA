@@ -65,6 +65,30 @@ class DFMTrainer:
         self.total_evaluations = 0
         self.svd_error_count = 0
 
+    def _detect_observation_end(self, data: pd.DataFrame, validation_end: str) -> Optional[str]:
+        """
+        检测观察期结束日期
+
+        Args:
+            data: 完整数据框
+            validation_end: 验证期结束日期
+
+        Returns:
+            observation_end日期字符串，如果无观察期则返回None
+        """
+        try:
+            val_end_dt = pd.to_datetime(validation_end)
+            data_end_dt = data.index.max()
+
+            if data_end_dt > val_end_dt:
+                return data_end_dt.strftime('%Y-%m-%d')
+            else:
+                logger.info("数据未超出验证期，无观察期")
+                return None
+        except Exception as e:
+            logger.error(f"检测观察期失败: {e}")
+            return None
+
     def train(
         self,
         progress_callback: Optional[Callable[[str], None]] = None,
@@ -97,6 +121,11 @@ class DFMTrainer:
             if not data.index.is_monotonic_increasing:
                 data = data.sort_index()
                 target_data = data[self.config.target_variable]
+
+            # 检测观察期
+            observation_end = self._detect_observation_end(data, self.config.validation_end)
+            if observation_end:
+                logger.info(f"检测到观察期数据，结束日期: {observation_end}")
 
             # 输出训练配置摘要
             # 根据training_start切分训练数据
@@ -199,6 +228,7 @@ class DFMTrainer:
                 train_end=self.config.train_end,
                 validation_start=self.config.validation_start,
                 validation_end=self.config.validation_end,
+                observation_end=observation_end,
                 max_iter=self.config.max_iterations,
                 max_lags=1,
                 tolerance=self.config.tolerance,
@@ -212,7 +242,8 @@ class DFMTrainer:
                 target_data=target_data,
                 train_end=self.config.train_end,
                 validation_start=self.config.validation_start,
-                validation_end=self.config.validation_end
+                validation_end=self.config.validation_end,
+                observation_end=observation_end
             )
 
             # 步骤6: 构建结果（直接调用）

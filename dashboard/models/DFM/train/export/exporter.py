@@ -46,7 +46,8 @@ class TrainingResultExporter:
         Returns:
             文件路径字典 {
                 'final_model_joblib': 模型文件路径,
-                'metadata': 元数据文件路径
+                'metadata': 元数据文件路径,
+                'training_summary': 训练摘要文本文件路径
             }
         """
         logger.info("开始导出训练结果文件")
@@ -76,6 +77,12 @@ class TrainingResultExporter:
         self._export_metadata(result, config, metadata_path, timestamp, prepared_data)
         file_paths['metadata'] = metadata_path
         logger.info(f"元数据文件已导出: {os.path.basename(metadata_path)}")
+
+        # 导出训练摘要文本文件
+        summary_path = os.path.join(output_dir, f'training_summary_{timestamp}.txt')
+        self._export_training_summary(result, config, summary_path, timestamp)
+        file_paths['training_summary'] = summary_path
+        logger.info(f"训练摘要已导出: {os.path.basename(summary_path)}")
 
         # 验证文件
         for file_type, path in file_paths.items():
@@ -115,6 +122,26 @@ class TrainingResultExporter:
         file_size = os.path.getsize(path) / (1024 * 1024)
         logger.debug(f"元数据文件大小: {file_size:.2f} MB")
 
+    def _export_training_summary(self, result, config, path: str, timestamp: str) -> None:
+        """导出训练摘要文本文件"""
+        from dashboard.models.DFM.train.export.training_summary import generate_training_summary
+
+        try:
+            summary_text = generate_training_summary(result, config, timestamp)
+
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(summary_text)
+
+            if not os.path.exists(path):
+                raise IOError(f"训练摘要文件保存失败: {path}")
+
+            file_size = os.path.getsize(path) / 1024
+            logger.debug(f"训练摘要文件大小: {file_size:.2f} KB")
+
+        except Exception as e:
+            logger.error(f"导出训练摘要失败: {e}")
+            raise IOError(f"无法导出训练摘要: {e}") from e
+
     # ========== 元数据构建方法 ==========
 
     def _build_metadata(self, result, config, timestamp: str, prepared_data: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
@@ -130,6 +157,7 @@ class TrainingResultExporter:
             'target_variable': config.target_variable,
             'best_variables': result.selected_variables,
             'N_variables': len(result.selected_variables),  # 显式保存变量数N
+            'initial_selected_indicators': getattr(config, 'selected_indicators', []),  # 保存原始选择的指标列表
 
             # 模型参数
             'best_params': {
@@ -166,6 +194,15 @@ class TrainingResultExporter:
             'is_mae': float(result.metrics.is_mae),
             'oos_mae': float(result.metrics.oos_mae),
         })
+
+        # 观察期指标（如果存在）
+        if result.metrics.obs_rmse != np.inf:
+            metadata.update({
+                'obs_hit_rate': float(result.metrics.obs_hit_rate),
+                'obs_rmse': float(result.metrics.obs_rmse),
+                'obs_mae': float(result.metrics.obs_mae),
+            })
+            logger.info("观察期指标已添加到元数据")
 
         # 因子载荷DataFrame（预测变量）
         metadata['factor_loadings_df'] = self._extract_factor_loadings(result, config)
@@ -221,6 +258,16 @@ class TrainingResultExporter:
 
         # 对齐表格（核心数据）
         metadata['complete_aligned_table'] = self._generate_aligned_table(result, config, metadata)
+
+        # 观察期日期（基于对齐表格计算）
+        observation_period_start, observation_period_end = self._calculate_observation_period(
+            config.validation_end,
+            metadata['complete_aligned_table']
+        )
+        if observation_period_start and observation_period_end:
+            metadata['observation_period_start'] = observation_period_start
+            metadata['observation_period_end'] = observation_period_end
+            logger.info(f"观察期时间段: {observation_period_start} 至 {observation_period_end}")
 
         # 保存完整观测数据矩阵（用于新闻分析的数据发布提取）
         if prepared_data is not None:
@@ -287,6 +334,48 @@ class TrainingResultExporter:
         if not config.validation_start:
             raise ValueError("配置中缺少validation_start字段")
         return config.validation_start
+
+    def _calculate_observation_period(
+        self,
+        validation_end: str,
+        aligned_table: Optional[pd.DataFrame]
+    ) -> tuple[Optional[str], Optional[str]]:
+        """
+        计算观察期起止日期
+
+        Args:
+            validation_end: 验证期结束日期
+            aligned_table: 对齐表格（包含完整时间序列）
+
+        Returns:
+            (observation_start, observation_end) 或 (None, None)
+        """
+        try:
+            if aligned_table is None or aligned_table.empty:
+                logger.warning("aligned_table为空，无法计算观察期")
+                return None, None
+
+            val_end_dt = pd.to_datetime(validation_end)
+            data_end_dt = aligned_table.index.max()
+
+            # 观察期起始 = 验证期结束后的下一周
+            obs_start_dt = val_end_dt + pd.DateOffset(weeks=1)
+
+            # 检查是否有观察期数据
+            if data_end_dt <= val_end_dt:
+                logger.info("数据结束日期不晚于验证期，无观察期")
+                return None, None
+
+            if obs_start_dt > data_end_dt:
+                logger.warning("观察期起始日期晚于数据结束日期，无观察期")
+                return None, None
+
+            # 返回字符串格式
+            return obs_start_dt.strftime('%Y-%m-%d'), data_end_dt.strftime('%Y-%m-%d')
+
+        except Exception as e:
+            logger.error(f"计算观察期失败: {e}")
+            return None, None
 
     def _validate_metadata(self, metadata: Dict) -> None:
         """验证元数据包含所有必需字段"""
@@ -414,7 +503,7 @@ class TrainingResultExporter:
 
     def _collect_nowcast_data(self, result, config) -> Optional[pd.Series]:
         """
-        收集并合并训练期和验证期的Nowcast数据
+        收集并合并训练期、验证期和观察期的Nowcast数据
 
         Args:
             result: 训练结果
@@ -425,6 +514,7 @@ class TrainingResultExporter:
         """
         forecast_is = None
         forecast_oos = None
+        forecast_obs = None
 
         if result.model_result:
             if hasattr(result.model_result, 'forecast_is'):
@@ -434,6 +524,10 @@ class TrainingResultExporter:
             if hasattr(result.model_result, 'forecast_oos'):
                 forecast_oos = result.model_result.forecast_oos
                 logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
+
+            if hasattr(result.model_result, 'forecast_obs'):
+                forecast_obs = result.model_result.forecast_obs
+                logger.info(f"forecast_obs类型: {type(forecast_obs)}, 长度: {len(forecast_obs) if forecast_obs is not None else None}")
 
         is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
         oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
@@ -453,6 +547,16 @@ class TrainingResultExporter:
             logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
         else:
             logger.warning("无法生成验证期Nowcast序列")
+
+        # 添加观察期数据
+        if forecast_obs is not None:
+            obs_index = self._get_observation_index(config)
+            if obs_index is not None and len(obs_index) == len(forecast_obs):
+                obs_series = pd.Series(forecast_obs, index=obs_index, name='Nowcast')
+                nowcast_series_list.append(obs_series)
+                logger.info(f"观察期数据: {len(obs_series)} 个点，时间范围 {obs_index.min()} 到 {obs_index.max()}")
+            else:
+                logger.warning("无法生成观察期Nowcast序列")
 
         if len(nowcast_series_list) == 0:
             logger.warning("无法获取Nowcast数据")
@@ -666,6 +770,62 @@ class TrainingResultExporter:
 
         except Exception as e:
             logger.error(f"获取{period_name}日期索引失败: {e}")
+            return None
+
+    def _get_observation_index(self, config) -> Optional[pd.DatetimeIndex]:
+        """
+        获取观察期的日期索引
+
+        Args:
+            config: 训练配置
+
+        Returns:
+            观察期的日期索引，如果无法获取则返回None
+        """
+        try:
+            if not hasattr(config, 'data_path') or not config.data_path:
+                return None
+
+            if not hasattr(config, 'validation_end') or not config.validation_end:
+                logger.warning("config缺少validation_end字段")
+                return None
+
+            # 读取数据文件
+            data = self._read_data_file(config.data_path)
+
+            if not isinstance(data.index, pd.DatetimeIndex):
+                try:
+                    data.index = pd.to_datetime(data.index)
+                except Exception:
+                    logger.warning("无法将数据索引转换为DatetimeIndex")
+                    return None
+
+            # 计算观察期起始和结束日期
+            val_end_dt = pd.to_datetime(config.validation_end)
+            obs_start_dt = val_end_dt + pd.DateOffset(weeks=1)
+            data_end_dt = data.index.max()
+
+            # 检查是否有观察期
+            if data_end_dt <= val_end_dt:
+                logger.info("数据结束日期不晚于验证期，无观察期")
+                return None
+
+            if obs_start_dt > data_end_dt:
+                logger.warning("观察期起始日期晚于数据结束日期，无观察期")
+                return None
+
+            # 获取观察期日期索引
+            obs_index = data.index[(data.index >= obs_start_dt) & (data.index <= data_end_dt)]
+
+            if len(obs_index) == 0:
+                logger.warning(f"观察期 {obs_start_dt} 到 {data_end_dt} 没有数据")
+                return None
+
+            logger.debug(f"获取观察期日期索引成功: {len(obs_index)} 个日期，范围 {obs_index.min()} 到 {obs_index.max()}")
+            return obs_index
+
+        except Exception as e:
+            logger.error(f"获取观察期日期索引失败: {e}")
             return None
 
     def _prepare_r2_calculation_data(

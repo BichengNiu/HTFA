@@ -839,12 +839,15 @@ def render_dfm_model_training_page(st_instance):
                     # 训练开始日期默认为数据的第一期
                     training_start_date = data_first_date
                     validation_start_date = UIConfig.DEFAULT_VALIDATION_START
-                    validation_end_date = UIConfig.DEFAULT_VALIDATION_END
+                    observation_start_date = UIConfig.DEFAULT_OBSERVATION_START
+
+                    # 计算验证期结束日期 = 观察期开始日期 - 1周
+                    validation_end_timestamp = pd.Timestamp(observation_start_date) - pd.Timedelta(weeks=1)
 
                     return {
                         'training_start': training_start_date,       # 训练开始日：默认为数据的开始日期
                         'validation_start': validation_start_date,   # 验证开始日：使用配置默认值
-                        'validation_end': validation_end_date        # 验证结束日：使用配置默认值
+                        'validation_end': validation_end_timestamp.date()  # 验证结束日：观察期开始的前一周
                     }
                 else:
                     return static_defaults
@@ -876,9 +879,14 @@ def render_dfm_model_training_page(st_instance):
                 if current_validation_start is None:
                     _state.set('dfm_validation_start_date', date_defaults['validation_start'])
 
-                current_validation_end = _state.get('dfm_validation_end_date')
-                if current_validation_end is None:
-                    _state.set('dfm_validation_end_date', date_defaults['validation_end'])
+                # 初始化观察期开始日期（基于validation_end推算）
+                current_observation_start = _state.get('dfm_observation_start_date')
+                if current_observation_start is None:
+                    # 默认观察期开始日期 = 验证期结束日期 + 1周
+                    default_obs_start_timestamp = pd.Timestamp(date_defaults['validation_end']) + pd.Timedelta(weeks=1)
+                    _state.set('dfm_observation_start_date', default_obs_start_timestamp.date())
+
+                # validation_end会在UI输入部分自动计算，这里不需要初始化
 
                 # 简化数据范围信息
                 data_start = data_df.index.min().strftime('%Y-%m-%d')
@@ -903,13 +911,18 @@ def render_dfm_model_training_page(st_instance):
         )
         _state.set('dfm_validation_start_date', validation_start_value)
 
-        # 3. 验证期结束日期
-        validation_end_value = st_instance.date_input(
-            "验证期结束日期 (Validation End Date)",
-            value=_state.get('dfm_validation_end_date', date_defaults['validation_end']),
-            key='dfm_validation_end_date_input',
-            help="选择验证期结束日期。默认为数据的最后一期。"
+        # 3. 观察期开始日期
+        observation_start_value = st_instance.date_input(
+            "观察期开始日期 (Observation Start Date)",
+            value=_state.get('dfm_observation_start_date', date_defaults['validation_end']),
+            key='dfm_observation_start_date_input',
+            help="选择观察期开始日期。验证期结束日期将自动设置为该日期的前一周。"
         )
+        _state.set('dfm_observation_start_date', observation_start_value)
+
+        # 自动计算验证期结束日期 = 观察期开始日期 - 1周
+        validation_end_timestamp = pd.Timestamp(observation_start_value) - pd.Timedelta(weeks=1)
+        validation_end_value = validation_end_timestamp.date()
         _state.set('dfm_validation_end_date', validation_end_value)
 
     with col2_factor_core:
@@ -1466,7 +1479,7 @@ def render_dfm_model_training_page(st_instance):
             if isinstance(training_results, dict) and training_results:
                 print(f"[UI状态检查] 处理字典格式结果，包含 {len(training_results)} 个条目")
 
-                target_files = ['final_model_joblib', 'metadata']
+                target_files = ['final_model_joblib', 'metadata', 'training_summary']
                 available_files = []
 
                 for file_key in target_files:

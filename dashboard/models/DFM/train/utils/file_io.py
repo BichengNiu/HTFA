@@ -42,13 +42,13 @@ def read_data_file(
     file_suffix = file_path.suffix.lower()
 
     if file_suffix in ['.xlsx', '.xls']:
-        return pd.read_excel(
+        df = pd.read_excel(
             str(file_path),
             index_col=index_col,
             parse_dates=parse_dates
         )
     elif file_suffix == '.csv':
-        return pd.read_csv(
+        df = pd.read_csv(
             str(file_path),
             index_col=index_col,
             parse_dates=parse_dates
@@ -57,6 +57,13 @@ def read_data_file(
         raise ValueError(
             f"不支持的文件格式: {file_suffix}，仅支持 .xlsx, .xls, .csv"
         )
+
+    # 确保DatetimeIndex按升序排列（关键修复：避免切片失败）
+    if isinstance(df.index, pd.DatetimeIndex):
+        if not df.index.is_monotonic_increasing:
+            df = df.sort_index()
+
+    return df
 
 
 __all__ = ['read_data_file']

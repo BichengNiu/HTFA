@@ -6,6 +6,8 @@
 
 import streamlit as st
 import pandas as pd
+import io
+from pathlib import Path
 from typing import Optional, Any
 import logging
 
@@ -52,6 +54,13 @@ class IndustrialRenderer(BaseRenderer):
                 help="支持上传包含多个sheet的Excel文件"
             )
 
+            # 如果没有用户上传，尝试加载默认文件
+            if uploaded_file is None:
+                default_file = self._load_default_data_file()
+                if default_file is not None:
+                    uploaded_file = default_file
+                    st.info("已加载默认数据：经济指标数据库.xlsx")
+
             if uploaded_file:
                 # 检查是否需要重新处理
                 if self._should_reprocess_file(uploaded_file):
@@ -62,6 +71,23 @@ class IndustrialRenderer(BaseRenderer):
                 self._render_data_status_panel()
 
             return uploaded_file
+
+    def _load_default_data_file(self) -> Optional[io.BytesIO]:
+        """加载默认数据文件
+
+        Returns:
+            Optional[io.BytesIO]: 文件对象或None
+        """
+        default_path = Path(__file__).parent.parent.parent.parent.parent / "data" / "经济指标数据库.xlsx"
+
+        if default_path.exists():
+            with open(default_path, 'rb') as f:
+                file_obj = io.BytesIO(f.read())
+                file_obj.name = "经济指标数据库.xlsx"
+                return file_obj
+
+        logger.warning(f"默认数据文件不存在: {default_path}")
+        return None
 
     def render_main_content(self):
         """渲染主内容区域"""

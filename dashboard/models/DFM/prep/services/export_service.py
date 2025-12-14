@@ -16,6 +16,55 @@ class ExportService:
     """导出服务类"""
 
     @staticmethod
+    def clear_non_stationary_markers(
+        mappings: Dict[str, Any],
+        stationarity_check_results: Dict[str, Dict]
+    ) -> Dict[str, Any]:
+        """
+        清除不平稳变量的"一次估计"和"一阶段预测"标记
+
+        对于标记为"一次估计=是"或"一阶段预测=是"但不平稳的变量，
+        将其标记替换为空值。
+
+        Args:
+            mappings: 映射字典（包含single_stage_map和first_stage_pred_map）
+            stationarity_check_results: 平稳性检验结果
+
+        Returns:
+            更新后的mappings字典（深拷贝）
+        """
+        import copy
+        updated_mappings = copy.deepcopy(mappings)
+
+        single_stage_map = updated_mappings.get('single_stage_map', {})
+        first_stage_pred_map = updated_mappings.get('first_stage_pred_map', {})
+
+        cleared_vars = []
+
+        # 检查所有标记为"是"的变量
+        all_marked_vars = set(single_stage_map.keys()) | set(first_stage_pred_map.keys())
+
+        for var in all_marked_vars:
+            stat_result = stationarity_check_results.get(var, {})
+            is_stationary = stat_result.get('is_stationary', True)
+
+            if not is_stationary:
+                # 清除标记
+                if var in single_stage_map:
+                    single_stage_map[var] = ''
+                if var in first_stage_pred_map:
+                    first_stage_pred_map[var] = ''
+                cleared_vars.append(var)
+
+        if cleared_vars:
+            logger.info(f"平稳性过滤: 清除 {len(cleared_vars)} 个不平稳变量的标记: {cleared_vars}")
+
+        updated_mappings['single_stage_map'] = single_stage_map
+        updated_mappings['first_stage_pred_map'] = first_stage_pred_map
+
+        return updated_mappings
+
+    @staticmethod
     def build_processing_log(
         removed_vars_log: Optional[List[Dict]] = None,
         prepared_data: Optional[pd.DataFrame] = None,
@@ -208,7 +257,6 @@ class ExportService:
                 '一阶段预测': dfm_first_stage_pred_map.get(indicator, ''),
                 '一阶段目标': dfm_first_stage_target_map.get(indicator, ''),
                 '二阶段目标': dfm_second_stage_target_map.get(indicator, ''),
-                '状态': log_info.get('状态', ''),
                 '处理详情': log_info.get('处理详情', ''),
                 'P值': log_info.get('P值', ''),
                 '平稳性检验（0.05）': log_info.get('平稳性检验（0.05）', '')
@@ -218,7 +266,7 @@ class ExportService:
             unified_mapping_data,
             columns=['Indicator', 'Industry', 'Frequency', 'Unit', 'Nature',
                      '一次估计', '一阶段预测', '一阶段目标', '二阶段目标',
-                     '状态', '处理详情', 'P值', '平稳性检验（0.05）']
+                     '处理详情', 'P值', '平稳性检验（0.05）']
         )
 
         # 写入Excel
