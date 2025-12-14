@@ -141,7 +141,7 @@ class StationarityAnalysisComponent(TimeSeriesAnalysisComponent):
 
         # 如果results是DataFrame，直接显示
         if isinstance(results, pd.DataFrame):
-            st_obj.dataframe(results, use_container_width=True)
+            st_obj.dataframe(results, width='stretch')
         else:
             # 如果是字典格式，按原来的方式处理
             result_data = []
@@ -166,7 +166,7 @@ class StationarityAnalysisComponent(TimeSeriesAnalysisComponent):
                         results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
                         results_df[col] = results_df[col].round(4)
 
-                st_obj.dataframe(results_df, use_container_width=True)
+                st_obj.dataframe(results_df, width='stretch')
 
         # 显示处理后的数据预览
         if processed_data_dict:
@@ -232,7 +232,7 @@ class StationarityAnalysisComponent(TimeSeriesAnalysisComponent):
                         st_obj.info(f"显示数据形状: {display_df.shape} | 时间戳列(第一列): {time_columns[0] if time_columns else '无'}")
 
                         # 显示选中变量的数据
-                        st_obj.dataframe(display_df.head(20), use_container_width=True)
+                        st_obj.dataframe(display_df.head(20), width='stretch')
 
                         # 生成带时间戳的文件名
                         from datetime import datetime

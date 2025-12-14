@@ -109,7 +109,7 @@ def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
         selected_target_month = _render_parameter_section(st_module)
 
         # 执行按钮和结果渲染
-        if st_module.button("执行新闻分析", type="primary", use_container_width=True, key="execute_news_analysis_btn"):
+        if st_module.button("执行新闻分析", type="primary", width='stretch', key="execute_news_analysis_btn"):
             result = _execute_analysis(st_module, model_file, metadata_file, selected_target_month)
             # 如果分析成功，直接渲染结果，不使用rerun
             if result and result.get('returncode') == 0:
@@ -327,7 +327,7 @@ def _render_data_flow_table(st_module, result):
                 })
 
             df = pd.DataFrame(release_data)
-            st_module.dataframe(df, use_container_width=True, hide_index=True)
+            st_module.dataframe(df, width='stretch', hide_index=True)
         else:
             st_module.caption("无发布数据")
 
@@ -412,7 +412,7 @@ def _render_summary_cards(st_module, result):
 
         industry_df = pd.DataFrame(industry_data)
         industry_df = industry_df.sort_values(by='总影响', key=abs, ascending=False)
-        st_module.dataframe(industry_df, use_container_width=True, hide_index=True)
+        st_module.dataframe(industry_df, width='stretch', hide_index=True)
 
 
 def _render_download_section(st_module, result):
@@ -433,7 +433,7 @@ def _render_download_section(st_module, result):
                 data=impacts_data,
                 file_name=os.path.basename(impacts_path) if impacts_path else 'data_release_impacts.csv',
                 mime="text/csv",
-                use_container_width=True,
+                width='stretch',
                 key="download_impacts_csv"
             )
         else:
@@ -448,7 +448,7 @@ def _render_download_section(st_module, result):
                 data=contributions_data,
                 file_name=os.path.basename(contributions_path) if contributions_path else 'contributions_decomposition.csv',
                 mime="text/csv",
-                use_container_width=True,
+                width='stretch',
                 key="download_contributions_csv"
             )
         else:

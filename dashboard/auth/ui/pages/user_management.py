@@ -108,7 +108,7 @@ class UserManagementPage:
             # 显示数据表格
             st.dataframe(
                 df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
                 column_config={
                     "ID": st.column_config.NumberColumn("ID", width="small"),
@@ -363,10 +363,10 @@ class UserManagementPage:
             col_submit, col_cancel = st.columns(2)
             
             with col_submit:
-                submitted = st.form_submit_button("保存修改", type="primary", use_container_width=True)
+                submitted = st.form_submit_button("保存修改", type="primary", width='stretch')
             
             with col_cancel:
-                reset_clicked = st.form_submit_button("重置", use_container_width=True)
+                reset_clicked = st.form_submit_button("重置", width='stretch')
                 if reset_clicked:
                     # 设置重置标志，下次渲染时将使用新的表单key来重置表单
                     st.session_state[reset_key] = True
@@ -572,7 +572,7 @@ class UserManagementPage:
                 
                 st.dataframe(
                     pd.DataFrame(today_data), 
-                    use_container_width=True, 
+                    width='stretch', 
                     hide_index=True
                 )
             else:

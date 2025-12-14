@@ -690,6 +690,8 @@ def _render_data_preview(st_obj):
     updated_data = render_value_replacement_section(prepared_data)
     if updated_data is not None:
         _set_state(PrepStateKeys.PREPARED_DATA_DF, updated_data)
+        # 重新生成导出文件以包含替换后的数据
+        _regenerate_export_file(st_obj, updated_data)
         st.rerun()
     # 重新获取可能已更新的数据
     prepared_data = _get_state(PrepStateKeys.PREPARED_DATA_DF)

@@ -201,7 +201,7 @@ class UnifiedDataUploadComponent(DataInputComponent):
                     # 显示数据预览
                     if kwargs.get('show_preview', True):
                         st_obj.markdown("**数据预览：**")
-                        st_obj.dataframe(df.head(10), use_container_width=True)
+                        st_obj.dataframe(df.head(10), width='stretch')
 
                     return df
                 elif df is not None and df.empty:
@@ -277,7 +277,7 @@ class UnifiedDataUploadComponent(DataInputComponent):
             # 显示数据预览
             if kwargs.get('show_preview', True):
                 st_obj.markdown("**数据预览：**")
-                st_obj.dataframe(selected_data.head(10), use_container_width=True)
+                st_obj.dataframe(selected_data.head(10), width='stretch')
 
             return selected_data
 

@@ -380,7 +380,7 @@ class VariableSelectionComponent(DFMComponent):
                 if st_obj.button("取消全行业",
                                 key='btn_dfm_deselect_all_industries',
                                 help="点击取消所有已选中的行业",
-                                use_container_width=True):
+                                width='stretch'):
                     old_states = self._get_state('dfm_industry_checkbox_states', {})
                     new_states = {industry: False for industry in filtered_industries}
 
@@ -398,7 +398,7 @@ class VariableSelectionComponent(DFMComponent):
                 if st_obj.button("选择全行业",
                                 key='btn_dfm_select_all_industries',
                                 help="点击选择所有行业",
-                                use_container_width=True):
+                                width='stretch'):
                     old_states = self._get_state('dfm_industry_checkbox_states', {})
                     new_states = {industry: True for industry in filtered_industries}
 
@@ -414,7 +414,7 @@ class VariableSelectionComponent(DFMComponent):
                 if st_obj.button("[LOADING] 重置",
                                 key='btn_dfm_reset_industries',
                                 help="重置为默认状态（全选）",
-                                use_container_width=True):
+                                width='stretch'):
                     old_states = self._get_state('dfm_industry_checkbox_states', {})
                     reset_states = {industry: True for industry in filtered_industries}
 

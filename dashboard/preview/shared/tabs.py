@@ -179,7 +179,7 @@ def render_statistics_summary(stats, st_module):
             stats['industry_stats'],
             ['行业名称', '指标数量']
         )
-        st_module.dataframe(industry_df, use_container_width=True, hide_index=True)
+        st_module.dataframe(industry_df, width='stretch', hide_index=True)
 
     # 渲染类型统计
     with col2:
@@ -188,7 +188,7 @@ def render_statistics_summary(stats, st_module):
             stats['type_stats'],
             ['指标类型', '指标数量']
         )
-        st_module.dataframe(type_df, use_container_width=True, hide_index=True)
+        st_module.dataframe(type_df, width='stretch', hide_index=True)
 
     # 渲染频率统计
     with col3:
@@ -198,7 +198,7 @@ def render_statistics_summary(stats, st_module):
                 stats['frequency_stats'],
                 ['数据频率', '指标数量']
             )
-            st_module.dataframe(frequency_df, use_container_width=True, hide_index=True)
+            st_module.dataframe(frequency_df, width='stretch', hide_index=True)
         else:
             st_module.warning("无频率数据")
 
@@ -234,7 +234,7 @@ def render_indicator_details(indicator_details, st_module):
     detailed_df.insert(0, '序号', range(1, len(detailed_df) + 1))
 
     # 显示表格（隐藏默认index）
-    st_module.dataframe(detailed_df, use_container_width=True, hide_index=True)
+    st_module.dataframe(detailed_df, width='stretch', hide_index=True)
 
     # 下载指标详情按钮
     buffer = io.BytesIO()
@@ -429,7 +429,7 @@ def display_time_series_tab(st_module, frequency):
                                     unit=unit,
                                     indicator_type=ind_type
                                 )
-                                st_module.plotly_chart(fig, use_container_width=True)
+                                st_module.plotly_chart(fig, width='stretch')
                             except Exception as e:
                                 st_module.error(f"为指标 '{indicator}' 生成图表时出错: {e}")
                     col_idx += 1

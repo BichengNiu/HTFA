@@ -48,7 +48,8 @@ def infer_series_frequency(series: pd.Series) -> str:
             if freq.startswith('Q'):
                 logger.debug(f"识别为Quarterly（pandas推断: {freq}）")
                 return 'Quarterly'
-            elif freq.startswith('M') or freq.startswith('ME') or freq.startswith('MS'):
+            elif freq.startswith('M') or freq.startswith('ME') or freq.startswith('MS') or freq.startswith('WOM'):
+                # WOM-*表示Week Of Month（如WOM-4FRI=每月第4个星期五），应识别为Monthly
                 logger.debug(f"识别为Monthly（pandas推断: {freq}）")
                 return 'Monthly'
             elif freq.startswith('W'):
@@ -72,7 +73,7 @@ def infer_series_frequency(series: pd.Series) -> str:
 
         # 使用中位数而不是均值，更robust
         median_diff = diffs.median()
-        median_days = median_diff.days
+        median_days = abs(median_diff.days)  # 取绝对值处理倒序数据
 
         logger.debug(f"序列长度: {len(series)}, 中位数间隔: {median_days}天")
 
@@ -535,9 +536,38 @@ def align_multiple_series_frequencies(
     logger.info(f"[频率对齐] 需要对齐: {needs_alignment}, 唯一频率: {unique_freqs}")
 
     if not needs_alignment:
-        # 不需要对齐，直接返回
-        logger.info("[频率对齐] 频率一致，无需对齐")
-        return df_work
+        # 频率一致，但对于月度/季度/年度数据，仍需检查时间点是否对齐
+        if len(unique_freqs) == 1 and unique_freqs[0] in ['Monthly', 'Quarterly', 'Annual']:
+            target_freq = unique_freqs[0]
+            logger.info(f"[频率对齐] 频率相同但为{target_freq}，检查时间点对齐性")
+
+            # 检查各序列的有效日期是否有重叠
+            valid_dates_list = []
+            for col in numeric_cols:
+                valid_dates = df_work[col].dropna().index
+                if len(valid_dates) > 0:
+                    valid_dates_list.append(set(valid_dates))
+
+            # 计算重叠日期
+            if len(valid_dates_list) > 1:
+                overlap = set.intersection(*valid_dates_list)
+                overlap_ratio = len(overlap) / max(len(vd) for vd in valid_dates_list)
+                logger.info(f"[频率对齐] 时间点重叠比例: {overlap_ratio:.2%} ({len(overlap)}/{max(len(vd) for vd in valid_dates_list)})")
+
+                # 如果重叠率低于50%，强制对齐到月末/季末/年末
+                if overlap_ratio < 0.5:
+                    logger.info(f"[频率对齐] 重叠率过低，强制重采样到{target_freq}期末")
+                    # 继续执行对齐流程
+                else:
+                    logger.info("[频率对齐] 时间点已对齐，无需重采样")
+                    return df_work
+            else:
+                logger.info("[频率对齐] 只有一个序列，无需检查时间点对齐")
+                return df_work
+        else:
+            # 不需要对齐，直接返回
+            logger.info("[频率对齐] 频率一致，无需对齐")
+            return df_work
 
     # 确定目标频率（选择最低频率以避免信息丢失）
     if unique_freqs:

@@ -522,9 +522,15 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     st_obj.caption(f"Radius: {radius}")
 
         # 显示结果表格
+        # 转换混合类型列为字符串以避免Arrow序列化错误
+        display_results = final_results.copy()
+        for col in ['DTW距离', '对齐路径长度', '标准化DTW距离']:
+            if col in display_results.columns:
+                display_results[col] = display_results[col].astype(str)
+
         st_obj.dataframe(
-            final_results,
-            use_container_width=True,
+            display_results,
+            width='stretch',
             hide_index=True
         )
 
@@ -872,7 +878,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             )
 
             # 显示图表
-            st_obj.plotly_chart(fig, use_container_width=True)
+            st_obj.plotly_chart(fig, width='stretch')
 
         except Exception as e:
             error_msg = f"绘制DTW路径图失败: {str(e)}"

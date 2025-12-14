@@ -177,7 +177,7 @@ class DataValidationComponent(DataInputComponent):
                 {'列名': col, '类型': dtype} 
                 for col, dtype in validation_details['data_types'].items()
             ])
-            st_obj.dataframe(type_df, use_container_width=True)
+            st_obj.dataframe(type_df, width='stretch')
         
         # 缺失值信息
         if validation_details['missing_values']:
@@ -193,7 +193,7 @@ class DataValidationComponent(DataInputComponent):
             ])
             
             if not missing_df.empty:
-                st_obj.dataframe(missing_df, use_container_width=True)
+                st_obj.dataframe(missing_df, width='stretch')
             else:
                 st_obj.success("[SUCCESS] 无缺失值")
         

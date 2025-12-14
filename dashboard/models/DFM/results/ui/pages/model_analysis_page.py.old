@@ -257,7 +257,7 @@ def plot_factor_evolution(factor_df: pd.DataFrame, title: str = "因子时间序
         margin=dict(t=50, b=50, l=50, r=50)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 def plot_loadings_heatmap(loadings_df: pd.DataFrame, title: str = "因子载荷矩阵 (Lambda)", cluster_vars: bool = True):
     """
@@ -325,7 +325,7 @@ def plot_loadings_heatmap(loadings_df: pd.DataFrame, title: str = "因子载荷�
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='LightGrey')
     fig.update_xaxes(showgrid=False) 
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 def render_file_upload_section(st_instance):
     """
@@ -630,7 +630,7 @@ def render_dfm_tab(st):
                 comparison_df = comparison_df.sort_index()
             except Exception as e:
                 st.error(f"无法将对比数据的索引转换为日期时间格式: {e}")
-                st.dataframe(comparison_df, use_container_width=True)
+                st.dataframe(comparison_df, width='stretch')
                 return
 
         # 绘制Nowcast vs 实际值图表
@@ -773,7 +773,7 @@ def render_dfm_tab(st):
         )
 
         # 显示图表
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
 
         # 提供数据下载
         try:
@@ -816,7 +816,7 @@ def render_dfm_tab(st):
             '累计解释方差 (%)': '累计解释方差(%)',
             '特征值 (Eigenvalue)': '特征值(Eigenvalue)'
         })
-        st.dataframe(pca_df_display, use_container_width=True)
+        st.dataframe(pca_df_display, width='stretch')
     else:
         st.write("未找到 PCA 结果。")
     
@@ -830,7 +830,7 @@ def render_dfm_tab(st):
         st.markdown("**整体 R² (按行业)**")
         industry_r2 = metadata.get('industry_r2_results')
         if industry_r2 is not None and isinstance(industry_r2, pd.Series) and not industry_r2.empty:
-            st.dataframe(industry_r2.to_frame(name="Industry R2 (All Factors)"), use_container_width=True)
+            st.dataframe(industry_r2.to_frame(name="Industry R2 (All Factors)"), width='stretch')
             st.caption("附注：衡量所有因子共同解释该行业内所有变量整体变动的百分比。计算方式为对行业内各变量分别对所有因子进行OLS回归后，汇总各变量的总平方和(TSS)与残差平方和(RSS)，计算 Pooled R² = 1 - (Sum(RSS) / Sum(TSS))。")
         else:
             st.write("未找到行业整体 R² 数据。")
@@ -841,7 +841,7 @@ def render_dfm_tab(st):
         if factor_industry_r2 and isinstance(factor_industry_r2, dict):
             try:
                 factor_industry_df = pd.DataFrame(factor_industry_r2)
-                st.dataframe(factor_industry_df, use_container_width=True)
+                st.dataframe(factor_industry_df, width='stretch')
                 st.caption("附注：衡量单个因子解释该行业内所有变量整体变动的百分比。计算方式为对行业内各变量分别对单个因子进行OLS回归后，汇总TSS与RSS，计算 Pooled R² = 1 - (Sum(RSS) / Sum(TSS))。")
             except ValueError as ve:
                 st.warning(f"因子对行业 Pooled R² 数据格式错误，无法转换为DataFrame: {ve}")
@@ -959,7 +959,7 @@ def render_dfm_tab(st):
         # 使用居中显示的容器
         heatmap_col1, heatmap_col2, heatmap_col3 = st.columns([1, 8, 1])
         with heatmap_col2:
-            st.plotly_chart(fig_heatmap, use_container_width=True)
+            st.plotly_chart(fig_heatmap, width='stretch')
 
         # Download button for factor loadings data
         try:
@@ -1038,7 +1038,7 @@ def render_dfm_tab(st):
                                     # 添加零轴线
                                     fig_factor.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
                                     
-                                    st.plotly_chart(fig_factor, use_container_width=True)
+                                    st.plotly_chart(fig_factor, width='stretch')
                                 else:
                                     st.warning(f"{factor_name}数据为空，无法绘制图表。")
                 

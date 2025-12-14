@@ -541,7 +541,7 @@ def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, d
             fig_change.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5)
 
             # 显示图表
-            st_obj.plotly_chart(fig_change, use_container_width=True)
+            st_obj.plotly_chart(fig_change, width='stretch')
 
             # 准备下载数据
             download_change_df = pd.DataFrame({
@@ -614,7 +614,7 @@ def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, d
                     bottom_margin=150,
                     var_name_mapping=var_name_mapping  # 使用简化名称
                 )
-                st_obj.plotly_chart(fig, use_container_width=True)
+                st_obj.plotly_chart(fig, width='stretch')
 
             else:  # 拉动率排名
                 # 计算排名（按绝对值排名：ascending=False表示绝对值从大到小排序，绝对值最大排名1）
@@ -637,7 +637,7 @@ def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, d
 
                 # 排名图需要倒置Y轴（1在上，41在下）
                 fig.update_yaxes(autorange='reversed')
-                st_obj.plotly_chart(fig, use_container_width=True)
+                st_obj.plotly_chart(fig, width='stretch')
         else:
             st_obj.info("请至少选择一个工业指标")
 

@@ -198,7 +198,7 @@ class TrainingStatusComponent(DFMComponent):
             if st_obj.button("[START] 开始训练",
                            key="new_btn_dfm_start_training",
                            help="开始模型训练",
-                           use_container_width=True):
+                           width='stretch'):
                 self._start_training(training_config)
                 return {'action': 'start_training'}
 
@@ -206,7 +206,7 @@ class TrainingStatusComponent(DFMComponent):
             if st_obj.button("停止训练",
                            key="new_btn_dfm_stop_training",
                            help="停止当前训练",
-                           use_container_width=True):
+                           width='stretch'):
                 self._stop_training()
                 return {'action': 'stop_training'}
 
@@ -214,7 +214,7 @@ class TrainingStatusComponent(DFMComponent):
             if st_obj.button("[LOADING] 重置状态",
                            key="new_btn_dfm_reset_training",
                            help="重置训练状态",
-                           use_container_width=True):
+                           width='stretch'):
                 self._reset_training_state()
                 return {'action': 'reset_training'}
 
@@ -281,14 +281,14 @@ class TrainingStatusComponent(DFMComponent):
                     if st_obj.button("下载模型",
                                    key="new_btn_dfm_download_model",
                                    help="下载训练好的模型文件",
-                                   use_container_width=True):
+                                   width='stretch'):
                         return {'action': 'download_model'}
 
                 with col_report:
                     if st_obj.button("[DATA] 下载报告",
                                    key="new_btn_dfm_download_report",
                                    help="下载训练报告",
-                                   use_container_width=True):
+                                   width='stretch'):
                         return {'action': 'download_report'}
             else:
                 st_obj.info("训练结果准备中...")

@@ -142,7 +142,7 @@ class DataStagingComponent(DataInputComponent):
         
         if staging_info:
             staging_df = pd.DataFrame(staging_info)
-            st_obj.dataframe(staging_df, use_container_width=True)
+            st_obj.dataframe(staging_df, width='stretch')
             
             # 操作按钮
             col1, col2 = st_obj.columns(2)
@@ -199,7 +199,7 @@ class DataStagingComponent(DataInputComponent):
                 
                 # 显示数据预览
                 with st_obj.expander("数据预览", expanded=False):
-                    st_obj.dataframe(selected_data.head(10), use_container_width=True)
+                    st_obj.dataframe(selected_data.head(10), width='stretch')
                 
                 return selected_data
             else:
@@ -346,7 +346,7 @@ class DataStagingComponent(DataInputComponent):
 
                     # 显示暂存数据预览
                     with st_obj.expander("查看暂存数据预览"):
-                        st_obj.dataframe(staged_data.head(10), use_container_width=True)
+                        st_obj.dataframe(staged_data.head(10), width='stretch')
 
                     return staged_data
                 else:
@@ -370,7 +370,7 @@ class DataStagingComponent(DataInputComponent):
                     preview_data = preview_data[time_mask]
 
                 st_obj.markdown("**处理后数据预览：**")
-                st_obj.dataframe(preview_data.head(10), use_container_width=True)
+                st_obj.dataframe(preview_data.head(10), width='stretch')
                 st_obj.info(f"预览数据形状: {preview_data.shape}")
 
                 return preview_data

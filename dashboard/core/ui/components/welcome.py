@@ -114,7 +114,7 @@ class WelcomeComponent(UIComponent):
         st_obj.markdown(card_html, unsafe_allow_html=True)
         
         # 添加选择按钮
-        if st_obj.button(f"进入{sub_module}", key=f"enter_{sub_module}", use_container_width=True):
+        if st_obj.button(f"进入{sub_module}", key=f"enter_{sub_module}", width='stretch'):
             st.session_state["navigation.navigate_to_sub_module"] = sub_module
             st_obj.rerun()
     

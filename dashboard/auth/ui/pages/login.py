@@ -88,7 +88,7 @@ class LoginPage:
                 login_clicked = st.button(
                     "登录",
                     key="login_submit",
-                    use_container_width=True,
+                    width='stretch',
                     type="primary"
                 )
 
@@ -96,7 +96,7 @@ class LoginPage:
                 register_clicked = st.button(
                     "注册新用户",
                     key="register_submit",
-                    use_container_width=True,
+                    width='stretch',
                     type="primary"
                 )
 

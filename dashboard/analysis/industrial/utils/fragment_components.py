@@ -189,7 +189,7 @@ def create_chart_with_time_selector_fragment(
                 if fig:
                     st_obj.plotly_chart(
                         fig,
-                        use_container_width=True,
+                        width='stretch',
                         key=f"{chart_id}_chart_fragment"
                     )
                 else:

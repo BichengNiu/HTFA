@@ -216,7 +216,7 @@ def create_module_button(
         module_name,
         type=button_type,
         key=key,
-        use_container_width=True
+        width='stretch'
     )
 
     if button_clicked:

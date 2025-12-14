@@ -227,7 +227,7 @@ class CorrelationAnalysisComponent(TimeSeriesAnalysisComponent):
                 corr_df['相关系数'] = corr_df['相关系数'].round(4)
 
                 st_obj.markdown("**详细相关性数据:**")
-                st_obj.dataframe(corr_df, use_container_width=True)
+                st_obj.dataframe(corr_df, width='stretch')
 
                 # 提供下载功能，使用utf-8-sig编码避免中文乱码
                 csv_string = corr_df.to_csv(index=False, encoding='utf-8-sig')

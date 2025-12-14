@@ -172,11 +172,32 @@ class ExportService:
         var_unit_map = mappings.get('var_unit_map', {})
         var_nature_map = mappings.get('var_nature_map', {})
 
+        # 构建处理日志
+        df_processing_log = ExportService.build_processing_log(
+            removed_vars_log, prepared_data, transform_details, replacement_history,
+            stationarity_check_results
+        )
+
+        # 创建处理日志查找字典
+        log_lookup = {}
+        if df_processing_log is not None and not df_processing_log.empty:
+            for idx, row in df_processing_log.iterrows():
+                var_name = row['变量名']
+                log_lookup[var_name] = {
+                    '状态': row.get('状态', ''),
+                    '处理详情': row.get('处理详情', ''),
+                    'P值': row.get('P值', ''),
+                    '平稳性检验（0.05）': row.get('平稳性检验（0.05）', '')
+                }
+
         # 创建统一映射数据
         all_indicators = list(industry_map.keys())
         unified_mapping_data = []
 
         for indicator in all_indicators:
+            # 从处理日志查找该变量的信息
+            log_info = log_lookup.get(indicator, {})
+
             unified_mapping_data.append({
                 'Indicator': indicator,
                 'Industry': industry_map.get(indicator, ''),
@@ -186,19 +207,18 @@ class ExportService:
                 '一次估计': dfm_single_stage_map.get(indicator, ''),
                 '一阶段预测': dfm_first_stage_pred_map.get(indicator, ''),
                 '一阶段目标': dfm_first_stage_target_map.get(indicator, ''),
-                '二阶段目标': dfm_second_stage_target_map.get(indicator, '')
+                '二阶段目标': dfm_second_stage_target_map.get(indicator, ''),
+                '状态': log_info.get('状态', ''),
+                '处理详情': log_info.get('处理详情', ''),
+                'P值': log_info.get('P值', ''),
+                '平稳性检验（0.05）': log_info.get('平稳性检验（0.05）', '')
             })
 
         df_unified_map = pd.DataFrame(
             unified_mapping_data,
             columns=['Indicator', 'Industry', 'Frequency', 'Unit', 'Nature',
-                     '一次估计', '一阶段预测', '一阶段目标', '二阶段目标']
-        )
-
-        # 构建处理日志
-        df_processing_log = ExportService.build_processing_log(
-            removed_vars_log, prepared_data, transform_details, replacement_history,
-            stationarity_check_results
+                     '一次估计', '一阶段预测', '一阶段目标', '二阶段目标',
+                     '状态', '处理详情', 'P值', '平稳性检验（0.05）']
         )
 
         # 写入Excel
@@ -213,9 +233,6 @@ class ExportService:
 
             # Sheet2: 映射表
             df_unified_map.to_excel(writer, sheet_name='映射', index=False)
-
-            # Sheet3: 处理日志
-            df_processing_log.to_excel(writer, sheet_name='处理日志', index=False)
 
         return excel_buffer.getvalue()
 

@@ -122,10 +122,10 @@ class RegisterPage:
                 col_submit, col_reset = st.columns(2)
                 
                 with col_submit:
-                    submitted = st.form_submit_button("提交", type="primary", use_container_width=True)
+                    submitted = st.form_submit_button("提交", type="primary", width='stretch')
                 
                 with col_reset:
-                    reset_clicked = st.form_submit_button("重置", type="primary", use_container_width=True)
+                    reset_clicked = st.form_submit_button("重置", type="primary", width='stretch')
                 
                 # 处理重置
                 if reset_clicked:
@@ -168,7 +168,7 @@ class RegisterPage:
             
             # 返回登录按钮
             st.markdown("---")
-            if st.button("返回登录页面", use_container_width=True, type="primary"):
+            if st.button("返回登录页面", width='stretch', type="primary"):
                 # 清除注册页面标识
                 if 'show_register_page' in st.session_state:
                     del st.session_state['show_register_page']

@@ -104,7 +104,7 @@ class ChartComponent(BaseAnalysisComponent):
         try:
             st.plotly_chart(
                 fig,
-                use_container_width=True,
+                width='stretch',
                 key=key
             )
         except Exception as e:

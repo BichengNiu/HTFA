@@ -584,14 +584,14 @@ def render_dfm_model_training_page(st_instance):
                 global_select_all = st_instance.button(
                     "全选所有指标",
                     key=f"dfm_global_select_all_{current_estimation_method}",
-                    use_container_width=True
+                    width='stretch'
                 )
 
             with global_control_col2:
                 global_deselect_all = st_instance.button(
                     "取消全选所有指标",
                     key=f"dfm_global_deselect_all_{current_estimation_method}",
-                    use_container_width=True
+                    width='stretch'
                 )
 
             # 处理全局全选

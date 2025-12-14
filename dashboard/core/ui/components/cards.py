@@ -40,7 +40,7 @@ class ModuleCard(UIComponent):
         
         # 添加操作按钮
         button_key = f"card_btn_{self.title}_{id(self)}"
-        if st_obj.button(self.action_text, key=button_key, use_container_width=True):
+        if st_obj.button(self.action_text, key=button_key, width='stretch'):
             try:
                 if self.on_click:
                     self.on_click()
