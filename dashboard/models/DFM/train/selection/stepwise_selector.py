@@ -201,7 +201,7 @@ class StepwiseSelector:
             if new_score <= current_score:
                 logger.info(
                     f"前向步骤：添加任何变量都无法提升性能 "
-                    f"(当前RMSE={-current_score[1]:.6f}; 最佳候选RMSE={-new_score[1]:.6f})"
+                    f"(当前验证期RMSE={-current_score[1]:.6f}; 最佳候选验证期RMSE={-new_score[1]:.6f})"
                 )
                 if progress_callback:
                     progress_callback(
@@ -769,16 +769,14 @@ class StepwiseSelector:
         logger.info(
             f"\n向前向后法变量选择完成: 从{n_initial_vars-1}个候选变量中选出{len(final_predictors)}个\n"
             f"  训练期RMSE: {final_is_rmse:.4f}\n"
-            f"  验证期RMSE: {final_oos_rmse:.4f}\n"
-            f"  平均RMSE: {-final_score[1]:.4f}"
+            f"  验证期RMSE: {final_oos_rmse:.4f}"
         )
 
         if progress_callback:
             progress_callback(
                 f"\n选择完成: 从{n_initial_vars-1}个候选变量中选出{len(final_predictors)}个\n"
                 f"  训练期RMSE: {final_is_rmse:.4f}\n"
-                f"  验证期RMSE: {final_oos_rmse:.4f}\n"
-                f"  平均RMSE: {-final_score[1]:.4f}"
+                f"  验证期RMSE: {final_oos_rmse:.4f}"
             )
 
         return SelectionResult(

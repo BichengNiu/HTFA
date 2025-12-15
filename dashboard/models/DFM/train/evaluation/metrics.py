@@ -57,33 +57,27 @@ def calculate_combined_score(
     计算组合得分（用于变量选择）
 
     评分标准：
-    - 如果有Hit Rate数据，先优化Hit Rate，再优化RMSE
-    - 如果没有Hit Rate数据（都是NaN），只优化RMSE
+    - 仅使用验证期（样本外）RMSE作为评估标准
+    - Hit Rate已弃用，不再作为评估标准
 
     Args:
-        is_rmse: 样本内RMSE
-        oos_rmse: 样本外RMSE
-        is_hit_rate: 样本内命中率
-        oos_hit_rate: 样本外命中率
+        is_rmse: 样本内RMSE（不参与评分）
+        oos_rmse: 样本外RMSE（唯一评分标准）
+        is_hit_rate: 样本内命中率（已弃用）
+        oos_hit_rate: 样本外命中率（已弃用）
 
     Returns:
-        Tuple[float, float]: (combined_hit_rate, -combined_rmse)
-            - 第一个元素：平均命中率（越大越好），无Hit Rate时为0
-            - 第二个元素：负平均RMSE（越大越好）
+        Tuple[float, float]: (0, -oos_rmse)
+            - 第一个元素：固定为0（Hit Rate已弃用）
+            - 第二个元素：负验证期RMSE（越大越好，即RMSE越小越好）
     """
-    # 计算平均RMSE
-    finite_rmses = [r for r in [is_rmse, oos_rmse] if np.isfinite(r)]
-    combined_rmse = np.mean(finite_rmses) if finite_rmses else np.inf
+    # 仅使用验证期RMSE作为评估标准
+    validation_rmse = oos_rmse if np.isfinite(oos_rmse) else np.inf
 
-    # 计算平均命中率
-    finite_hrs = [hr for hr in [is_hit_rate, oos_hit_rate] if np.isfinite(hr)]
-    if finite_hrs:
-        combined_hr = np.mean(finite_hrs)
-    else:
-        # 如果没有Hit Rate数据，设置为0（这样RMSE成为唯一比较标准）
-        combined_hr = 0.0
+    # Hit Rate已弃用，固定返回0
+    combined_hr = 0.0
 
-    return (combined_hr, -combined_rmse)
+    return (combined_hr, -validation_rmse)
 
 
 # ==================== 下月配对评估函数（新定义）====================

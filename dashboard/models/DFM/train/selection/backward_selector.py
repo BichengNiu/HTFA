@@ -155,7 +155,7 @@ class BackwardSelector:
             if best_score_this_iter <= current_best_score:
                 logger.warning(
                     f"移除任何变量都无法提升性能 "
-                    f"(当前RMSE={-current_best_score[1]:.6f}; 最佳候选RMSE={-best_score_this_iter[1]:.6f})"
+                    f"(当前验证期RMSE={-current_best_score[1]:.6f}; 最佳候选验证期RMSE={-best_score_this_iter[1]:.6f})"
                 )
                 break
 
@@ -221,9 +221,9 @@ class BackwardSelector:
 
             score = calculate_combined_score(is_rmse, oos_rmse, is_hit_rate, oos_hit_rate)
 
-            if not np.isfinite(score[0]) or not np.isfinite(score[1]):
-                logger.warning(f"初始基准评估返回无效分数，使用最差分数")
-                score = (-np.inf, -np.inf)
+            if not np.isfinite(score[1]):
+                logger.warning(f"初始基准评估返回无效分数（验证期RMSE无效），使用最差分数")
+                score = (0.0, -np.inf)
 
             logger.info(
                 f"初始基准得分 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}, "
@@ -486,7 +486,7 @@ class BackwardSelector:
 
         logger.info(
             f"变量选择完成: 从{n_initial_vars-1}个变量剔除到{len(final_predictors)}个, "
-            f"最终RMSE={-final_score[1]:.6f}"
+            f"最终验证期RMSE={-final_score[1]:.6f}"
         )
 
         return SelectionResult(
