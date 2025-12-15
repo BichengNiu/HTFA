@@ -8,6 +8,7 @@ import pandas as pd
 import io
 from typing import Dict, Any, Optional, List
 import logging
+from dashboard.models.DFM.utils.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,7 @@ class ExportService:
         # 添加被删除的变量
         for entry in removed_vars_log:
             var_name = entry.get('Variable', '')
+            var_name_norm = normalize_text(var_name)
             reason = entry.get('Reason', '')
             details = entry.get('Details', {})
 
@@ -103,7 +105,7 @@ class ExportService:
                 detail_str = reason
 
             log_data.append({
-                '变量名': var_name,
+                '变量名': var_name_norm,
                 '状态': '删除',
                 '处理详情': detail_str,
                 'P值': '-',
@@ -113,10 +115,11 @@ class ExportService:
         # 添加值替换记录
         for h in replacement_history:
             var_name = h.get('variable', '')
+            var_name_norm = normalize_text(var_name)
 
             # 优先使用检验结果，如果没有检验结果则显示"未检验"
-            if var_name in stationarity_check_results:
-                stat_result = stationarity_check_results[var_name]
+            if var_name_norm in stationarity_check_results:
+                stat_result = stationarity_check_results[var_name_norm]
                 p_value = stat_result.get('p_value')
                 status = stat_result.get('status', '未检验')
 
@@ -133,12 +136,12 @@ class ExportService:
                 else:
                     stationarity_str = '非平稳'
             else:
-                logger.warning(f"值替换变量 '{var_name}' 没有检验结果，可能未在prepared_data中")
+                logger.warning(f"值替换变量 '{var_name_norm}' 没有检验结果，可能未在prepared_data中")
                 p_value_str = '-'
                 stationarity_str = '未检验'
 
             log_data.append({
-                '变量名': var_name,
+                '变量名': var_name_norm,
                 '状态': '值替换',
                 '处理详情': f"规则: {h.get('rule', '')}, 替换为: {h.get('new_value', '')}, 影响{h.get('affected_count', 0)}行",
                 'P值': p_value_str,
@@ -148,15 +151,18 @@ class ExportService:
         # 添加保留的变量
         if prepared_data is not None:
             for col in prepared_data.columns:
-                if col in transform_details:
-                    ops = transform_details[col].get('operations', [])
+                col_norm = normalize_text(col)
+
+                # 获取转换详情（使用标准化名称）
+                if col_norm in transform_details:
+                    ops = transform_details[col_norm].get('operations', [])
                     ops_str = ' -> '.join(ops) if ops else '不处理'
                 else:
                     ops_str = '不处理'
 
-                # 获取平稳性检验结果
-                if col in stationarity_check_results:
-                    stat_result = stationarity_check_results[col]
+                # 获取平稳性检验结果（使用标准化名称）
+                if col_norm in stationarity_check_results:
+                    stat_result = stationarity_check_results[col_norm]
                     p_value = stat_result.get('p_value')
                     status = stat_result.get('status', '未检验')
 
@@ -173,12 +179,12 @@ class ExportService:
                     else:
                         stationarity_str = '非平稳'
                 else:
-                    logger.warning(f"保留变量 '{col}' 没有检验结果，可能检验失败或被跳过")
+                    logger.warning(f"保留变量 '{col_norm}' 没有检验结果，可能检验失败或被跳过")
                     p_value_str = '-'
                     stationarity_str = '未检验'
 
                 log_data.append({
-                    '变量名': col,
+                    '变量名': col_norm,
                     '状态': '保留',
                     '处理详情': ops_str,
                     'P值': p_value_str,
