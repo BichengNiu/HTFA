@@ -322,9 +322,313 @@ def evaluate_removals_with_fallback(
         )
 
 
+# ========== 前向评估函数（用于向前向后法）==========
+
+def evaluate_single_variable_addition(
+    var_to_add: str,
+    current_predictors: List[str],
+    target_variable: str,
+    full_data: pd.DataFrame,
+    k_factors: int,
+    evaluator_config: Dict[str, Any]
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """
+    评估添加单个变量后的模型性能（可序列化版本）
+
+    此函数设计为可被并行执行的独立任务，所有参数都可序列化
+
+    Args:
+        var_to_add: 待添加的变量名
+        current_predictors: 当前预测变量列表
+        target_variable: 目标变量名
+        full_data: 完整数据DataFrame（可序列化）
+        k_factors: 因子数
+        evaluator_config: 评估器配置字典（可序列化）
+
+    Returns:
+        (变量名, 评估结果字典) 或 (变量名, None) 如果评估失败
+    """
+    try:
+        # 构建添加该变量后的变量列表
+        temp_predictors = current_predictors + [var_to_add]
+        temp_variables = [target_variable] + temp_predictors
+
+        # 检查因子数约束
+        if k_factors >= len(temp_variables):
+            logger.debug(
+                f"跳过'{var_to_add}': k_factors({k_factors}) >= "
+                f"变量数({len(temp_variables)})"
+            )
+            return (var_to_add, None)
+
+        # 导入可序列化的顶层评估函数
+        from dashboard.models.DFM.train.training.evaluator_strategy import _evaluate_variable_selection_model
+
+        # 调用可序列化的评估函数
+        result_tuple = _evaluate_variable_selection_model(
+            variables=temp_variables,
+            target_variable=target_variable,
+            full_data=full_data,
+            k_factors=k_factors,
+            training_start=evaluator_config['training_start'],
+            train_end=evaluator_config['train_end'],
+            validation_start=evaluator_config['validation_start'],
+            validation_end=evaluator_config['validation_end'],
+            max_iterations=evaluator_config['max_iterations'],
+            tolerance=evaluator_config['tolerance'],
+            alignment_mode=evaluator_config.get('alignment_mode', 'next_month')
+        )
+
+        if len(result_tuple) != 9:
+            logger.warning(f"评估返回了{len(result_tuple)}个值，跳过'{var_to_add}'")
+            return (var_to_add, None)
+
+        is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+
+        # 返回评估结果
+        result = {
+            'var': var_to_add,
+            'is_rmse': is_rmse,
+            'oos_rmse': oos_rmse,
+            'is_hit_rate': is_hit_rate,
+            'oos_hit_rate': oos_hit_rate,
+            'is_svd_error': is_svd_error
+        }
+
+        return (var_to_add, result)
+
+    except Exception as e:
+        logger.error(f"评估添加'{var_to_add}'时出错: {e}")
+        import traceback
+        traceback.print_exc()
+        return (var_to_add, None)
+
+
+def parallel_evaluate_additions(
+    current_predictors: List[str],
+    candidate_vars: List[str],
+    target_variable: str,
+    full_data: pd.DataFrame,
+    k_factors: int,
+    evaluator_config: Dict[str, Any],
+    n_jobs: int = -1,
+    backend: str = 'loky',
+    verbose: int = 0,
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> List[Dict[str, Any]]:
+    """
+    并行评估所有候选变量的添加效果（可序列化版本）
+
+    Args:
+        current_predictors: 当前预测变量列表
+        candidate_vars: 候选添加变量列表
+        target_variable: 目标变量名
+        full_data: 完整数据DataFrame（可序列化）
+        k_factors: 因子数
+        evaluator_config: 评估器配置字典（可序列化）
+        n_jobs: 并行任务数（-1=所有核心）
+        backend: 并行后端（'loky', 'multiprocessing', 'threading'）
+        verbose: 是否显示进度
+        progress_callback: 进度回调函数（仅在主进程使用，不传递给子进程）
+
+    Returns:
+        评估结果列表（仅包含成功的评估）
+    """
+    try:
+        from joblib import Parallel, delayed
+    except ImportError:
+        logger.error("未安装joblib库，无法使用并行评估，请安装: pip install joblib")
+        raise
+
+    if progress_callback:
+        progress_callback(
+            f"  并行评估添加 {len(candidate_vars)} 个候选变量 "
+            f"(使用 {n_jobs if n_jobs > 0 else 'max-1'} 个核心, backend={backend})..."
+        )
+
+    # 并行评估所有变量
+    results_with_none = Parallel(
+        n_jobs=n_jobs,
+        backend=backend,
+        verbose=verbose,
+        prefer='processes',
+        batch_size='auto',
+        pre_dispatch='2*n_jobs'
+    )(
+        delayed(evaluate_single_variable_addition)(
+            var,
+            current_predictors,
+            target_variable,
+            full_data,
+            k_factors,
+            evaluator_config
+        )
+        for var in candidate_vars
+    )
+
+    # 过滤掉失败的评估（None结果）
+    candidate_results = []
+    for idx, (var, result) in enumerate(results_with_none, 1):
+        if result is None:
+            continue
+
+        # 打印每个候选的结果
+        if progress_callback:
+            progress_callback(
+                f"  [{idx}/{len(candidate_vars)}] 完成评估: '{var}' - "
+                f"训练期RMSE: {result['is_rmse']:.4f}, "
+                f"验证期RMSE: {result['oos_rmse']:.4f}"
+            )
+
+        candidate_results.append(result)
+
+    return candidate_results
+
+
+def serial_evaluate_additions(
+    current_predictors: List[str],
+    candidate_vars: List[str],
+    target_variable: str,
+    full_data: pd.DataFrame,
+    k_factors: int,
+    evaluator_config: Dict[str, Any],
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> List[Dict[str, Any]]:
+    """
+    串行评估所有候选变量的添加效果（回退方案，可序列化版本）
+
+    Args:
+        current_predictors: 当前预测变量列表
+        candidate_vars: 候选添加变量列表
+        target_variable: 目标变量名
+        full_data: 完整数据DataFrame（可序列化）
+        k_factors: 因子数
+        evaluator_config: 评估器配置字典（可序列化）
+        progress_callback: 进度回调函数
+
+    Returns:
+        评估结果列表（仅包含成功的评估）
+    """
+    candidate_results = []
+
+    for idx, var in enumerate(candidate_vars, 1):
+        # 打印正在尝试的变量
+        if progress_callback:
+            msg = f"  [{idx}/{len(candidate_vars)}] 尝试添加: '{var}'"
+            progress_callback(msg)
+
+        # 评估该变量
+        _, result = evaluate_single_variable_addition(
+            var,
+            current_predictors,
+            target_variable,
+            full_data,
+            k_factors,
+            evaluator_config
+        )
+
+        if result is None:
+            continue
+
+        # 打印评估结果
+        if progress_callback:
+            progress_callback(
+                f"    训练期RMSE: {result['is_rmse']:.4f}, "
+                f"验证期RMSE: {result['oos_rmse']:.4f}"
+            )
+
+        candidate_results.append(result)
+
+    return candidate_results
+
+
+def evaluate_additions_with_fallback(
+    current_predictors: List[str],
+    candidate_vars: List[str],
+    target_variable: str,
+    full_data: pd.DataFrame,
+    k_factors: int,
+    evaluator_config: Dict[str, Any],
+    use_parallel: bool = False,
+    n_jobs: int = -1,
+    backend: str = 'loky',
+    verbose: int = 0,
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> List[Dict[str, Any]]:
+    """
+    评估所有候选变量的添加效果（自动降级，可序列化版本）
+
+    首先尝试并行评估，如果失败则自动降级到串行
+
+    Args:
+        current_predictors: 当前预测变量列表
+        candidate_vars: 候选添加变量列表
+        target_variable: 目标变量名
+        full_data: 完整数据DataFrame（可序列化）
+        k_factors: 因子数
+        evaluator_config: 评估器配置字典（可序列化）
+        use_parallel: 是否使用并行
+        n_jobs: 并行任务数
+        backend: 并行后端
+        verbose: 是否显示进度
+        progress_callback: 进度回调函数
+
+    Returns:
+        评估结果列表
+    """
+    if not use_parallel:
+        # 串行评估
+        return serial_evaluate_additions(
+            current_predictors,
+            candidate_vars,
+            target_variable,
+            full_data,
+            k_factors,
+            evaluator_config,
+            progress_callback
+        )
+
+    try:
+        # 尝试并行评估
+        return parallel_evaluate_additions(
+            current_predictors,
+            candidate_vars,
+            target_variable,
+            full_data,
+            k_factors,
+            evaluator_config,
+            n_jobs,
+            backend,
+            verbose,
+            progress_callback
+        )
+    except Exception as e:
+        logger.error(f"并行评估失败: {e}，降级到串行模式")
+        import traceback
+        traceback.print_exc()
+
+        if progress_callback:
+            progress_callback(f"  并行评估失败，自动切换到串行模式...")
+
+        # 降级到串行评估
+        return serial_evaluate_additions(
+            current_predictors,
+            candidate_vars,
+            target_variable,
+            full_data,
+            k_factors,
+            evaluator_config,
+            progress_callback
+        )
+
+
 __all__ = [
     'evaluate_single_variable_removal',
     'parallel_evaluate_removals',
     'serial_evaluate_removals',
-    'evaluate_removals_with_fallback'
+    'evaluate_removals_with_fallback',
+    'evaluate_single_variable_addition',
+    'parallel_evaluate_additions',
+    'serial_evaluate_additions',
+    'evaluate_additions_with_fallback'
 ]

@@ -164,13 +164,23 @@ def generate_training_summary(
         for industry, k_factors in result.industry_k_factors_used.items():
             lines.append(f"    {industry}: {k_factors}个因子")
     else:
-        # 一次估计法：从industry_map统计行业数
+        # 一次估计法：从最终保留变量统计涉及的行业数
         if hasattr(config, 'industry_map') and config.industry_map:
-            unique_industries = set(config.industry_map.values())
-            lines.append(f"  涉及行业数: {len(unique_industries)}")
-            lines.append("  行业列表:")
-            for industry in sorted(unique_industries):
-                lines.append(f"    - {industry}")
+            # 获取最终保留的预测变量
+            final_predictors = [v for v in result.selected_variables if v != config.target_variable]
+            # 只统计最终保留变量涉及的行业
+            involved_industries = set()
+            for var in final_predictors:
+                if var in config.industry_map:
+                    involved_industries.add(config.industry_map[var])
+
+            if involved_industries:
+                lines.append(f"  涉及行业数: {len(involved_industries)}")
+                lines.append("  行业列表:")
+                for industry in sorted(involved_industries):
+                    lines.append(f"    - {industry}")
+            else:
+                lines.append("  涉及行业数: 0 (变量未映射到行业)")
         else:
             lines.append("  行业信息: 未提供行业映射")
     lines.append("")

@@ -214,7 +214,8 @@ class TrainingConfigBuilder:
             'global_backward': 'backward',
             'global_forward': 'forward',
             'backward': 'backward',
-            'forward': 'forward'
+            'forward': 'forward',
+            'stepwise': 'stepwise'  # 向前向后法
         }
         return var_selection_method_map.get(var_selection_method, 'none')
 

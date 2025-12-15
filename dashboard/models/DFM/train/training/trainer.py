@@ -152,13 +152,37 @@ class DFMTrainer:
                 # 创建变量筛选专用评估器（使用下月配对RMSE）
                 evaluator = create_variable_selection_evaluator(self.config)
 
-                # 创建变量选择器（传递并行配置）
-                selector = BackwardSelector(
-                    evaluator_func=evaluator,
-                    criterion='rmse',
-                    min_variables=self.config.min_variables_after_selection or 1,
-                    parallel_config=self.config.get_parallel_config()
-                )
+                # 根据选择方法创建对应的选择器
+                if self.config.variable_selection_method == 'backward':
+                    # 后向选择器
+                    selector = BackwardSelector(
+                        evaluator_func=evaluator,
+                        criterion='rmse',
+                        min_variables=self.config.min_variables_after_selection or 1,
+                        parallel_config=self.config.get_parallel_config()
+                    )
+                elif self.config.variable_selection_method == 'stepwise':
+                    # 向前向后法选择器
+                    from dashboard.models.DFM.train.selection import StepwiseSelector
+                    selector = StepwiseSelector(
+                        evaluator_func=evaluator,
+                        criterion='rmse',
+                        min_variables=self.config.min_variables_after_selection or 1,
+                        parallel_config=self.config.get_parallel_config()
+                    )
+                elif self.config.variable_selection_method == 'forward':
+                    # forward方法目前未实现
+                    raise NotImplementedError(
+                        "forward方法尚未实现，请使用'backward'或'stepwise'"
+                    )
+                else:
+                    # 默认使用后向选择器
+                    selector = BackwardSelector(
+                        evaluator_func=evaluator,
+                        criterion='rmse',
+                        min_variables=self.config.min_variables_after_selection or 1,
+                        parallel_config=self.config.get_parallel_config()
+                    )
 
                 # 根据因子选择策略确定k_factors用于变量选择
                 if self.config.factor_selection_method == 'fixed':

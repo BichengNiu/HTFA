@@ -123,27 +123,33 @@ class ModelParametersComponent(DFMComponent):
     # === 与老代码完全一致的辅助方法 ===
 
     def _render_variable_selection_method(self, st_obj) -> str:
-        """渲染变量选择方法 - 与老代码第1300-1320行一致"""
-        variable_selection_options = [
-            "无变量选择",
-            "基于信息准则的变量选择",
-            "基于交叉验证的变量选择",
-            "基于正则化的变量选择"
-        ]
+        """渲染变量选择方法"""
+        # 变量选择方法选项（与后端TrainingConfig对应）
+        variable_selection_options = {
+            'none': '无变量选择',
+            'backward': '后向选择法 (Backward)',
+            'stepwise': '向前向后法 (Stepwise)'
+        }
 
         # 获取当前状态
-        current_method = self._get_state('dfm_variable_selection_method', variable_selection_options[0])
+        current_method = self._get_state('dfm_variable_selection_method', 'none')
 
         # 确保当前方法在选项中
         if current_method not in variable_selection_options:
-            current_method = variable_selection_options[0]
+            current_method = 'none'
 
         selected_method = st_obj.selectbox(
-            "**变量选择方法**",
-            options=variable_selection_options,
-            index=variable_selection_options.index(current_method),
+            "**变量筛选方法**",
+            options=list(variable_selection_options.keys()),
+            format_func=lambda x: variable_selection_options[x],
+            index=list(variable_selection_options.keys()).index(current_method),
             key="new_ss_dfm_variable_selection_method",
-            help="选择用于变量选择的方法。"
+            help=(
+                "选择用于变量筛选的方法：\n"
+                "- 无变量选择: 使用所有选定的预测指标\n"
+                "- 后向选择法: 从全部变量开始，逐步移除对模型贡献最小的变量\n"
+                "- 向前向后法: 从单个最优变量开始，逐步添加变量并检查是否需要移除冗余变量"
+            )
         )
 
         self._set_state('dfm_variable_selection_method', selected_method)
@@ -267,8 +273,8 @@ class ModelParametersComponent(DFMComponent):
             
             if config_available:
                 return {
-                    'variable_selection_method': 'global_backward',
-                    'enable_variable_selection': True,
+                    'variable_selection_method': 'none',  # 默认不启用变量选择
+                    'enable_variable_selection': False,
                     'max_iter': getattr(UIDefaults, 'MAX_ITERATIONS_DEFAULT', 30),  # 修正键名
                     'factor_ar_order': 1,  # 修正键名
                     'factor_selection_strategy': getattr(TrainDefaults, 'FACTOR_SELECTION_STRATEGY', 'fixed_number'),
@@ -278,8 +284,8 @@ class ModelParametersComponent(DFMComponent):
             else:
                 # 硬编码默认值
                 return {
-                    'variable_selection_method': 'global_backward',
-                    'enable_variable_selection': True,
+                    'variable_selection_method': 'none',  # 默认不启用变量选择
+                    'enable_variable_selection': False,
                     'max_iter': 30,  # 修正键名
                     'factor_ar_order': 1,  # 修正键名
                     'factor_selection_strategy': 'fixed_number',
@@ -291,8 +297,8 @@ class ModelParametersComponent(DFMComponent):
             logger.error(f"获取默认参数失败: {e}")
             # 最基本的默认值
             return {
-                'variable_selection_method': 'global_backward',
-                'enable_variable_selection': True,
+                'variable_selection_method': 'none',  # 默认不启用变量选择
+                'enable_variable_selection': False,
                 'max_iter': 30,  # 修正键名
                 'factor_ar_order': 1,  # 修正键名
                 'factor_selection_strategy': 'fixed_number',

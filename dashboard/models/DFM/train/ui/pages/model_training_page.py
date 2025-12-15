@@ -958,15 +958,21 @@ def render_dfm_model_training_page(st_instance):
 
         variable_selection_options = {
             'none': "无筛选 (使用全部已选变量)",
-            'global_backward': "全局后向剔除 (在已选变量中筛选)"
+            'backward': "后向选择法 (逐步移除不重要变量)",
+            'stepwise': "向前向后法 (逐步添加并检查冗余变量)"
         }
-        default_var_method = 'global_backward'
+        default_var_method = 'none'
 
         # 获取当前变量选择方法
         current_var_method = _state.get('dfm_variable_selection_method', default_var_method)
+        # 兼容旧值
+        if current_var_method == 'global_backward':
+            current_var_method = 'backward'
+        if current_var_method not in variable_selection_options:
+            current_var_method = default_var_method
 
         var_method_value = st_instance.selectbox(
-            "变量选择方法",
+            "变量筛选方法",
             options=list(variable_selection_options.keys()),
             format_func=lambda x: variable_selection_options[x],
             index=list(variable_selection_options.keys()).index(current_var_method),
@@ -974,7 +980,8 @@ def render_dfm_model_training_page(st_instance):
             help=(
                 "选择在已选变量基础上的筛选方法：\n"
                 "- 无筛选: 直接使用所有已选择的变量\n"
-                "- 全局后向剔除: 从已选变量开始，逐个剔除不重要的变量"
+                "- 后向选择法: 从全部变量开始，逐步移除对模型贡献最小的变量\n"
+                "- 向前向后法: 从单个最优变量开始，逐步添加变量并检查是否需要移除冗余变量"
             )
         )
         _state.set('dfm_variable_selection_method', var_method_value)
