@@ -80,6 +80,8 @@ def _render_correlation_tab():
         )
 
         if data_corr is not None:
+            # 统一清理列名空格（在数据入口点处理，避免下游重复清理）
+            data_corr.columns = data_corr.columns.str.strip() if hasattr(data_corr.columns, 'str') else data_corr.columns
             file_name_corr = upload_component_corr.get_state('file_name')
             st.session_state['exploration.time_lag_corr.upload_data'] = data_corr
             st.session_state['exploration.time_lag_corr.file_name'] = file_name_corr
@@ -109,6 +111,8 @@ def _render_lead_lag_tab():
         )
 
         if data_lag is not None:
+            # 统一清理列名空格（在数据入口点处理，避免下游重复清理）
+            data_lag.columns = data_lag.columns.str.strip() if hasattr(data_lag.columns, 'str') else data_lag.columns
             file_name_lag = upload_component_lag.get_state('file_name')
             st.session_state['exploration.lead_lag.upload_data'] = data_lag
             st.session_state['exploration.lead_lag.file_name'] = file_name_lag

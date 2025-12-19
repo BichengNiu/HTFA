@@ -84,6 +84,111 @@ class FileUploaderComponent:
         name = getattr(file_obj, 'name', 'unknown')
         return f"{name}_{size}"
 
+    def _clear_dependent_states(self, st_instance) -> None:
+        """
+        清除所有依赖于旧数据的状态
+
+        当用户上传新文件时调用，确保页面状态与新数据一致
+
+        Args:
+            st_instance: Streamlit实例（用于打印日志）
+        """
+        import streamlit as st
+
+        # 1. 变量选择相关状态（StateManager命名空间内）
+        variable_selection_keys = [
+            'dfm_selected_indicators',
+            'dfm_selected_industries',
+            'dfm_selected_indicators_per_industry_single_stage',
+            'dfm_selected_indicators_per_industry_two_stage',
+            'dfm_target_variable',
+            'dfm_first_stage_target_variables',
+            'dfm_second_stage_target_variable',
+            'dfm_second_stage_extra_predictors',
+            'dfm_default_variables_map',
+            'dfm_industry_map_filtered',
+        ]
+
+        # 2. 训练状态相关
+        training_state_keys = [
+            'dfm_training_status',
+            'dfm_training_log',
+            'dfm_model_results_paths',
+            'dfm_model_results',
+            'dfm_training_result',
+            'dfm_training_error',
+            'dfm_training_progress',
+            'dfm_training_start_time',
+            'dfm_training_end_time',
+            'dfm_training_completed_timestamp',
+            'dfm_page_initialized',
+        ]
+
+        # 3. 日期相关状态
+        date_keys = [
+            'dfm_training_start_date',
+            'dfm_validation_start_date',
+            'dfm_validation_end_date',
+            'dfm_observation_start_date',
+        ]
+
+        # 4. 行业因子数设置
+        industry_factor_keys = [
+            'dfm_industry_k_factors',
+        ]
+
+        # 清除StateManager命名空间内的状态
+        all_keys = variable_selection_keys + training_state_keys + date_keys + industry_factor_keys
+        cleared_count = 0
+        for key in all_keys:
+            if self.state.exists(key):
+                self.state.delete(key)
+                cleared_count += 1
+
+        # 5. 清除直接存储在st.session_state中的widget状态
+        widget_prefixes = [
+            'dfm_indicators_multiselect_',
+            'dfm_select_all_',
+            'dfm_second_stage_extra_predictors_',
+            'industry_k_',
+        ]
+
+        # 6. 清除日期输入等widget的key（这些widget key直接存储在st.session_state中）
+        widget_exact_keys = [
+            'dfm_training_start_date_input',
+            'dfm_validation_start_date_input',
+            'dfm_observation_start_date_input',
+            'dfm_variable_selection_method_input',
+            'dfm_target_alignment_mode_input',
+            'dfm_factor_selection_strategy',
+            'dfm_fixed_number_of_factors',
+            'dfm_cumulative_variance_threshold_input',
+            'dfm_kaiser_threshold_input',
+            'dfm_factor_ar_order_input',
+            'temp_estimation_method_selector',
+        ]
+
+        widget_cleared_count = 0
+        keys_to_delete = []
+
+        # 清除前缀匹配的widget
+        for key in st.session_state.keys():
+            for prefix in widget_prefixes:
+                if key.startswith(prefix) or key.startswith(f'train_model.{prefix}'):
+                    keys_to_delete.append(key)
+                    break
+
+        # 清除精确匹配的widget
+        for key in widget_exact_keys:
+            if key in st.session_state:
+                keys_to_delete.append(key)
+
+        for key in keys_to_delete:
+            del st.session_state[key]
+            widget_cleared_count += 1
+
+        print(f"[模型训练] 状态清除完成: {cleared_count}个命名空间状态 + {widget_cleared_count}个widget状态")
+
     def _load_excel_file(self, excel_file, st_instance) -> Tuple[Optional[pd.DataFrame], Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
         """
         从Excel文件加载数据和映射（带缓存）
@@ -120,6 +225,13 @@ class FileUploaderComponent:
             and cached_frequency_map and cached_unit_map and current_file_id == cached_file_id):
             print(f"[模型训练] 使用缓存的Excel数据: 数据={cached_df.shape}, 映射={len(cached_industry_map)}个变量, 频率={len(cached_frequency_map)}个变量, 单位={len(cached_unit_map)}个变量")
             return cached_df, cached_industry_map, cached_single_stage_map or {}, cached_frequency_map, cached_unit_map
+
+        # 检测到新文件上传，清除所有依赖旧数据的状态
+        is_new_file = cached_file_id is not None and current_file_id != cached_file_id
+        if is_new_file:
+            print(f"[模型训练] 检测到新文件上传，清除旧数据相关状态")
+            self._clear_dependent_states(st_instance)
+            st_instance.info("检测到新数据文件，已重置所有配置。请重新设置模型参数。")
 
         # 重新加载Excel
         try:

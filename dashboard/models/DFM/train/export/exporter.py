@@ -229,7 +229,32 @@ class TrainingResultExporter:
                 if factors_data.ndim == 2:
                     factors_transposed = factors_data.T
                     factor_names = [f'Factor_{i+1}' for i in range(factors_transposed.shape[1])]
-                    metadata['factor_series'] = pd.DataFrame(factors_transposed, columns=factor_names)
+
+                    # 尝试从数据文件获取日期索引
+                    date_index = None
+                    if hasattr(config, 'data_path') and config.data_path:
+                        try:
+                            data = self._read_data_file(config.data_path)
+                            if isinstance(data.index, pd.DatetimeIndex):
+                                date_index = data.index
+                            else:
+                                date_index = pd.to_datetime(data.index)
+
+                            # 确保长度匹配
+                            if len(date_index) != factors_transposed.shape[0]:
+                                logger.warning(f"日期索引长度({len(date_index)})与因子数据长度({factors_transposed.shape[0]})不匹配")
+                                date_index = None
+                        except Exception as e:
+                            logger.warning(f"获取因子序列日期索引失败: {e}")
+                            date_index = None
+
+                    metadata['factor_series'] = pd.DataFrame(
+                        factors_transposed,
+                        columns=factor_names,
+                        index=date_index
+                    )
+                    if date_index is not None:
+                        logger.info(f"因子序列保存成功，日期范围: {date_index.min()} 到 {date_index.max()}")
                 else:
                     metadata['factor_series'] = None
             else:

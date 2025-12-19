@@ -80,6 +80,17 @@ def perform_batch_dtw_calculation(
         error_messages.append(f"目标序列 '{target_series_name}' 不存在于数据中")
         return results_list, paths_dict, error_messages, warning_messages
 
+    # 确保df有DatetimeIndex（无论是否启用频率对齐）
+    # 这是后续时间坐标正确显示的前提
+    if not isinstance(df.index, pd.DatetimeIndex):
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date'])
+            df = df.set_index('Date')
+            logger.info("[DTW批量计算] 将Date列设置为DatetimeIndex")
+        else:
+            error_messages.append("数据中没有Date列，无法进行DTW分析")
+            return results_list, paths_dict, error_messages, warning_messages
+
     # 频率对齐（如果启用）- 修复：必须在验证目标序列之前执行
     if enable_freq_alignment:
         logger.info(f"执行频率对齐: 模式={freq_alignment_mode}, 聚合方法={freq_agg_method}")
@@ -87,42 +98,29 @@ def perform_batch_dtw_calculation(
             # 构建包含目标序列和所有对比序列的DataFrame
             all_series_names = [target_series_name] + comparison_series_names
 
-            # 简化逻辑：数据第一列固定是Date(日期格式)
+            # df此时应该已经有DatetimeIndex
             if isinstance(df.index, pd.DatetimeIndex):
-                # 如果已经是DatetimeIndex，直接使用
                 df_for_alignment = df[all_series_names].copy()
-            elif 'Date' in df.columns:
-                # 数据第一列是Date，将其设为索引
-                df_for_alignment = df[['Date'] + all_series_names].copy()
-                df_for_alignment['Date'] = pd.to_datetime(df_for_alignment['Date'])
-                df_for_alignment = df_for_alignment.set_index('Date')
-                logger.info("[频率对齐] 使用Date列作为时间索引")
             else:
-                # 找不到Date列，跳过对齐
-                df_for_alignment = None
-                warning_messages.append("数据中没有Date列，频率对齐已跳过")
-                logger.warning("[频率对齐] 未找到Date列")
+                error_messages.append("数据没有时间索引，无法进行频率对齐")
+                return results_list, paths_dict, error_messages, warning_messages
 
+            logger.info(f"[频率对齐] 调用align_multiple_series_frequencies，输入形状: {df_for_alignment.shape}")
 
-            if df_for_alignment is not None:
-                logger.info(f"[频率对齐] 调用align_multiple_series_frequencies，输入形状: {df_for_alignment.shape}")
+            # 执行频率对齐
+            df_aligned = align_multiple_series_frequencies(
+                df_for_alignment,
+                mode=freq_alignment_mode,
+                agg_method=freq_agg_method
+            )
 
-                # 执行频率对齐
-                df_aligned = align_multiple_series_frequencies(
-                    df_for_alignment,
-                    mode=freq_alignment_mode,
-                    agg_method=freq_agg_method
-                )
-
-                # 更新数据（不对所有列一起dropna，而是在计算每对DTW时单独处理）
-                df = df_aligned
-                logger.info(f"[频率对齐] 完成: 数据形状 {df.shape}")
-            else:
-                logger.warning("[频率对齐] 跳过对齐，继续使用原始数据")
+            # 更新数据（不对所有列一起dropna，而是在计算每对DTW时单独处理）
+            df = df_aligned
+            logger.info(f"[频率对齐] 完成: 数据形状 {df.shape}")
 
         except Exception as e:
-            warning_messages.append(f"频率对齐失败: {str(e)}，使用原始数据")
-            logger.warning(f"[频率对齐] 异常: {e}")
+            error_messages.append(f"频率对齐失败: {str(e)}")
+            return results_list, paths_dict, error_messages, warning_messages
 
     # 验证并清洗目标序列（在频率对齐之后）
     # 注意：不在这里标准化，因为需要针对每对序列单独对齐后再标准化
@@ -187,12 +185,30 @@ def perform_batch_dtw_calculation(
                         f"对齐前=({len(target_data_clean)}, {len(compare_data_clean)}), "
                         f"对齐后={len(pair_df_clean)}")
         else:
-            # 非严格对齐模式：DTW可以比较不同长度的序列，每个序列分别去除NaN
-            target_data_for_dtw = target_data_clean.dropna()
-            compare_data_for_dtw = compare_data_clean.dropna()
+            # 非严格对齐模式：使用共同时间范围计算DTW（各自保持原有频率）
+            # 首先去除各自的NaN
+            target_clean = target_data_clean.dropna()
+            compare_clean = compare_data_clean.dropna()
 
-            logger.debug(f"[非严格对齐] {target_series_name} vs {compare_name}: "
-                        f"序列长度=({len(target_data_for_dtw)}, {len(compare_data_for_dtw)})")
+            # 找到共同的时间范围（而非索引交集）
+            # 共同时间范围 = [max(start1, start2), min(end1, end2)]
+            common_start = max(target_clean.index.min(), compare_clean.index.min())
+            common_end = min(target_clean.index.max(), compare_clean.index.max())
+
+            if common_start > common_end:
+                # 没有重叠的时间范围
+                error_messages.append(f"'{target_series_name}' 与 '{compare_name}' 没有重叠的时间范围")
+                current_result['原因'] = '时间范围无重叠'
+                results_list.append(current_result)
+                continue
+
+            # 在共同时间范围内筛选各自的数据点（保持各自原有频率）
+            target_data_for_dtw = target_clean[(target_clean.index >= common_start) & (target_clean.index <= common_end)]
+            compare_data_for_dtw = compare_clean[(compare_clean.index >= common_start) & (compare_clean.index <= common_end)]
+
+            logger.debug(f"[非严格对齐-共同时间范围] {target_series_name} vs {compare_name}: "
+                        f"共同时间范围=[{common_start}, {common_end}], "
+                        f"筛选后长度=({len(target_data_for_dtw)}, {len(compare_data_for_dtw)})")
 
         # 检查序列是否有足够的样本
         if len(target_data_for_dtw) < 10:
@@ -209,11 +225,8 @@ def perform_batch_dtw_calculation(
 
         # 标准化（各自独立标准化）
         if standardization_method and standardization_method != 'none':
-            try:
-                target_data_for_dtw = standardize_series(target_data_for_dtw, method=standardization_method)
-                compare_data_for_dtw = standardize_series(compare_data_for_dtw, method=standardization_method)
-            except Exception as e:
-                warning_messages.append(f"序列对 '{target_series_name}' vs '{compare_name}' 标准化失败: {str(e)}")
+            target_data_for_dtw = standardize_series(target_data_for_dtw, method=standardization_method)
+            compare_data_for_dtw = standardize_series(compare_data_for_dtw, method=standardization_method)
 
         target_np = target_data_for_dtw.to_numpy()
         compare_np = compare_data_for_dtw.to_numpy()
@@ -231,6 +244,22 @@ def perform_batch_dtw_calculation(
                 else:
                     radius = 10
                     warning_messages.append(f"窗口大小参数无效 ({window_size_param})，已默认为10")
+
+                # 检查序列长度差异是否超过radius
+                # DTW路径必须从(0,0)到(n-1,m-1)，最小偏离为|n-m|
+                len_diff = abs(len(target_np) - len(compare_np))
+                if len_diff > radius:
+                    error_msg = (
+                        f"'{target_series_name}' vs '{compare_name}': "
+                        f"序列长度差异({len_diff})超过radius({radius})，Sakoe-Chiba约束无法满足！\n"
+                        f"  目标序列长度: {len(target_np)}\n"
+                        f"  比较序列长度: {len(compare_np)}\n"
+                        f"  建议: 使用'无限制'模式，或设置radius >= {len_diff}"
+                    )
+                    error_messages.append(error_msg)
+                    current_result['原因'] = f'长度差异({len_diff}) > radius({radius})'
+                    results_list.append(current_result)
+                    continue
 
                 logger.debug(f"[DTW计算] 启用窗口约束: radius={radius}")
             else:  # "无限制"

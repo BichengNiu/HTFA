@@ -23,7 +23,29 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
     
     def __init__(self):
         super().__init__("dtw", "DTW分析")
-    
+
+    def clear_analysis_state(self):
+        """
+        清除所有DTW分析相关状态
+
+        用于：
+        - 参数变化时清除旧结果
+        - 数据变化时清除缓存
+        - 确保状态一致性
+        """
+        state_keys = [
+            'auto_results',
+            'target_series',
+            'comparison_series',
+            'dtw_params',
+            'dtw_analysis_data',
+            'dtw_paths_dict',
+            'dtw_data_version'
+        ]
+        for key in state_keys:
+            self.set_state(key, None)
+        logger.info("[DTW] 已清除所有分析状态")
+
     def smart_window_selection(self, target_length: int, comparison_length: int, series_length: int) -> Tuple[str, int]:
         """
         智能选择窗口类型和大小
@@ -139,7 +161,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
         return params
 
-    def collect_analysis_parameters(self, st_obj, data: pd.DataFrame, data_name: str) -> dict:
+    def collect_analysis_parameters(self, st_obj, data: pd.DataFrame, data_name: str) -> Optional[dict]:
         """
         收集当前界面上的所有分析参数
 
@@ -149,7 +171,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             data_name: 数据名称
 
         Returns:
-            dict: 当前界面参数字典
+            dict: 当前界面参数字典，如果参数收集失败或验证失败则返回None
         """
         try:
             # 获取数值列
@@ -162,10 +184,20 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             if target_series and isinstance(target_series, str):
                 target_series = target_series.strip()
 
+            # 验证必需参数：目标序列
+            if not target_series:
+                logger.warning(f"[DTW参数收集] 目标序列未设置或为空")
+                return None
+
             # 获取窗口约束参数（从下拉菜单读取）
             window_constraint_choice = st.session_state.get(f"dtw_{data_name}_window_constraint_choice", "是")
             enable_window_constraint = (window_constraint_choice == "是")
-            radius = st.session_state.get(f"dtw_{data_name}_radius", 10)
+            # 只有当窗口约束启用时才获取radius，否则设为None
+            # 这与render_auto_mode_parameters的行为保持一致，避免参数变化误判
+            if enable_window_constraint:
+                radius = st.session_state.get(f"dtw_{data_name}_radius", 10)
+            else:
+                radius = None
 
             # 获取对齐模式选择
             alignment_mode_choice = st.session_state.get(f"dtw_{data_name}_alignment_mode_choice", 'freq_align_strict')
@@ -194,8 +226,18 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
             # 获取比较序列（所有除目标序列外的数值列）
             # 清理列名首尾空格，防止空格导致的匹配失败
-            comparison_series = [col.strip() if isinstance(col, str) else col
-                                for col in numeric_cols if col != target_series] if target_series else []
+            # 注意：必须先strip再比较，因为target_series已经被strip过了
+            comparison_series = []
+            if target_series:
+                for col in numeric_cols:
+                    col_cleaned = col.strip() if isinstance(col, str) else col
+                    if col_cleaned != target_series:
+                        comparison_series.append(col_cleaned)
+
+            # 验证必需参数：比较序列不能为空
+            if not comparison_series:
+                logger.warning(f"[DTW参数收集] 比较序列为空（可能所有数值列都被选为目标序列）")
+                return None
 
             return {
                 'target_series': target_series,
@@ -212,9 +254,9 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             }
 
         except Exception as e:
-            # 如果获取参数失败，返回空字典
-            logger.debug(f"Failed to collect analysis parameters: {e}")
-            return {}
+            # 如果获取参数失败，返回None（而不是空字典）
+            logger.error(f"[DTW参数收集] 参数收集失败: {e}", exc_info=True)
+            return None
     
     def render_auto_mode_parameters(self, st_obj, data: pd.DataFrame, data_name: str, numeric_cols: list):
         """渲染自动模式参数（新3列布局）"""
@@ -433,9 +475,12 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         results = self.add_similarity_labels(results)
 
         # 缓存分析时使用的数据和路径字典，避免第二次重复计算
+        # 添加数据版本号，用于检测数据是否变化
+        data_version = hash(tuple(data.columns.tolist() + [len(data)]))
         self.set_state('dtw_analysis_data', data.copy())
         self.set_state('dtw_paths_dict', paths_dict)
-        logger.info(f"[DTW] 已缓存分析数据（列数: {len(data.columns)}）和路径字典（{len(paths_dict)}个变量）")
+        self.set_state('dtw_data_version', data_version)
+        logger.info(f"[DTW] 已缓存分析数据（列数: {len(data.columns)}, 版本: {data_version}）和路径字典（{len(paths_dict)}个变量）")
 
         return results
 
@@ -574,7 +619,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 selected_comparison = st_obj.selectbox(
                     "选择比较序列:",
                     options=valid_comparison_series,
-                    key="dtw_comparison_selection",
+                    key=f"dtw_{data_name}_comparison_selection",
                     help="选择一个序列查看DTW对比图"
                 )
             else:
@@ -585,7 +630,11 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # 显示选中比较序列的DTW信息
             selected_result = None
             for result in results:
-                if result.get('变量名') == selected_comparison:
+                # 防御性strip，避免旧缓存结果的变量名未被清理
+                result_var_name = result.get('变量名')
+                if isinstance(result_var_name, str):
+                    result_var_name = result_var_name.strip()
+                if result_var_name == selected_comparison:
                     selected_result = result
                     break
             
@@ -659,24 +708,38 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             logger.warning(f"[DTW诊断] 变量不存在！最相似的3个列名: {top3}")
 
         # 优先使用缓存的路径字典，避免重复计算
+        # 但是需要先检查数据版本是否匹配，避免使用旧数据的路径
         cached_paths_dict = self.get_state('dtw_paths_dict')
-        if cached_paths_dict and selected_comparison in cached_paths_dict:
-            logger.info(f"[DTW] 使用缓存的路径数据（无需重新计算）: {selected_comparison}")
+        cached_version = self.get_state('dtw_data_version')
+        current_version = hash(tuple(data.columns.tolist() + [len(data)]))
+
+        if cached_paths_dict and selected_comparison in cached_paths_dict and cached_version == current_version:
+            logger.info(f"[DTW] 使用缓存的路径数据（版本匹配: {current_version}，无需重新计算）: {selected_comparison}")
             paths_dict = cached_paths_dict
             errors = []
             warnings = []
         else:
-            # 缓存中没有，需要重新计算
-            logger.info(f"[DTW] 缓存中没有路径数据，重新计算: {selected_comparison}")
+            # 缓存中没有或版本不匹配，需要重新计算
+            if cached_version != current_version:
+                logger.info(f"[DTW] 缓存版本不匹配（缓存: {cached_version}, 当前: {current_version}），重新计算: {selected_comparison}")
+            else:
+                logger.info(f"[DTW] 缓存中没有路径数据，重新计算: {selected_comparison}")
 
-            # 使用缓存的分析数据（如果存在）
+            # 使用缓存的分析数据（如果存在且版本匹配）
             cached_data = self.get_state('dtw_analysis_data')
-            if cached_data is not None:
-                logger.info("[DTW] 使用缓存的分析数据")
+
+            if cached_data is not None and cached_version == current_version:
+                logger.info(f"[DTW] 使用缓存的分析数据（版本匹配: {current_version}）")
                 data_for_calc = cached_data
                 # 确保缓存数据的列名也被清理（防止旧缓存列名带空格）
                 data_for_calc.columns = data_for_calc.columns.str.strip() if hasattr(data_for_calc.columns, 'str') else data_for_calc.columns
                 logger.info(f"[DTW] 已清理缓存数据列名，列数: {len(data_for_calc.columns)}")
+            elif cached_data is not None and cached_version != current_version:
+                logger.warning(f"[DTW] 缓存数据版本不匹配（缓存: {cached_version}, 当前: {current_version}），使用当前data")
+                data_for_calc = data
+                # 确保当前data的列名也被清理
+                data_for_calc.columns = data_for_calc.columns.str.strip() if hasattr(data_for_calc.columns, 'str') else data_for_calc.columns
+                logger.info(f"[DTW] 已清理当前数据列名，列数: {len(data_for_calc.columns)}")
             else:
                 logger.warning("[DTW] 未找到缓存数据，使用当前data")
                 data_for_calc = data
@@ -770,37 +833,19 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # 创建Plotly图表
             fig = go.Figure()
 
-            # 创建X轴索引（使用真实时间或数字索引）
-            # 优先使用传入的时间索引
-            if s1_time_index is not None and len(s1_time_index) == len(s1_np):
-                # 将月末日期转换为月初日期，解决hover时间与x轴刻度不对齐问题
-                if hasattr(s1_time_index, 'to_period'):
-                    # pandas DatetimeIndex: 转换为月初
-                    s1_x = s1_time_index.to_period('M').to_timestamp()
-                else:
-                    s1_x = s1_time_index
-                use_time_axis = True
-            else:
-                s1_x = np.arange(len(s1_np))
-                use_time_axis = False
+            # 创建X轴索引（必须使用DatetimeIndex）
+            if not isinstance(s1_time_index, pd.DatetimeIndex):
+                raise ValueError(f"目标序列时间索引类型错误: {type(s1_time_index).__name__}，必须为DatetimeIndex")
+            if not isinstance(s2_time_index, pd.DatetimeIndex):
+                raise ValueError(f"比较序列时间索引类型错误: {type(s2_time_index).__name__}，必须为DatetimeIndex")
 
-            if s2_time_index is not None and len(s2_time_index) == len(s2_np):
-                # 同样转换为月初
-                if hasattr(s2_time_index, 'to_period'):
-                    s2_x = s2_time_index.to_period('M').to_timestamp()
-                else:
-                    s2_x = s2_time_index
-            else:
-                s2_x = np.arange(len(s2_np))
-                use_time_axis = False
+            # pandas DatetimeIndex: 转换为月初
+            s1_x = s1_time_index.to_period('M').to_timestamp()
+            s2_x = s2_time_index.to_period('M').to_timestamp()
 
             # 格式化时间用于hover显示
-            if use_time_axis:
-                s1_hover_times = [t.strftime('%Y-%m') if hasattr(t, 'strftime') else str(t) for t in s1_x]
-                s2_hover_times = [t.strftime('%Y-%m') if hasattr(t, 'strftime') else str(t) for t in s2_x]
-            else:
-                s1_hover_times = [str(t) for t in s1_x]
-                s2_hover_times = [str(t) for t in s2_x]
+            s1_hover_times = [t.strftime('%Y-%m') for t in s1_x]
+            s2_hover_times = [t.strftime('%Y-%m') for t in s2_x]
 
             # 添加目标序列（序列1）- 实线
             fig.add_trace(go.Scatter(
@@ -852,7 +897,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     gridcolor='rgba(128, 128, 128, 0.2)',
                     showgrid=True,
                     tickfont=dict(size=13, family='Microsoft YaHei, SimHei, sans-serif'),  # X轴刻度字体加大
-                    tickformat='%Y-%m' if use_time_axis else None  # 时间格式：年-月
+                    tickformat='%Y-%m'  # 时间格式：年-月
                 ),
                 yaxis=dict(
                     title=dict(
@@ -892,10 +937,16 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         """渲染DTW分析界面"""
 
         try:
-            # 立即清理DataFrame列名中的首尾空格（统一在入口处处理）
+            # 防御性检查：确保列名已清理（上游bivariate_page.py应该已处理）
             data = data.copy()
-            data.columns = data.columns.str.strip() if hasattr(data.columns, 'str') else data.columns
-            logger.info(f"[DTW界面] 已清理数据列名空格，列数: {len(data.columns)}")
+            if hasattr(data.columns, 'str'):
+                # 检查是否需要清理（先保存原始列名，再比较）
+                original_columns = data.columns.tolist()
+                cleaned_columns = data.columns.str.strip().tolist()
+                if original_columns != cleaned_columns:
+                    logger.warning(f"[DTW界面] 检测到列名包含空格，已清理。建议检查上游数据处理流程。")
+                    data.columns = cleaned_columns
+            logger.debug(f"[DTW界面] 数据准备完成，列数: {len(data.columns)}")
 
             # 渲染参数设置
             params = self.render_analysis_parameters(st_obj, data, data_name)
@@ -979,18 +1030,24 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
                     **Radius参数**
 
-                    表示序列1的第i个点只能与序列2的第(i-radius)到(i+radius)个点对齐
+                    限制对齐路径的偏离程度（Sakoe-Chiba约束）：
+                    - **目标序列**（您选择的目标变量）的第i个点
+                    - 只能与**比较序列**的第(i-radius)到(i+radius)个点对齐
+
+                    **举例**: 设radius=5，目标序列第10个点只能与比较序列第5-15个点对齐
+
+                    **重要限制**:
+                    当两序列长度差异较大时，radius必须 >= 长度差异。
+                    例如：序列A有59点，序列B有303点，
+                    则长度差异=244，radius至少设为244才有效。
 
                     **推荐值**:
-                    - 小数据集 (<50点): 5-10
-                    - 中等数据集 (50-200点): 10-20
-                    - 大数据集 (>200点): 20-50
+                    - 长度接近时: 序列长度的5-15%
+                    - 长度差异大时: 使用"无限制"模式
 
                     **权衡**:
-                    - 越小：计算更快，对齐更严格
+                    - 越小：计算更快，对齐更严格（接近对角线）
                     - 越大：对齐更灵活，计算更慢
-
-                    **建议**: 一般设置为序列长度的5-15%
                     """)
 
             # 初始化分析结果变量
@@ -1052,6 +1109,13 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             if previous_auto_results and previous_target:
                 # 获取当前界面参数
                 current_params = self.collect_analysis_parameters(st_obj, data, data_name)
+
+                # 验证参数收集是否成功
+                if current_params is None:
+                    logger.warning("[DTW] 无法收集当前参数（UI控件可能未初始化），清除之前的结果")
+                    self.clear_analysis_state()
+                    return None
+
                 logger.info(f"DTW参数收集 - 当前参数: {list(current_params.keys())}")
 
                 # 检查关键参数是否发生变化
@@ -1067,12 +1131,19 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                                 'standardization_method',
                                 'enable_alignment', 'strict_alignment', 'agg_method']
 
-                    # 检查关键参数是否变化
+                    # 检查关键参数是否变化（带类型标准化）
                     for param in key_params:
                         current_val = current_params.get(param)
                         previous_val = previous_params.get(param)
-                        if current_val != previous_val:
-                            logger.info(f"DTW参数变化检测 - {param}: {previous_val} → {current_val}")
+
+                        # 对数字类型进行标准化比较（避免int/float误判）
+                        if isinstance(current_val, (int, float)) and isinstance(previous_val, (int, float)):
+                            if abs(current_val - previous_val) > 1e-9:
+                                logger.info(f"DTW参数变化检测 - {param}: {previous_val} → {current_val} (数字类型)")
+                                params_changed = True
+                                break
+                        elif current_val != previous_val:
+                            logger.info(f"DTW参数变化检测 - {param}: {previous_val} ({type(previous_val).__name__}) → {current_val} ({type(current_val).__name__})")
                             params_changed = True
                             break
 
@@ -1080,20 +1151,25 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     if not params_changed:
                         logger.info("DTW参数检查 - 无变化，保持现有结果")
 
-                    # 检查比较序列是否变化
+                    # 检查比较序列是否变化（注意：需要对列名进行空格清理以匹配保存时的处理）
+                    # 必须先strip再比较，因为target_series已经被strip过了
                     numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
-                    current_comparison = [col for col in numeric_cols if col != current_params.get('target_series')]
-                    if set(current_comparison) != set(previous_comparison_series or []):
-                        logger.info(f"DTW参数变化检测 - 比较序列发生变化")
+                    current_comparison = []
+                    target_series_value = current_params.get('target_series')
+                    for col in numeric_cols:
+                        col_cleaned = col.strip() if isinstance(col, str) else col
+                        if col_cleaned != target_series_value:
+                            current_comparison.append(col_cleaned)
+                    previous_comparison_set = set(previous_comparison_series or [])
+                    current_comparison_set = set(current_comparison)
+                    if current_comparison_set != previous_comparison_set:
+                        logger.info(f"DTW参数变化检测 - 比较序列发生变化: 当前{len(current_comparison_set)}个 vs 之前{len(previous_comparison_set)}个")
                         params_changed = True
-                
+
                 if params_changed:
-                    # 参数已变化，清除之前的结果状态
+                    # 参数已变化，使用统一的状态清理方法
                     logger.info("DTW参数已变化 - 清除之前的分析结果")
-                    self.set_state('auto_results', None)
-                    self.set_state('target_series', None)
-                    self.set_state('comparison_series', None)
-                    self.set_state('dtw_params', None)
+                    self.clear_analysis_state()
                 else:
                     # 参数未变化，显示之前的结果
                     logger.info("DTW参数未变化 - 显示之前的分析结果")
