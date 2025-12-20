@@ -402,8 +402,358 @@ def render_dfm_model_training_page(st_instance):
     unique_industries = sorted(list(industry_to_indicators_temp.keys()))
     var_to_indicators_map_by_industry = {k: sorted(v) for k, v in industry_to_indicators_temp.items()}
 
-    # 主布局：现在是上下结构，不再使用列
-    # REMOVED: var_selection_col, param_col = st_instance.columns([1, 1.5])
+    # ===== 计算日期默认值的辅助函数 =====
+    def get_data_based_date_defaults():
+        """基于实际数据计算日期默认值，优先使用数据准备页面设置的日期边界"""
+        from datetime import datetime
+        today = datetime.now().date()
+
+        # 使用统一配置类
+        static_defaults = UIConfig.get_date_defaults()
+
+        try:
+            # 仅从train_model模块获取数据（完全解耦）
+            data_df = _state.get('dfm_prepared_data_df')
+
+            if data_df is not None and isinstance(data_df.index, pd.DatetimeIndex) and len(data_df.index) > 0:
+                # 从数据获取第一期
+                data_first_date = data_df.index.min().date()
+
+                # 训练开始日期默认为数据的第一期
+                training_start_date = data_first_date
+                validation_start_date = UIConfig.DEFAULT_VALIDATION_START
+                observation_start_date = UIConfig.DEFAULT_OBSERVATION_START
+
+                # 计算验证期结束日期 = 观察期开始日期 - 1周
+                validation_end_timestamp = pd.Timestamp(observation_start_date) - pd.Timedelta(weeks=1)
+
+                return {
+                    'training_start': training_start_date,
+                    'validation_start': validation_start_date,
+                    'validation_end': validation_end_timestamp.date()
+                }
+            else:
+                return static_defaults
+        except Exception as e:
+            print(f"[WARNING] 计算数据默认日期失败: {e}，使用静态默认值")
+            return static_defaults
+
+    # 获取智能默认值
+    date_defaults = get_data_based_date_defaults()
+
+    # 初始化数据相关状态
+    has_data = False
+    data_df = _state.get('dfm_prepared_data_df')
+    if data_df is not None:
+        has_data = True
+
+    if has_data:
+        if isinstance(data_df.index, pd.DatetimeIndex) and len(data_df.index) > 0:
+            # 初始化默认日期（只在状态为空时设置）
+            if _state.get('dfm_training_start_date') is None:
+                _state.set('dfm_training_start_date', date_defaults['training_start'])
+            if _state.get('dfm_validation_start_date') is None:
+                _state.set('dfm_validation_start_date', date_defaults['validation_start'])
+            if _state.get('dfm_observation_start_date') is None:
+                default_obs_start_timestamp = pd.Timestamp(date_defaults['validation_end']) + pd.Timedelta(weeks=1)
+                _state.set('dfm_observation_start_date', default_obs_start_timestamp.date())
+
+    # ===== 卡片1: 训练周期设置 =====
+    st_instance.subheader("训练周期设置")
+    col_time1, col_time2, col_time3 = st_instance.columns(3)
+
+    with col_time1:
+        training_start_value = st_instance.date_input(
+            "训练期开始",
+            value=_state.get('dfm_training_start_date', date_defaults['training_start']),
+            key='dfm_training_start_date_input',
+            help="模型训练数据的起始日期，默认为数据开始日期"
+        )
+        _state.set('dfm_training_start_date', training_start_value)
+
+    with col_time2:
+        validation_start_value = st_instance.date_input(
+            "验证期开始",
+            value=_state.get('dfm_validation_start_date', date_defaults['validation_start']),
+            key='dfm_validation_start_date_input',
+            help="验证期开始日期"
+        )
+        _state.set('dfm_validation_start_date', validation_start_value)
+
+    with col_time3:
+        observation_start_value = st_instance.date_input(
+            "观察期开始",
+            value=_state.get('dfm_observation_start_date', date_defaults['validation_end']),
+            key='dfm_observation_start_date_input',
+            help="观察期开始日期，验证期结束日期自动设置为该日期的前一周"
+        )
+        _state.set('dfm_observation_start_date', observation_start_value)
+
+    # 自动计算验证期结束日期
+    validation_end_timestamp = pd.Timestamp(observation_start_value) - pd.Timedelta(weeks=1)
+    validation_end_value = validation_end_timestamp.date()
+    _state.set('dfm_validation_end_date', validation_end_value)
+    st_instance.caption(f"验证期结束: {validation_end_value.strftime('%Y-%m-%d')}")
+
+    # ===== 卡片2: 模型核心配置 =====
+    st_instance.subheader("模型核心配置")
+
+    # 估计方法回调函数
+    def on_estimation_method_change():
+        new_method = st_instance.session_state.get('temp_estimation_method_selector', 'single_stage')
+        _state.set('dfm_estimation_method', new_method)
+
+    # 第一行: 估计方法 + 目标对齐方式
+    col_core1, col_core2 = st_instance.columns(2)
+
+    with col_core1:
+        current_method = _state.get('dfm_estimation_method', UIConfig.DEFAULT_ESTIMATION_METHOD)
+        # 验证方法有效性
+        if current_method not in UIConfig.ESTIMATION_METHODS:
+            raise ValueError(f"无效的估计方法: {current_method}，有效值: {list(UIConfig.ESTIMATION_METHODS.keys())}")
+
+        estimation_method = st_instance.selectbox(
+            "估计方法",
+            options=list(UIConfig.ESTIMATION_METHODS.keys()),
+            format_func=lambda x: UIConfig.ESTIMATION_METHODS[x],
+            index=UIConfig.get_safe_option_index(
+                UIConfig.ESTIMATION_METHODS, current_method, UIConfig.DEFAULT_ESTIMATION_METHOD
+            ),
+            key='temp_estimation_method_selector',
+            on_change=on_estimation_method_change,
+            help="一次估计法：直接预测总量指标；二次估计法：先预测各行业，再加总"
+        )
+        _state.set('dfm_estimation_method', estimation_method)
+
+    with col_core2:
+        current_alignment = _state.get('dfm_target_alignment_mode', UIConfig.DEFAULT_TARGET_ALIGNMENT)
+        # 验证有效性
+        if current_alignment not in UIConfig.TARGET_ALIGNMENT_OPTIONS:
+            raise ValueError(f"无效的目标对齐方式: {current_alignment}，有效值: {list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys())}")
+
+        alignment_value = st_instance.selectbox(
+            "目标对齐方式",
+            options=list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys()),
+            format_func=lambda x: UIConfig.TARGET_ALIGNMENT_OPTIONS[x],
+            index=UIConfig.get_safe_option_index(
+                UIConfig.TARGET_ALIGNMENT_OPTIONS, current_alignment, UIConfig.DEFAULT_TARGET_ALIGNMENT
+            ),
+            key='dfm_target_alignment_mode_input',
+            help="nowcast预测值与目标变量实际值的配对方式"
+        )
+        _state.set('dfm_target_alignment_mode', alignment_value)
+
+    # 第二行: 变量筛选方法 + 因子选择策略
+    col_core3, col_core4 = st_instance.columns(2)
+
+    with col_core3:
+        current_var_method = _state.get('dfm_variable_selection_method', UIConfig.DEFAULT_VAR_SELECTION)
+        # 验证方法有效性
+        if current_var_method not in UIConfig.VARIABLE_SELECTION_METHODS:
+            raise ValueError(f"无效的变量筛选方法: {current_var_method}，有效值: {list(UIConfig.VARIABLE_SELECTION_METHODS.keys())}")
+
+        var_method_value = st_instance.selectbox(
+            "变量筛选方法",
+            options=list(UIConfig.VARIABLE_SELECTION_METHODS.keys()),
+            format_func=lambda x: UIConfig.VARIABLE_SELECTION_METHODS[x],
+            index=UIConfig.get_safe_option_index(
+                UIConfig.VARIABLE_SELECTION_METHODS, current_var_method, UIConfig.DEFAULT_VAR_SELECTION
+            ),
+            key='dfm_variable_selection_method_input',
+            help="选择在已选变量基础上的筛选方法"
+        )
+        _state.set('dfm_variable_selection_method', var_method_value)
+
+        enable_var_selection = (var_method_value != 'none')
+        _state.set('dfm_enable_variable_selection', enable_var_selection)
+
+    with col_core4:
+        current_strategy = _state.get('dfm_factor_selection_strategy', UIConfig.DEFAULT_FACTOR_STRATEGY)
+        # 验证策略有效性
+        if current_strategy not in UIConfig.FACTOR_STRATEGIES:
+            raise ValueError(f"无效的因子选择策略: {current_strategy}，有效值: {list(UIConfig.FACTOR_STRATEGIES.keys())}")
+
+        strategy_value = st_instance.selectbox(
+            "因子选择策略",
+            options=list(UIConfig.FACTOR_STRATEGIES.keys()),
+            format_func=lambda x: UIConfig.FACTOR_STRATEGIES[x],
+            index=UIConfig.get_safe_option_index(
+                UIConfig.FACTOR_STRATEGIES, current_strategy, UIConfig.DEFAULT_FACTOR_STRATEGY
+            ),
+            key='dfm_factor_selection_strategy',
+            help="选择确定因子数量的方法"
+        )
+        _state.set('dfm_factor_selection_strategy', strategy_value)
+
+    # ===== 卡片3: 高级选项 (折叠) =====
+    with st_instance.expander("高级选项", expanded=False):
+        # 因子参数（根据策略条件显示）
+        st_instance.markdown("**因子参数**")
+
+        # 初始化默认值
+        if strategy_value == 'fixed_number':
+            if _state.get('dfm_fixed_number_of_factors') is None:
+                _state.set('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS)
+        elif strategy_value == 'cumulative_variance':
+            if _state.get('dfm_cumulative_variance_threshold') is None:
+                _state.set('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE)
+        elif strategy_value == 'kaiser':
+            if _state.get('dfm_kaiser_threshold') is None:
+                _state.set('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD)
+
+        # 根据策略条件显示参数
+        if strategy_value == 'fixed_number':
+            fixed_factors_value = st_instance.number_input(
+                "因子数",
+                min_value=UIConfig.K_FACTORS_MIN,
+                max_value=UIConfig.K_FACTORS_MAX,
+                value=_state.get('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS),
+                step=1,
+                key='dfm_fixed_number_of_factors',
+                help="指定使用的因子数量"
+            )
+            _state.set('dfm_fixed_number_of_factors', fixed_factors_value)
+        elif strategy_value == 'cumulative_variance':
+            cum_var_value = st_instance.number_input(
+                "累积方差阈值",
+                min_value=UIConfig.CUM_VARIANCE_MIN,
+                max_value=UIConfig.CUM_VARIANCE_MAX,
+                value=_state.get('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE),
+                step=UIConfig.CUM_VARIANCE_STEP,
+                format="%.2f",
+                key='dfm_cumulative_variance_threshold_input',
+                help="因子累积解释方差的阈值"
+            )
+            _state.set('dfm_cumulative_variance_threshold', cum_var_value)
+        elif strategy_value == 'kaiser':
+            kaiser_threshold_value = st_instance.number_input(
+                "特征值阈值",
+                min_value=UIConfig.KAISER_THRESHOLD_MIN,
+                max_value=UIConfig.KAISER_THRESHOLD_MAX,
+                value=_state.get('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD),
+                step=UIConfig.KAISER_THRESHOLD_STEP,
+                format="%.1f",
+                key='dfm_kaiser_threshold_input',
+                help="选择特征值大于此阈值的因子"
+            )
+            _state.set('dfm_kaiser_threshold', kaiser_threshold_value)
+
+        # 因子自回归阶数
+        ar_order_value = st_instance.number_input(
+            "因子自回归阶数",
+            min_value=UIConfig.FACTOR_AR_ORDER_MIN,
+            max_value=UIConfig.FACTOR_AR_ORDER_MAX,
+            value=_state.get('dfm_factor_ar_order', UIConfig.DEFAULT_FACTOR_AR_ORDER),
+            step=1,
+            key='dfm_factor_ar_order_input',
+            help="因子的自回归阶数，通常设为1"
+        )
+        _state.set('dfm_factor_ar_order', ar_order_value)
+
+        # === 第一阶段分行业因子数（仅二次估计法）===
+        if estimation_method == 'two_stage':
+            st_instance.divider()
+            st_instance.markdown("**第一阶段：分行业因子数**")
+
+            if input_df is not None:
+                from dashboard.models.DFM.train.utils.industry_data_processor import extract_industry_list
+
+                industry_list = extract_industry_list(input_df)
+
+                if industry_list:
+                    st_instance.info(f"共识别到 {len(industry_list)} 个行业，请设定各行业因子数（默认值为1）")
+
+                    # 使用列布局优化显示（每行3个）
+                    cols_per_row = 3
+                    industry_k_factors = {}
+
+                    for i in range(0, len(industry_list), cols_per_row):
+                        cols = st_instance.columns(cols_per_row)
+                        for j, col in enumerate(cols):
+                            idx = i + j
+                            if idx < len(industry_list):
+                                industry = industry_list[idx]
+                                with col:
+                                    k_val = st_instance.number_input(
+                                        f"{industry}",
+                                        min_value=1,
+                                        max_value=5,
+                                        value=_state.get(f'industry_k_{industry}', 1),
+                                        step=1,
+                                        key=f'industry_k_{industry}'
+                                    )
+                                    industry_k_factors[industry] = k_val
+
+                    # 存储到session_state
+                    _state.set('dfm_industry_k_factors', industry_k_factors)
+                else:
+                    st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
+            else:
+                st_instance.warning("请先上传预处理后的数据文件")
+
+        # 筛选策略和混合优先级（筛选启用时显示）
+        if enable_var_selection:
+            st_instance.divider()
+            st_instance.markdown("**筛选参数**")
+
+            current_criterion = _state.get('dfm_selection_criterion', UIConfig.DEFAULT_SELECTION_CRITERION)
+            # 验证策略有效性
+            if current_criterion not in UIConfig.SELECTION_CRITERIA:
+                raise ValueError(f"无效的筛选策略: {current_criterion}，有效值: {list(UIConfig.SELECTION_CRITERIA.keys())}")
+
+            criterion_value = st_instance.selectbox(
+                "筛选策略",
+                options=list(UIConfig.SELECTION_CRITERIA.keys()),
+                format_func=lambda x: UIConfig.SELECTION_CRITERIA[x],
+                index=UIConfig.get_safe_option_index(
+                    UIConfig.SELECTION_CRITERIA, current_criterion, UIConfig.DEFAULT_SELECTION_CRITERION
+                ),
+                key='dfm_selection_criterion_input',
+                help="RMSE/胜率/混合"
+            )
+            _state.set('dfm_selection_criterion', criterion_value)
+
+            # 混合优先级（条件显示）
+            if criterion_value == 'hybrid':
+                current_priority = _state.get('dfm_hybrid_priority', UIConfig.DEFAULT_HYBRID_PRIORITY)
+                # 验证优先级有效性
+                if current_priority not in UIConfig.HYBRID_PRIORITIES:
+                    raise ValueError(f"无效的混合优先级: {current_priority}，有效值: {list(UIConfig.HYBRID_PRIORITIES.keys())}")
+
+                priority_value = st_instance.selectbox(
+                    "混合优先级",
+                    options=list(UIConfig.HYBRID_PRIORITIES.keys()),
+                    format_func=lambda x: UIConfig.HYBRID_PRIORITIES[x],
+                    index=UIConfig.get_safe_option_index(
+                        UIConfig.HYBRID_PRIORITIES, current_priority, UIConfig.DEFAULT_HYBRID_PRIORITY
+                    ),
+                    key='dfm_hybrid_priority_input',
+                    help="胜率优先或RMSE优先"
+                )
+                _state.set('dfm_hybrid_priority', priority_value)
+
+            st_instance.divider()
+            st_instance.markdown("**评分权重**")
+
+            current_weight = _state.get('dfm_training_weight', UIConfig.DEFAULT_TRAINING_WEIGHT)
+
+            training_weight_value = st_instance.slider(
+                "训练期权重 (%)",
+                min_value=UIConfig.TRAINING_WEIGHT_MIN,
+                max_value=UIConfig.TRAINING_WEIGHT_MAX,
+                value=current_weight,
+                step=UIConfig.TRAINING_WEIGHT_STEP,
+                key='dfm_training_weight_input',
+                help="0%=仅验证期, 100%=仅训练期"
+            )
+            _state.set('dfm_training_weight', training_weight_value)
+
+            # 显示权重说明
+            validation_weight = 100 - training_weight_value
+            st_instance.caption(f"训练期 {training_weight_value}% + 验证期 {validation_weight}%")
+
+    # ===== 变量选择 =====
+    st_instance.markdown("--- ")
 
     # 添加变量选择大标题
     st_instance.subheader("变量选择")
@@ -783,379 +1133,12 @@ def render_dfm_model_training_page(st_instance):
 
         _state.set('dfm_selected_industries', inferred_industries)
 
-    # 变量选择完成
+        # === 第二阶段变量选择（仅二次估计法）===
+        if current_estimation_method == 'two_stage':
+            st_instance.divider()
+            st_instance.markdown("**第二阶段：额外预测变量**")
 
-    # 显示变量选择汇总信息
-    current_target_var = _state.get('dfm_target_variable', None)
-    current_selected_indicators = _state.get('dfm_selected_indicators', [])
-    current_selected_industries_for_display = _state.get('dfm_selected_industries', [])
-    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
-
-    # 计算总预测变量数（包含第二阶段额外变量）
-    total_predictor_count = len(current_selected_indicators)
-    if current_estimation_method == 'two_stage':
-        second_stage_extra_predictors = _state.get('dfm_second_stage_extra_predictors', [])
-        total_predictor_count += len(second_stage_extra_predictors)
-
-    st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
-    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
-    st_instance.text(f" - 选定预测指标总数: {total_predictor_count}")
-
-    st_instance.markdown("--- ")
-    st_instance.subheader("模型参数")
-
-    # 创建三列布局
-    col1_time, col2_factor_core, col3_factor_specific = st_instance.columns(3)
-
-    with col1_time:
-
-
-        # 计算基于数据的智能默认值
-        def get_data_based_date_defaults():
-            """基于实际数据计算日期默认值，优先使用数据准备页面设置的日期边界"""
-            from datetime import datetime, timedelta
-            today = datetime.now().date()
-
-            data_prep_start = _state.get('dfm_param_data_start_date')
-            data_prep_end = _state.get('dfm_param_data_end_date')
-
-            # 使用统一配置类
-            static_defaults = UIConfig.get_date_defaults()
-
-            try:
-                # 仅从train_model模块获取数据（完全解耦）
-                data_df = _state.get('dfm_prepared_data_df')
-
-                if data_df is not None and isinstance(data_df.index, pd.DatetimeIndex) and len(data_df.index) > 0:
-                    # 从数据获取第一期和最后一期
-                    data_first_date = data_df.index.min().date()  # 第一期数据
-                    data_last_date = data_df.index.max().date()   # 最后一期数据
-
-                    # 重要：确保数据的最后日期不是未来日期
-                    if data_last_date > today:
-                        print(f"[WARNING] 警告: 数据包含未来日期 {data_last_date}，将使用今天作为最后日期")
-                        data_last_date = today
-
-                    # 训练开始日期默认为数据的第一期
-                    training_start_date = data_first_date
-                    validation_start_date = UIConfig.DEFAULT_VALIDATION_START
-                    observation_start_date = UIConfig.DEFAULT_OBSERVATION_START
-
-                    # 计算验证期结束日期 = 观察期开始日期 - 1周
-                    validation_end_timestamp = pd.Timestamp(observation_start_date) - pd.Timedelta(weeks=1)
-
-                    return {
-                        'training_start': training_start_date,       # 训练开始日：默认为数据的开始日期
-                        'validation_start': validation_start_date,   # 验证开始日：使用配置默认值
-                        'validation_end': validation_end_timestamp.date()  # 验证结束日：观察期开始的前一周
-                    }
-                else:
-                    return static_defaults
-            except Exception as e:
-                print(f"[WARNING] 计算数据默认日期失败: {e}，使用静态默认值")
-                return static_defaults
-
-        # 获取智能默认值
-        date_defaults = get_data_based_date_defaults()
-
-        has_data = False
-        # 仅从train_model模块获取数据（完全解耦）
-        data_df = _state.get('dfm_prepared_data_df')
-        if data_df is not None:
-            has_data = True
-
-        if has_data:
-            if isinstance(data_df.index, pd.DatetimeIndex) and len(data_df.index) > 0:
-                # 计算数据的实际日期范围用于比较
-                actual_data_start = data_df.index.min().date()
-                actual_data_end = data_df.index.max().date()
-
-                # 初始化默认日期（只在状态为空时设置）
-                current_training_start = _state.get('dfm_training_start_date')
-                if current_training_start is None:
-                    _state.set('dfm_training_start_date', date_defaults['training_start'])
-
-                current_validation_start = _state.get('dfm_validation_start_date')
-                if current_validation_start is None:
-                    _state.set('dfm_validation_start_date', date_defaults['validation_start'])
-
-                # 初始化观察期开始日期（基于validation_end推算）
-                current_observation_start = _state.get('dfm_observation_start_date')
-                if current_observation_start is None:
-                    # 默认观察期开始日期 = 验证期结束日期 + 1周
-                    default_obs_start_timestamp = pd.Timestamp(date_defaults['validation_end']) + pd.Timedelta(weeks=1)
-                    _state.set('dfm_observation_start_date', default_obs_start_timestamp.date())
-
-                # validation_end会在UI输入部分自动计算，这里不需要初始化
-
-                # 简化数据范围信息
-                data_start = data_df.index.min().strftime('%Y-%m-%d')
-                data_end = data_df.index.max().strftime('%Y-%m-%d')
-                data_count = len(data_df.index)
-                # st_instance.info(f"[DATA] 数据: {data_start} 至 {data_end} ({data_count}点)")
-        # 1. 训练期开始日期
-        training_start_value = st_instance.date_input(
-            "训练期开始日期 (Training Start Date)",
-            value=_state.get('dfm_training_start_date', date_defaults['training_start']),
-            key='dfm_training_start_date_input',
-            help="选择模型训练数据的起始日期。默认为上传数据的开始日期。"
-        )
-        _state.set('dfm_training_start_date', training_start_value)
-
-        # 2. 验证期开始日期
-        validation_start_value = st_instance.date_input(
-            "验证期开始日期 (Validation Start Date)",
-            value=_state.get('dfm_validation_start_date', date_defaults['validation_start']),
-            key='dfm_validation_start_date_input',
-            help="选择验证期开始日期。默认为最后一期数据前3个月。"
-        )
-        _state.set('dfm_validation_start_date', validation_start_value)
-
-        # 3. 观察期开始日期
-        observation_start_value = st_instance.date_input(
-            "观察期开始日期 (Observation Start Date)",
-            value=_state.get('dfm_observation_start_date', date_defaults['validation_end']),
-            key='dfm_observation_start_date_input',
-            help="选择观察期开始日期。验证期结束日期将自动设置为该日期的前一周。"
-        )
-        _state.set('dfm_observation_start_date', observation_start_value)
-
-        # 自动计算验证期结束日期 = 观察期开始日期 - 1周
-        validation_end_timestamp = pd.Timestamp(observation_start_value) - pd.Timedelta(weeks=1)
-        validation_end_value = validation_end_timestamp.date()
-        _state.set('dfm_validation_end_date', validation_end_value)
-
-    with col2_factor_core:
-        # 估计方法选择
-        estimation_methods = {
-            'single_stage': '一次估计法',
-            'two_stage': '二次估计法'
-        }
-
-        # 定义回调函数：切换估计方法时同步状态
-        # 注意：回调执行后Streamlit会自动重新运行脚本，无需手动调用rerun()
-        def on_estimation_method_change():
-            # 从临时key读取新值并同步到dfm状态
-            new_method = st_instance.session_state.get('temp_estimation_method_selector', 'single_stage')
-            _state.set('dfm_estimation_method', new_method)
-
-        # 获取当前选择的估计方法（用于确定默认index）
-        current_method = _state.get('dfm_estimation_method', 'single_stage')
-        current_index = 0 if current_method == 'single_stage' else 1
-
-        estimation_method = st_instance.selectbox(
-            "估计方法",
-            options=list(estimation_methods.keys()),
-            format_func=lambda x: estimation_methods[x],
-            index=current_index,
-            key='temp_estimation_method_selector',  # 使用临时key
-            on_change=on_estimation_method_change,  # 回调函数处理状态同步和重载
-            help="一次估计法：直接预测总量指标；二次估计法：先预测各行业，再加总"
-        )
-
-        # 手动同步状态（确保即使回调未触发也能保持一致）
-        _state.set('dfm_estimation_method', estimation_method)
-
-        variable_selection_options = {
-            'none': "无筛选 (使用全部已选变量)",
-            'backward': "后向选择法 (逐步移除不重要变量)",
-            'stepwise': "向前向后法 (逐步添加并检查冗余变量)"
-        }
-        default_var_method = 'none'
-
-        # 获取当前变量选择方法
-        current_var_method = _state.get('dfm_variable_selection_method', default_var_method)
-        # 兼容旧值
-        if current_var_method == 'global_backward':
-            current_var_method = 'backward'
-        if current_var_method not in variable_selection_options:
-            current_var_method = default_var_method
-
-        var_method_value = st_instance.selectbox(
-            "变量筛选方法",
-            options=list(variable_selection_options.keys()),
-            format_func=lambda x: variable_selection_options[x],
-            index=list(variable_selection_options.keys()).index(current_var_method),
-            key='dfm_variable_selection_method_input',
-            help=(
-                "选择在已选变量基础上的筛选方法：\n"
-                "- 无筛选: 直接使用所有已选择的变量\n"
-                "- 后向选择法: 从全部变量开始，逐步移除对模型贡献最小的变量\n"
-                "- 向前向后法: 从单个最优变量开始，逐步添加变量并检查是否需要移除冗余变量"
-            )
-        )
-        _state.set('dfm_variable_selection_method', var_method_value)
-
-        enable_var_selection = (var_method_value != 'none')
-        _state.set('dfm_enable_variable_selection', enable_var_selection)
-
-        # 目标变量配对模式（2025-12新增）
-        target_alignment_options = {
-            'next_month': "下月值 (m月nowcast预测m+1月目标)",
-            'current_month': "本月值 (m月nowcast预测m月目标)"
-        }
-        default_alignment = 'next_month'
-
-        current_alignment = _state.get('dfm_target_alignment_mode', default_alignment)
-
-        alignment_value = st_instance.selectbox(
-            "目标变量配对方式",
-            options=list(target_alignment_options.keys()),
-            format_func=lambda x: target_alignment_options[x],
-            index=list(target_alignment_options.keys()).index(current_alignment),
-            key='dfm_target_alignment_mode_input',
-            help=(
-                "选择nowcast预测值与目标变量实际值的配对方式：\n"
-                "- 下月值: m月的nowcast与m+1月的target配对（默认）\n"
-                "- 本月值: m月的nowcast与m月的target配对"
-            )
-        )
-        _state.set('dfm_target_alignment_mode', alignment_value)
-
-        # 后向剔除基于性能比较（HR和RMSE），不使用统计显著性阈值
-
-    with col3_factor_specific:
-        # 因子选择策略
-        factor_strategy_options = {
-            'fixed_number': "固定因子数",
-            'cumulative_variance': "累积方差贡献",
-            'kaiser': "Kaiser准则(特征值>1)"
-        }
-        default_strategy = 'fixed_number'
-
-        current_strategy = _state.get('dfm_factor_selection_strategy', default_strategy)
-
-        strategy_value = st_instance.selectbox(
-            "因子选择策略",
-            options=list(factor_strategy_options.keys()),
-            format_func=lambda x: factor_strategy_options[x],
-            index=list(factor_strategy_options.keys()).index(current_strategy),
-            key='dfm_factor_selection_strategy',
-            help="选择确定因子数量的方法"
-        )
-        
-        # [CRITICAL FIX] 添加策略选择的状态保存
-        _state.set('dfm_factor_selection_strategy', strategy_value)
-
-        # 根据策略显示相应参数
-        if strategy_value == 'fixed_number':
-            # 固定因子数
-            default_fixed_factors = 4
-
-            # 获取当前估计方法以调整help文本
-            current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
-            if current_estimation_method == 'two_stage':
-                k_factors_help = "第二阶段总量模型使用的因子数量（第一阶段各行业因子数在下方单独设置）"
-            else:
-                k_factors_help = "指定使用的因子数量"
-
-            fixed_factors_value = st_instance.number_input(
-                "固定因子数",
-                min_value=1,
-                max_value=15,
-                value=_state.get('dfm_fixed_number_of_factors', default_fixed_factors),
-                step=1,
-                key='dfm_fixed_number_of_factors',
-                help=k_factors_help
-            )
-            # [CRITICAL FIX] 添加缺失的状态保存
-            _state.set('dfm_fixed_number_of_factors', fixed_factors_value)
-
-        elif strategy_value == 'cumulative_variance':
-            # 累积方差贡献
-            default_cum_var = 0.8
-
-            cum_var_value = st_instance.number_input(
-                "累积方差贡献阈值",
-                min_value=0.5,
-                max_value=0.99,
-                value=_state.get('dfm_cumulative_variance_threshold', default_cum_var),
-                step=0.01,
-                format="%.2f",
-                key='dfm_cumulative_variance_threshold_input',
-                help="因子累积解释方差的阈值"
-            )
-            _state.set('dfm_cumulative_variance_threshold', cum_var_value)
-
-        elif strategy_value == 'kaiser':
-            # Kaiser准则特征值阈值
-            default_kaiser_threshold = 1.0
-
-            kaiser_threshold_value = st_instance.number_input(
-                "特征值阈值",
-                min_value=0.5,
-                max_value=2.0,
-                value=_state.get('dfm_kaiser_threshold', default_kaiser_threshold),
-                step=0.1,
-                format="%.1f",
-                key='dfm_kaiser_threshold_input',
-                help="选择特征值大于此阈值的因子（经典Kaiser准则使用1.0）"
-            )
-            _state.set('dfm_kaiser_threshold', kaiser_threshold_value)
-
-        # 因子自回归阶数
-        default_ar_order = 1
-
-        ar_order_value = st_instance.number_input(
-            "因子自回归阶数",
-            min_value=0,
-            max_value=5,
-            value=_state.get('dfm_factor_ar_order', default_ar_order),
-            step=1,
-            key='dfm_factor_ar_order_input',
-            help="因子的自回归阶数，通常设为1"
-        )
-        _state.set('dfm_factor_ar_order', ar_order_value)
-
-    # 二次估计法配置
-    if estimation_method == 'two_stage':
-        st_instance.info("二次估计法说明：上方'固定因子数'为第二阶段总量模型的因子数，下方设置各行业模型的因子数")
-        with st_instance.expander("第一阶段：分行业因子数设置", expanded=False):
-            # 使用训练模块上传的数据（input_df从第614行获得）
             if input_df is not None:
-                # 提取行业列表
-                from dashboard.models.DFM.train.utils.industry_data_processor import extract_industry_list
-
-                industry_list = extract_industry_list(input_df)
-
-                if industry_list:
-                    st_instance.info(f"共识别到 {len(industry_list)} 个行业，请设定各行业因子数（默认值为1）")
-
-                    # 使用列布局优化显示（每行3个）
-                    cols_per_row = 3
-                    industry_k_factors = {}
-
-                    for i in range(0, len(industry_list), cols_per_row):
-                        cols = st_instance.columns(cols_per_row)
-                        for j, col in enumerate(cols):
-                            idx = i + j
-                            if idx < len(industry_list):
-                                industry = industry_list[idx]
-                                with col:
-                                    k_val = st_instance.number_input(
-                                        f"{industry}",
-                                        min_value=1,
-                                        max_value=5,
-                                        value=_state.get(f'industry_k_{industry}', 1),
-                                        step=1,
-                                        key=f'industry_k_{industry}'
-                                    )
-                                    industry_k_factors[industry] = k_val
-
-                    # 存储到session_state
-                    _state.set('dfm_industry_k_factors', industry_k_factors)
-                else:
-                    st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
-
-            else:
-                st_instance.warning("请先上传预处理后的数据文件")
-
-        # 第二阶段额外指标选择
-        with st_instance.expander("第二阶段：变量选择", expanded=False):
-            if input_df is not None:
-                # 获取当前估计方法
-                current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
-
                 # 获取需要排除的变量
                 target_variable = _state.get('dfm_target_variable', None)
                 first_stage_selected_indicators = _state.get('dfm_selected_indicators', [])
@@ -1165,21 +1148,18 @@ def render_dfm_model_training_page(st_instance):
 
                 # 构建排除集合（使用标准化名称）
                 excluded_vars = set()
-                excluded_vars_normalized = set()  # 标准化后的排除集合
+                excluded_vars_normalized = set()
 
-                # 排除第一阶段已选择的所有预测变量（关键修复：使用标准化名称）
+                # 排除第一阶段已选择的所有预测变量
                 if first_stage_selected_indicators:
                     excluded_vars.update(first_stage_selected_indicators)
-                    # 构建标准化版本的排除集合（去除所有空格）
                     for var in first_stage_selected_indicators:
                         normalized_var = normalize_variable_name_no_space(var)
                         excluded_vars_normalized.add(normalized_var)
 
                 # 遍历所有列，根据映射关系判断是否排除
                 for col in input_df.columns:
-                    # 标准化列名（用于映射查找）
                     normalized_col = normalize_variable_name(col)
-                    # 标准化列名（去除所有空格，用于第一阶段变量匹配）
                     normalized_col_no_space = normalize_variable_name_no_space(col)
 
                     # 检查变量的行业归属
@@ -1188,22 +1168,20 @@ def render_dfm_model_training_page(st_instance):
                         industry = var_industry_map[normalized_col]
 
                     # 排除逻辑：
-                    # 1. 排除所有非"综合"的行业级变量（无论是否在第一阶段使用）
+                    # 1. 排除所有非"综合"的行业级变量
                     if industry and industry != '综合':
                         excluded_vars.add(col)
                         continue
 
                     # 2. 如果是第一阶段选择的变量
                     if normalized_col_no_space in excluded_vars_normalized:
-                        # 如果是"综合"类变量，保留（不排除）
                         if industry == '综合':
                             continue
-                        # 否则排除
                         else:
                             excluded_vars.add(col)
                             continue
 
-                    # 3. 排除包含"工业增加值"的变量（未映射的行业目标变量）
+                    # 3. 排除包含"工业增加值"的变量
                     if '工业增加值' in col:
                         excluded_vars.add(col)
 
@@ -1237,10 +1215,28 @@ def render_dfm_model_training_page(st_instance):
                     "第二阶段额外预测变量（可选）",
                     options=available_extra_vars,
                     key=stage2_key,
-                    help="在分行业nowcasting之外添加的宏观指标"
+                    help="在分行业因子之外添加的宏观指标"
                 )
 
                 _state.set('dfm_second_stage_extra_predictors', extra_predictors)
+
+    # 变量选择完成
+
+    # 显示变量选择汇总信息
+    current_target_var = _state.get('dfm_target_variable', None)
+    current_selected_indicators = _state.get('dfm_selected_indicators', [])
+    current_selected_industries_for_display = _state.get('dfm_selected_industries', [])
+    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
+
+    # 计算总预测变量数（包含第二阶段额外变量）
+    total_predictor_count = len(current_selected_indicators)
+    if current_estimation_method == 'two_stage':
+        second_stage_extra_predictors = _state.get('dfm_second_stage_extra_predictors', [])
+        total_predictor_count += len(second_stage_extra_predictors)
+
+    st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
+    st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
+    st_instance.text(f" - 选定预测指标总数: {total_predictor_count}")
 
     # 第四行：开始训练按钮（左对齐）
     # 重新获取变量选择状态（用于训练条件检查）
@@ -1359,8 +1355,8 @@ def render_dfm_model_training_page(st_instance):
                         'metrics': {
                             'is_rmse': final_result.metrics.is_rmse if final_result.metrics else None,
                             'oos_rmse': final_result.metrics.oos_rmse if final_result.metrics else None,
-                            'is_hit_rate': final_result.metrics.is_hit_rate if final_result.metrics else None,
-                            'oos_hit_rate': final_result.metrics.oos_hit_rate if final_result.metrics else None
+                            'is_win_rate': final_result.metrics.is_win_rate if final_result.metrics else None,
+                            'oos_win_rate': final_result.metrics.oos_win_rate if final_result.metrics else None
                         },
                         'training_time': result.total_training_time,
                         'first_stage_count': len(result.first_stage_results),
@@ -1381,8 +1377,8 @@ def render_dfm_model_training_page(st_instance):
                         'metrics': {
                             'is_rmse': result.metrics.is_rmse if result.metrics else None,
                             'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
-                            'is_hit_rate': result.metrics.is_hit_rate if result.metrics else None,
-                            'oos_hit_rate': result.metrics.oos_hit_rate if result.metrics else None
+                            'is_win_rate': result.metrics.is_win_rate if result.metrics else None,
+                            'oos_win_rate': result.metrics.oos_win_rate if result.metrics else None
                         },
                         'training_time': result.training_time
                     }
@@ -1411,14 +1407,14 @@ def render_dfm_model_training_page(st_instance):
 
                 if metrics_obj:
                     training_log.append(f"[METRICS] 样本外RMSE: {metrics_obj.oos_rmse:.4f}")
-                    # 检查Hit Rate是否有效
+                    # 检查Win Rate是否有效
                     import numpy as np
-                    hit_rate_value = metrics_obj.oos_hit_rate
-                    if np.isnan(hit_rate_value) or np.isinf(hit_rate_value):
-                        hit_rate_str = "N/A (数据不足)"
+                    win_rate_value = metrics_obj.oos_win_rate
+                    if np.isnan(win_rate_value) or np.isinf(win_rate_value):
+                        win_rate_str = "N/A (数据不足)"
                     else:
-                        hit_rate_str = f"{hit_rate_value:.2f}%"
-                    training_log.append(f"[METRICS] 样本外Hit Rate: {hit_rate_str}")
+                        win_rate_str = f"{win_rate_value:.2f}%"
+                    training_log.append(f"[METRICS] 样本外Win Rate: {win_rate_str}")
 
                 _state.set('dfm_training_log', training_log)
 

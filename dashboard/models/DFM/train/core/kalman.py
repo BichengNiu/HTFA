@@ -228,9 +228,8 @@ class KalmanFilter:
                 # 使用scipy.linalg.solve提高数值稳定性
                 # J_i = P_filt[i] @ A.T @ inv(P_pred[i+1])
                 J_i = scipy.linalg.solve(P_pred[i+1].T, (P_filt[i] @ self.A.T).T, assume_a='pos').T
-            except scipy.linalg.LinAlgError:
-                # 回退到伪逆
-                J_i = P_filt[i] @ self.A.T @ np.linalg.pinv(P_pred[i+1])
+            except scipy.linalg.LinAlgError as e:
+                raise scipy.linalg.LinAlgError(f"卡尔曼平滑矩阵求解失败(时刻{i}): {e}，请检查数据质量或模型参数")
 
             # 平滑状态
             delta_x = x_smooth[i+1, :] - x_pred[i+1, :]

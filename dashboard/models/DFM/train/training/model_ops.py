@@ -15,7 +15,7 @@ from dashboard.models.DFM.train.core.prediction import generate_target_forecast
 from dashboard.models.DFM.train.evaluation.metrics import (
     calculate_aligned_rmse,
     calculate_aligned_mae,
-    calculate_aligned_hit_rate
+    calculate_aligned_win_rate
 )
 
 logger = get_logger(__name__)
@@ -265,29 +265,29 @@ def _evaluate_performance(
         mae = np.inf
 
     try:
-        hit_rate = calculate_aligned_hit_rate(pred_series, actual_series, alignment_mode)
-        logger.debug(f"[{log_prefix}] Hit Rate计算成功: {hit_rate:.2f}%")
+        win_rate = calculate_aligned_win_rate(pred_series, actual_series, alignment_mode)
+        logger.debug(f"[{log_prefix}] Win Rate计算成功: {win_rate:.2f}%")
     except Exception as e:
-        logger.error(f"[{log_prefix}] Hit Rate计算失败: {e}")
-        hit_rate = np.nan
+        logger.error(f"[{log_prefix}] Win Rate计算失败: {e}")
+        win_rate = np.nan
 
     if period_type == "is":
         metrics.is_rmse = rmse
         metrics.is_mae = mae
-        metrics.is_hit_rate = hit_rate
+        metrics.is_win_rate = win_rate
     elif period_type == "oos":
         metrics.oos_rmse = rmse
         metrics.oos_mae = mae
-        metrics.oos_hit_rate = hit_rate
+        metrics.oos_win_rate = win_rate
     elif period_type == "obs":
         metrics.obs_rmse = rmse
         metrics.obs_mae = mae
-        metrics.obs_hit_rate = hit_rate
+        metrics.obs_win_rate = win_rate
 
     logger.debug(
         f"[{log_prefix}] RMSE={rmse:.4f}, "
         f"MAE={mae:.4f}, "
-        f"HitRate={hit_rate:.2f}%"
+        f"WinRate={win_rate:.2f}%"
     )
 
 

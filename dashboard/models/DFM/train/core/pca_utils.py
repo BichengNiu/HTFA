@@ -85,9 +85,7 @@ def select_num_factors(
             global_std = train_data.std(axis=0)
             logger.info(f"使用训练集数据计算标准化参数 (截止到 {train_end}, {len(train_data)} 样本)")
         except (KeyError, IndexError) as e:
-            logger.warning(f"无法提取训练集进行标准化: {e}，回退到全数据集")
-            global_mean = data_subset.mean(axis=0)
-            global_std = data_subset.std(axis=0)
+            raise ValueError(f"无法提取训练集进行标准化: {e}，请检查train_end参数是否在数据索引范围内")
     else:
         # 如果没有提供train_end，使用全部数据
         global_mean = data_subset.mean(axis=0)

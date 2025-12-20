@@ -87,15 +87,15 @@ def evaluate_single_variable_removal(
             logger.warning(f"评估返回了{len(result_tuple)}个值，跳过'{var_to_remove}'")
             return (var_to_remove, None)
 
-        is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+        is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
 
         # 返回评估结果
         result = {
             'var': var_to_remove,
             'is_rmse': is_rmse,
             'oos_rmse': oos_rmse,
-            'is_hit_rate': is_hit_rate,
-            'oos_hit_rate': oos_hit_rate,
+            'is_win_rate': is_win_rate,
+            'oos_win_rate': oos_win_rate,
             'is_svd_error': is_svd_error
         }
 
@@ -201,7 +201,7 @@ def serial_evaluate_removals(
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> List[Dict[str, Any]]:
     """
-    串行评估所有候选变量的移除效果（回退方案，可序列化版本）
+    串行评估所有候选变量的移除效果（可序列化版本）
 
     Args:
         current_predictors: 当前预测变量列表
@@ -247,7 +247,7 @@ def serial_evaluate_removals(
     return candidate_results
 
 
-def evaluate_removals_with_fallback(
+def evaluate_removals(
     current_predictors: List[str],
     target_variable: str,
     full_data: pd.DataFrame,
@@ -260,9 +260,9 @@ def evaluate_removals_with_fallback(
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> List[Dict[str, Any]]:
     """
-    评估所有候选变量的移除效果（自动降级，可序列化版本）
+    评估所有候选变量的移除效果（可序列化版本）
 
-    首先尝试并行评估，如果失败则自动降级到串行
+    根据use_parallel参数选择并行或串行评估
 
     Args:
         current_predictors: 当前预测变量列表
@@ -290,36 +290,18 @@ def evaluate_removals_with_fallback(
             progress_callback
         )
 
-    try:
-        # 尝试并行评估
-        return parallel_evaluate_removals(
-            current_predictors,
-            target_variable,
-            full_data,
-            k_factors,
-            evaluator_config,
-            n_jobs,
-            backend,
-            verbose,
-            progress_callback
-        )
-    except Exception as e:
-        logger.error(f"并行评估失败: {e}，降级到串行模式")
-        import traceback
-        traceback.print_exc()
-
-        if progress_callback:
-            progress_callback(f"  并行评估失败，自动切换到串行模式...")
-
-        # 降级到串行评估
-        return serial_evaluate_removals(
-            current_predictors,
-            target_variable,
-            full_data,
-            k_factors,
-            evaluator_config,
-            progress_callback
-        )
+    # 并行评估（失败时报错，不降级）
+    return parallel_evaluate_removals(
+        current_predictors,
+        target_variable,
+        full_data,
+        k_factors,
+        evaluator_config,
+        n_jobs,
+        backend,
+        verbose,
+        progress_callback
+    )
 
 
 # ========== 前向评估函数（用于向前向后法）==========
@@ -383,15 +365,15 @@ def evaluate_single_variable_addition(
             logger.warning(f"评估返回了{len(result_tuple)}个值，跳过'{var_to_add}'")
             return (var_to_add, None)
 
-        is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+        is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
 
         # 返回评估结果
         result = {
             'var': var_to_add,
             'is_rmse': is_rmse,
             'oos_rmse': oos_rmse,
-            'is_hit_rate': is_hit_rate,
-            'oos_hit_rate': oos_hit_rate,
+            'is_win_rate': is_win_rate,
+            'oos_win_rate': oos_win_rate,
             'is_svd_error': is_svd_error
         }
 
@@ -495,7 +477,7 @@ def serial_evaluate_additions(
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> List[Dict[str, Any]]:
     """
-    串行评估所有候选变量的添加效果（回退方案，可序列化版本）
+    串行评估所有候选变量的添加效果（可序列化版本）
 
     Args:
         current_predictors: 当前预测变量列表
@@ -542,7 +524,7 @@ def serial_evaluate_additions(
     return candidate_results
 
 
-def evaluate_additions_with_fallback(
+def evaluate_additions(
     current_predictors: List[str],
     candidate_vars: List[str],
     target_variable: str,
@@ -556,9 +538,9 @@ def evaluate_additions_with_fallback(
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> List[Dict[str, Any]]:
     """
-    评估所有候选变量的添加效果（自动降级，可序列化版本）
+    评估所有候选变量的添加效果（可序列化版本）
 
-    首先尝试并行评估，如果失败则自动降级到串行
+    根据use_parallel参数选择并行或串行评估
 
     Args:
         current_predictors: 当前预测变量列表
@@ -588,47 +570,28 @@ def evaluate_additions_with_fallback(
             progress_callback
         )
 
-    try:
-        # 尝试并行评估
-        return parallel_evaluate_additions(
-            current_predictors,
-            candidate_vars,
-            target_variable,
-            full_data,
-            k_factors,
-            evaluator_config,
-            n_jobs,
-            backend,
-            verbose,
-            progress_callback
-        )
-    except Exception as e:
-        logger.error(f"并行评估失败: {e}，降级到串行模式")
-        import traceback
-        traceback.print_exc()
-
-        if progress_callback:
-            progress_callback(f"  并行评估失败，自动切换到串行模式...")
-
-        # 降级到串行评估
-        return serial_evaluate_additions(
-            current_predictors,
-            candidate_vars,
-            target_variable,
-            full_data,
-            k_factors,
-            evaluator_config,
-            progress_callback
-        )
+    # 并行评估（失败时报错，不降级）
+    return parallel_evaluate_additions(
+        current_predictors,
+        candidate_vars,
+        target_variable,
+        full_data,
+        k_factors,
+        evaluator_config,
+        n_jobs,
+        backend,
+        verbose,
+        progress_callback
+    )
 
 
 __all__ = [
     'evaluate_single_variable_removal',
     'parallel_evaluate_removals',
     'serial_evaluate_removals',
-    'evaluate_removals_with_fallback',
+    'evaluate_removals',
     'evaluate_single_variable_addition',
     'parallel_evaluate_additions',
     'serial_evaluate_additions',
-    'evaluate_additions_with_fallback'
+    'evaluate_additions'
 ]

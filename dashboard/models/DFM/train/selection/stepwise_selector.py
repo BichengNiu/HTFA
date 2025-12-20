@@ -9,11 +9,14 @@ import pandas as pd
 from typing import List, Dict, Tuple, Callable, Optional
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import SelectionResult
-from dashboard.models.DFM.train.evaluation.metrics import calculate_combined_score
+from dashboard.models.DFM.train.evaluation.metrics import (
+    calculate_weighted_score,
+    compare_scores_with_winrate
+)
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
 from dashboard.models.DFM.train.selection.parallel_evaluator import (
-    evaluate_additions_with_fallback,
-    evaluate_removals_with_fallback
+    evaluate_additions,
+    evaluate_removals
 )
 
 logger = get_logger(__name__)
@@ -42,10 +45,10 @@ class StepwiseSelector:
         """
         Args:
             evaluator_func: 评估函数,签名为 (variables, **kwargs) -> (
-                is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate,
+                is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
                 is_svd_error, _, _
             )
-            criterion: 优化准则,'rmse'(Hit Rate已弃用)
+            criterion: 优化准则,'rmse'(RMSE为主，Win Rate为辅)
             min_variables: 最少保留的变量数
             parallel_config: 并行配置（None表示使用默认串行）
         """
@@ -109,7 +112,12 @@ class StepwiseSelector:
             'target_std_original': target_std_original,
             'max_iter': max_iter,
             'max_lags': max_lags,
-            'progress_callback': progress_callback
+            'progress_callback': progress_callback,
+            'rmse_tolerance_percent': params.get('rmse_tolerance_percent', 1.0),  # RMSE容忍度配置
+            'win_rate_tolerance_percent': params.get('win_rate_tolerance_percent', 5.0),  # Win Rate容忍度配置
+            'selection_criterion': params.get('selection_criterion', 'hybrid'),  # 筛选标准
+            'prioritize_win_rate': params.get('prioritize_win_rate', True),  # 混合策略优先级
+            'training_weight': params.get('training_weight', 0.5)  # 训练期权重（2025-12-20新增）
         }
 
         total_evaluations = 0
@@ -123,7 +131,7 @@ class StepwiseSelector:
             return SelectionResult(
                 selected_variables=initial_variables,
                 selection_history=[],
-                final_score=(-np.inf, np.inf),
+                final_score=(np.nan, -np.inf, np.inf),
                 total_evaluations=0,
                 svd_error_count=0
             )
@@ -151,7 +159,7 @@ class StepwiseSelector:
             return SelectionResult(
                 selected_variables=initial_variables,
                 selection_history=[],
-                final_score=(-np.inf, np.inf),
+                final_score=(np.nan, -np.inf, np.inf),
                 total_evaluations=total_evaluations,
                 svd_error_count=svd_error_count
             )
@@ -335,7 +343,7 @@ class StepwiseSelector:
                 f"候选变量数({len(candidate_vars)})不足以满足k_factors({k_factors})约束，"
                 f"需要至少{min_init_vars}个预测变量"
             )
-            return (None, (-np.inf, -np.inf), 0, 0, np.inf, np.inf)
+            return (None, (np.nan, -np.inf, np.inf), 0, 0, np.inf, np.inf)
 
         logger.info(f"初始化：k_factors={k_factors}，需要至少{min_init_vars}个初始变量")
         if progress_callback:
@@ -348,7 +356,8 @@ class StepwiseSelector:
             'validation_start': self._eval_params['validation_start'],
             'validation_end': self._eval_params['validation_end'],
             'max_iterations': self._eval_params.get('max_iter', 30),
-            'tolerance': 1e-4
+            'tolerance': 1e-4,
+            'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
         }
 
         if min_init_vars == 1:
@@ -380,7 +389,7 @@ class StepwiseSelector:
         use_parallel = self.parallel_config.should_use_parallel(len(candidate_vars))
 
         # 评估每个变量单独的性能
-        candidate_results = evaluate_additions_with_fallback(
+        candidate_results = evaluate_additions(
             current_predictors=[],
             candidate_vars=candidate_vars,
             target_variable=target_variable,
@@ -396,11 +405,11 @@ class StepwiseSelector:
 
         if not candidate_results:
             logger.error("所有候选变量评估失败")
-            return (None, (-np.inf, -np.inf), len(candidate_vars), 0, np.inf, np.inf)
+            return (None, (np.nan, -np.inf, np.inf), len(candidate_vars), 0, np.inf, np.inf)
 
         # 找出最优变量
         best_var = None
-        best_score = (-np.inf, -np.inf)
+        best_score = (np.nan, -np.inf, np.inf)
         best_is_rmse = np.inf
         best_oos_rmse = np.inf
         svd_error_count = 0
@@ -409,14 +418,24 @@ class StepwiseSelector:
             if result.get('is_svd_error', False):
                 svd_error_count += 1
 
-            score = calculate_combined_score(
+            # 使用加权得分计算（2025-12-20修改）
+            score = calculate_weighted_score(
                 result['is_rmse'],
                 result['oos_rmse'],
-                result.get('is_hit_rate', 0.0),
-                result.get('oos_hit_rate', 0.0)
+                result.get('is_win_rate', np.nan),
+                result.get('oos_win_rate', np.nan),
+                training_weight=self._eval_params.get('training_weight', 0.5)
             )
 
-            if np.isfinite(score[1]) and score > best_score:
+            comparison = compare_scores_with_winrate(
+                score,
+                best_score,
+                rmse_tolerance_percent=self._eval_params.get('rmse_tolerance_percent', 1.0),
+                win_rate_tolerance_percent=self._eval_params.get('win_rate_tolerance_percent', 5.0),
+                selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
+                prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+            )
+            if np.isfinite(score[1]) and comparison > 0:
                 best_score = score
                 best_var = result['var']
                 best_is_rmse = result['is_rmse']
@@ -426,7 +445,7 @@ class StepwiseSelector:
         self._print_initial_summary(candidate_results, best_var, progress_callback)
 
         if best_var is None:
-            return (None, (-np.inf, -np.inf), len(candidate_results), svd_error_count, np.inf, np.inf)
+            return (None, (np.nan, -np.inf, np.inf), len(candidate_results), svd_error_count, np.inf, np.inf)
 
         return ([best_var], best_score, len(candidate_results), svd_error_count, best_is_rmse, best_oos_rmse)
 
@@ -495,16 +514,21 @@ class StepwiseSelector:
 
             if len(result_tuple) != 9:
                 logger.error(f"初始变量集评估返回了{len(result_tuple)}个值")
-                return (None, (-np.inf, -np.inf), 1, 0, np.inf, np.inf)
+                return (None, (np.nan, -np.inf, np.inf), 1, 0, np.inf, np.inf)
 
-            is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+            is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
             svd_count = 1 if is_svd_error else 0
 
-            score = calculate_combined_score(is_rmse, oos_rmse, is_hit_rate, oos_hit_rate)
+            # 使用加权得分计算（2025-12-20修改）
+            score = calculate_weighted_score(
+                is_rmse, oos_rmse, is_win_rate, oos_win_rate,
+                training_weight=self._eval_params.get('training_weight', 0.5)
+            )
 
+            win_rate_str = f", Win Rate={oos_win_rate:.1f}%" if np.isfinite(oos_win_rate) else ""
             logger.info(
                 f"初始变量集评估完成: {len(initial_vars)}个变量, "
-                f"训练期RMSE={is_rmse:.4f}, 验证期RMSE={oos_rmse:.4f}"
+                f"训练期RMSE={is_rmse:.4f}, 验证期RMSE={oos_rmse:.4f}{win_rate_str}"
             )
             if progress_callback:
                 progress_callback(
@@ -516,7 +540,7 @@ class StepwiseSelector:
 
         except Exception as e:
             logger.error(f"初始变量集评估失败: {e}")
-            return (None, (-np.inf, -np.inf), 1, 0, np.inf, np.inf)
+            return (None, (np.nan, -np.inf, np.inf), 1, 0, np.inf, np.inf)
 
     def _print_initial_summary(
         self,
@@ -557,7 +581,7 @@ class StepwiseSelector:
             (最佳变量名, 得分, 评估次数, SVD错误数, is_rmse, oos_rmse)
         """
         if not remaining_vars:
-            return (None, (-np.inf, -np.inf), 0, 0, np.inf, np.inf)
+            return (None, (np.nan, -np.inf, np.inf), 0, 0, np.inf, np.inf)
 
         logger.info(f"  前向步骤：评估添加 {len(remaining_vars)} 个候选变量...")
         if progress_callback:
@@ -573,14 +597,15 @@ class StepwiseSelector:
             'validation_start': self._eval_params['validation_start'],
             'validation_end': self._eval_params['validation_end'],
             'max_iterations': self._eval_params.get('max_iter', 30),
-            'tolerance': 1e-4
+            'tolerance': 1e-4,
+            'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
         }
 
         # 判断是否使用并行
         use_parallel = self.parallel_config.should_use_parallel(len(remaining_vars))
 
         # 评估添加每个候选变量的效果
-        candidate_results = evaluate_additions_with_fallback(
+        candidate_results = evaluate_additions(
             current_predictors=current_vars,
             candidate_vars=remaining_vars,
             target_variable=target_variable,
@@ -596,11 +621,11 @@ class StepwiseSelector:
 
         if not candidate_results:
             logger.warning("前向步骤：所有候选变量评估失败")
-            return (None, (-np.inf, -np.inf), len(remaining_vars), 0, np.inf, np.inf)
+            return (None, (np.nan, -np.inf, np.inf), len(remaining_vars), 0, np.inf, np.inf)
 
         # 找出最优添加候选
         best_var = None
-        best_score = (-np.inf, -np.inf)
+        best_score = (np.nan, -np.inf, np.inf)
         best_is_rmse = np.inf
         best_oos_rmse = np.inf
         svd_error_count = 0
@@ -609,14 +634,24 @@ class StepwiseSelector:
             if result.get('is_svd_error', False):
                 svd_error_count += 1
 
-            score = calculate_combined_score(
+            # 使用加权得分计算（2025-12-20修改）
+            score = calculate_weighted_score(
                 result['is_rmse'],
                 result['oos_rmse'],
-                result.get('is_hit_rate', 0.0),
-                result.get('oos_hit_rate', 0.0)
+                result.get('is_win_rate', np.nan),
+                result.get('oos_win_rate', np.nan),
+                training_weight=self._eval_params.get('training_weight', 0.5)
             )
 
-            if np.isfinite(score[1]) and score > best_score:
+            comparison = compare_scores_with_winrate(
+                score,
+                best_score,
+                rmse_tolerance_percent=self._eval_params.get('rmse_tolerance_percent', 1.0),
+                win_rate_tolerance_percent=self._eval_params.get('win_rate_tolerance_percent', 5.0),
+                selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
+                prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+            )
+            if np.isfinite(score[1]) and comparison > 0:
                 best_score = score
                 best_var = result['var']
                 best_is_rmse = result['is_rmse']
@@ -665,7 +700,8 @@ class StepwiseSelector:
             'validation_start': self._eval_params['validation_start'],
             'validation_end': self._eval_params['validation_end'],
             'max_iterations': self._eval_params.get('max_iter', 30),
-            'tolerance': 1e-4
+            'tolerance': 1e-4,
+            'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
         }
 
         total_evals = 0
@@ -682,7 +718,7 @@ class StepwiseSelector:
             use_parallel = self.parallel_config.should_use_parallel(len(working_vars))
 
             # 评估移除每个变量的效果
-            candidate_results = evaluate_removals_with_fallback(
+            candidate_results = evaluate_removals(
                 current_predictors=working_vars,
                 target_variable=target_variable,
                 full_data=self._eval_params['full_data'],
@@ -702,7 +738,7 @@ class StepwiseSelector:
 
             # 找出最优移除候选
             best_removal = None
-            best_removal_score = (-np.inf, -np.inf)
+            best_removal_score = (np.nan, -np.inf, np.inf)
             best_removal_is_rmse = np.inf
             best_removal_oos_rmse = np.inf
 
@@ -710,14 +746,24 @@ class StepwiseSelector:
                 if result.get('is_svd_error', False):
                     total_svd_errors += 1
 
-                score = calculate_combined_score(
+                # 使用加权得分计算（2025-12-20修改）
+                score = calculate_weighted_score(
                     result['is_rmse'],
                     result['oos_rmse'],
-                    result.get('is_hit_rate', 0.0),
-                    result.get('oos_hit_rate', 0.0)
+                    result.get('is_win_rate', np.nan),
+                    result.get('oos_win_rate', np.nan),
+                    training_weight=self._eval_params.get('training_weight', 0.5)
                 )
 
-                if np.isfinite(score[1]) and score > best_removal_score:
+                comparison = compare_scores_with_winrate(
+                    score,
+                    best_removal_score,
+                    rmse_tolerance_percent=self._eval_params.get('rmse_tolerance_percent', 1.0),
+                    win_rate_tolerance_percent=self._eval_params.get('win_rate_tolerance_percent', 5.0),
+                    selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
+                    prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+                )
+                if np.isfinite(score[1]) and comparison > 0:
                     best_removal_score = score
                     best_removal = result['var']
                     best_removal_is_rmse = result['is_rmse']

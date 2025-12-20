@@ -245,21 +245,21 @@ def generate_training_summary(
         if result.first_stage_results:
             is_rmse_list = []
             oos_rmse_list = []
-            is_hr_list = []
-            oos_hr_list = []
+            is_wr_list = []
+            oos_wr_list = []
 
             for ind_result in result.first_stage_results.values():
                 if ind_result.metrics:
                     is_rmse_list.append(ind_result.metrics.is_rmse)
                     oos_rmse_list.append(ind_result.metrics.oos_rmse)
-                    is_hr_list.append(ind_result.metrics.is_hit_rate)
-                    oos_hr_list.append(ind_result.metrics.oos_hit_rate)
+                    is_wr_list.append(ind_result.metrics.is_win_rate)
+                    oos_wr_list.append(ind_result.metrics.oos_win_rate)
 
             if is_rmse_list:
                 lines.append(f"    样本内RMSE (平均): {np.mean(is_rmse_list):.4f}")
                 lines.append(f"    样本外RMSE (平均): {np.mean(oos_rmse_list):.4f}")
-                lines.append(f"    样本内命中率 (平均): {np.mean(is_hr_list):.2f}%")
-                lines.append(f"    样本外命中率 (平均): {np.mean(oos_hr_list):.2f}%")
+                lines.append(f"    样本内胜率 (平均): {np.nanmean(is_wr_list):.2f}%")
+                lines.append(f"    样本外胜率 (平均): {np.nanmean(oos_wr_list):.2f}%")
 
         lines.append("")
         lines.append("  第二阶段（总量）指标:")
@@ -270,22 +270,22 @@ def generate_training_summary(
             lines.append(f"    样本内MAE: {metrics.is_mae:.4f}")
             lines.append(f"    样本外MAE: {metrics.oos_mae:.4f}")
 
-            # Hit Rate处理（可能为nan）
-            is_hr = metrics.is_hit_rate
-            oos_hr = metrics.oos_hit_rate
-            is_hr_str = f"{is_hr:.2f}%" if not np.isnan(is_hr) and not np.isinf(is_hr) else "N/A"
-            oos_hr_str = f"{oos_hr:.2f}%" if not np.isnan(oos_hr) and not np.isinf(oos_hr) else "N/A"
+            # Win Rate处理（可能为nan）
+            is_wr = metrics.is_win_rate
+            oos_wr = metrics.oos_win_rate
+            is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
+            oos_wr_str = f"{oos_wr:.2f}%" if not np.isnan(oos_wr) and not np.isinf(oos_wr) else "N/A"
 
-            lines.append(f"    样本内命中率: {is_hr_str}")
-            lines.append(f"    样本外命中率: {oos_hr_str}")
+            lines.append(f"    样本内胜率: {is_wr_str}")
+            lines.append(f"    样本外胜率: {oos_wr_str}")
 
             # 观察期指标（如果存在）
             if metrics.obs_rmse != np.inf:
-                obs_hr = metrics.obs_hit_rate
-                obs_hr_str = f"{obs_hr:.2f}%" if not np.isnan(obs_hr) and not np.isinf(obs_hr) else "N/A"
+                obs_wr = metrics.obs_win_rate
+                obs_wr_str = f"{obs_wr:.2f}%" if not np.isnan(obs_wr) and not np.isinf(obs_wr) else "N/A"
                 lines.append(f"    观察期RMSE: {metrics.obs_rmse:.4f}")
                 lines.append(f"    观察期MAE: {metrics.obs_mae:.4f}")
-                lines.append(f"    观察期命中率: {obs_hr_str}")
+                lines.append(f"    观察期胜率: {obs_wr_str}")
     else:
         # 一次估计法指标
         if result.metrics:
@@ -295,22 +295,22 @@ def generate_training_summary(
             lines.append(f"  样本内MAE: {metrics.is_mae:.4f}")
             lines.append(f"  样本外MAE: {metrics.oos_mae:.4f}")
 
-            # Hit Rate处理
-            is_hr = metrics.is_hit_rate
-            oos_hr = metrics.oos_hit_rate
-            is_hr_str = f"{is_hr:.2f}%" if not np.isnan(is_hr) and not np.isinf(is_hr) else "N/A"
-            oos_hr_str = f"{oos_hr:.2f}%" if not np.isnan(oos_hr) and not np.isinf(oos_hr) else "N/A"
+            # Win Rate处理
+            is_wr = metrics.is_win_rate
+            oos_wr = metrics.oos_win_rate
+            is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
+            oos_wr_str = f"{oos_wr:.2f}%" if not np.isnan(oos_wr) and not np.isinf(oos_wr) else "N/A"
 
-            lines.append(f"  样本内命中率: {is_hr_str}")
-            lines.append(f"  样本外命中率: {oos_hr_str}")
+            lines.append(f"  样本内胜率: {is_wr_str}")
+            lines.append(f"  样本外胜率: {oos_wr_str}")
 
             # 观察期指标
             if metrics.obs_rmse != np.inf:
-                obs_hr = metrics.obs_hit_rate
-                obs_hr_str = f"{obs_hr:.2f}%" if not np.isnan(obs_hr) and not np.isinf(obs_hr) else "N/A"
+                obs_wr = metrics.obs_win_rate
+                obs_wr_str = f"{obs_wr:.2f}%" if not np.isnan(obs_wr) and not np.isinf(obs_wr) else "N/A"
                 lines.append(f"  观察期RMSE: {metrics.obs_rmse:.4f}")
                 lines.append(f"  观察期MAE: {metrics.obs_mae:.4f}")
-                lines.append(f"  观察期命中率: {obs_hr_str}")
+                lines.append(f"  观察期胜率: {obs_wr_str}")
 
     lines.append("")
 

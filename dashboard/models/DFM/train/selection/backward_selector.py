@@ -10,9 +10,12 @@ import pandas as pd
 from typing import List, Dict, Tuple, Callable, Optional
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import SelectionResult
-from dashboard.models.DFM.train.evaluation.metrics import calculate_combined_score
+from dashboard.models.DFM.train.evaluation.metrics import (
+    calculate_weighted_score,
+    compare_scores_with_winrate
+)
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
-from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_removals_with_fallback
+from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_removals
 
 logger = get_logger(__name__)
 
@@ -41,10 +44,10 @@ class BackwardSelector:
         """
         Args:
             evaluator_func: 评估函数,签名为 (variables, **kwargs) -> (
-                is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate,
+                is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
                 is_svd_error, _, _
             )
-            criterion: 优化准则,'rmse'(Hit Rate已弃用)
+            criterion: 优化准则,'rmse'(RMSE为主，Win Rate为辅)
             min_variables: 最少保留的变量数
             parallel_config: 并行配置（None表示使用默认串行）
         """
@@ -108,7 +111,12 @@ class BackwardSelector:
             'target_std_original': target_std_original,
             'max_iter': max_iter,
             'max_lags': max_lags,
-            'progress_callback': progress_callback  # 添加progress_callback
+            'progress_callback': progress_callback,  # 添加progress_callback
+            'rmse_tolerance_percent': params.get('rmse_tolerance_percent', 1.0),  # RMSE容忍度配置
+            'win_rate_tolerance_percent': params.get('win_rate_tolerance_percent', 5.0),  # Win Rate容忍度配置
+            'selection_criterion': params.get('selection_criterion', 'hybrid'),  # 筛选标准
+            'prioritize_win_rate': params.get('prioritize_win_rate', True),  # 混合策略优先级
+            'training_weight': params.get('training_weight', 0.5)  # 训练期权重（2025-12-20新增）
         }
 
         total_evaluations = 0
@@ -121,13 +129,13 @@ class BackwardSelector:
             return SelectionResult(
                 selected_variables=initial_variables,
                 selection_history=[],
-                final_score=(-np.inf, np.inf),
+                final_score=(np.nan, -np.inf, np.inf),
                 total_evaluations=0,
                 svd_error_count=0
             )
 
         # 2. 计算初始基准性能
-        current_best_score, eval_count, svd_count, current_is_rmse, current_oos_rmse = self._evaluate_baseline(
+        current_best_score, eval_count, svd_count, current_is_rmse, current_oos_rmse, current_is_win_rate, current_oos_win_rate = self._evaluate_baseline(
             current_predictors, progress_callback
         )
         total_evaluations += eval_count
@@ -140,7 +148,7 @@ class BackwardSelector:
             self._log_iteration_start(iteration, len(current_predictors), progress_callback)
 
             # 找到本轮最佳移除候选
-            best_removal, best_score_this_iter, eval_count, svd_count, best_is_rmse, best_oos_rmse = self._find_best_removal_candidate(
+            best_removal, best_score_this_iter, eval_count, svd_count, best_is_rmse, best_oos_rmse, best_is_win_rate, best_oos_win_rate = self._find_best_removal_candidate(
                 current_predictors
             )
             total_evaluations += eval_count
@@ -151,8 +159,16 @@ class BackwardSelector:
                 logger.warning("本轮无可行的移除候选，筛选结束")
                 break
 
-            # 检查是否有性能提升
-            if best_score_this_iter <= current_best_score:
+            # 检查是否有性能提升（根据筛选策略）
+            comparison = compare_scores_with_winrate(
+                best_score_this_iter,
+                current_best_score,
+                rmse_tolerance_percent=self._eval_params.get('rmse_tolerance_percent', 1.0),
+                win_rate_tolerance_percent=self._eval_params.get('win_rate_tolerance_percent', 5.0),
+                selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
+                prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+            )
+            if comparison < 0:
                 logger.warning(
                     f"移除任何变量都无法提升性能 "
                     f"(当前验证期RMSE={-current_best_score[1]:.6f}; 最佳候选验证期RMSE={-best_score_this_iter[1]:.6f})"
@@ -163,13 +179,16 @@ class BackwardSelector:
             self._apply_removal_and_record(
                 current_predictors, best_removal, best_score_this_iter,
                 current_best_score, iteration, selection_history, progress_callback,
-                current_is_rmse, current_oos_rmse, best_is_rmse, best_oos_rmse
+                current_is_rmse, current_oos_rmse, best_is_rmse, best_oos_rmse,
+                current_is_win_rate, current_oos_win_rate, best_is_win_rate, best_oos_win_rate
             )
 
-            # 更新当前最佳得分和RMSE
+            # 更新当前最佳得分和指标
             current_best_score = best_score_this_iter
             current_is_rmse = best_is_rmse
             current_oos_rmse = best_oos_rmse
+            current_is_win_rate = best_is_win_rate
+            current_oos_win_rate = best_oos_win_rate
 
         # 4. 返回结果
         return self._build_selection_result(
@@ -202,8 +221,8 @@ class BackwardSelector:
         self,
         current_predictors: List[str],
         progress_callback: Optional[Callable]
-    ) -> Tuple[Tuple[float, float], int, int, float, float]:
-        """计算初始基准性能（扩展返回is_rmse和oos_rmse）"""
+    ) -> Tuple[Tuple[float, float, float], int, int, float, float, float, float]:
+        """计算初始基准性能（扩展返回RMSE和Win Rate）"""
         logger.info(f"计算初始基准性能，变量数: {len(current_predictors)}")
 
         target_variable = self._eval_params['target_variable']
@@ -214,35 +233,40 @@ class BackwardSelector:
 
             if len(result_tuple) != 9:
                 logger.error(f"评估函数返回了{len(result_tuple)}个值(预期9)，使用默认分数")
-                return ((-np.inf, -np.inf), 1, 0, np.inf, np.inf)
+                return ((np.nan, -np.inf, np.inf), 1, 0, np.inf, np.inf, np.nan, np.nan)
 
-            is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+            is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
             svd_count = 1 if is_svd_error else 0
 
-            score = calculate_combined_score(is_rmse, oos_rmse, is_hit_rate, oos_hit_rate)
+            # 使用加权得分计算（2025-12-20修改）
+            score = calculate_weighted_score(
+                is_rmse, oos_rmse, is_win_rate, oos_win_rate,
+                training_weight=self._eval_params.get('training_weight', 0.5)
+            )
 
             if not np.isfinite(score[1]):
-                logger.warning(f"初始基准评估返回无效分数（验证期RMSE无效），使用最差分数")
-                score = (0.0, -np.inf)
+                logger.warning(f"初始基准评估返回无效分数（加权RMSE无效），使用最差分数")
+                score = (np.nan, -np.inf, np.inf)
 
+            win_rate_str = f", Win Rate: {oos_win_rate:.1f}%" if np.isfinite(oos_win_rate) else ""
             logger.info(
-                f"初始基准得分 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}, "
+                f"初始基准得分 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}{win_rate_str}, "
                 f"变量数: {len(current_predictors)}"
             )
 
-            # 输出基线模型RMSE（精简格式）
+            # 输出基线模型RMSE和Win Rate
             if progress_callback:
                 progress_callback(
                     f"========== 变量选择 ==========\n"
-                    f"基线模型 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}"
+                    f"基线模型 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}{win_rate_str}"
                 )
 
-            return (score, 1, svd_count, is_rmse, oos_rmse)
+            return (score, 1, svd_count, is_rmse, oos_rmse, is_win_rate, oos_win_rate)
 
         except Exception as e:
             logger.error(f"计算初始基准性能时出错: {e}")
             logger.warning("使用默认分数继续")
-            return ((-np.inf, -np.inf), 1, 0, np.inf, np.inf)
+            return ((np.nan, -np.inf, np.inf), 1, 0, np.inf, np.inf, np.nan, np.nan)
 
     def _should_continue_selection(
         self,
@@ -280,7 +304,7 @@ class BackwardSelector:
         current_predictors: List[str]
     ) -> Tuple[Optional[str], Tuple[float, float], int, int, Optional[float], Optional[float]]:
         """找到本轮最佳移除候选（扩展返回is_rmse和oos_rmse）"""
-        best_score = (-np.inf, -np.inf)
+        best_score = (np.nan, -np.inf, np.inf)
         best_var = None
         best_is_rmse = None
         best_oos_rmse = None
@@ -305,12 +329,13 @@ class BackwardSelector:
                 'validation_start': self._eval_params['validation_start'],
                 'validation_end': self._eval_params['validation_end'],
                 'max_iterations': self._eval_params.get('max_iter', 30),
-                'tolerance': 1e-4  # 使用默认值
+                'tolerance': 1e-4,  # 使用默认值
+                'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
             }
 
             # 并行评估
             logger.info(f"  使用并行评估 ({self.parallel_config.get_effective_n_jobs()} 核心)")
-            candidate_results = evaluate_removals_with_fallback(
+            candidate_results = evaluate_removals(
                 current_predictors=current_predictors,
                 target_variable=target_variable,
                 full_data=self._eval_params['full_data'],
@@ -353,15 +378,20 @@ class BackwardSelector:
                         logger.warning(f"    评估返回了{len(result_tuple)}个值，跳过'{var}'")
                         continue
 
-                    is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate, is_svd_error, _, _ = result_tuple
+                    is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
                     if is_svd_error:
                         total_svd_errors += 1
                         logger.warning(f"    SVD警告")
 
-                    score = calculate_combined_score(is_rmse, oos_rmse, is_hit_rate, oos_hit_rate)
+                    # 使用加权得分计算（2025-12-20修改）
+                    score = calculate_weighted_score(
+                        is_rmse, oos_rmse, is_win_rate, oos_win_rate,
+                        training_weight=self._eval_params.get('training_weight', 0.5)
+                    )
 
                     # 打印评估结果（同时输出到UI和日志）
-                    msg = f"    训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}"
+                    win_rate_str = f", Win Rate={oos_win_rate:.1f}%" if np.isfinite(oos_win_rate) else ""
+                    msg = f"    训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}{win_rate_str}"
                     logger.info(msg)
                     if progress_callback:
                         progress_callback(msg)
@@ -371,8 +401,8 @@ class BackwardSelector:
                         'var': var,
                         'is_rmse': is_rmse,
                         'oos_rmse': oos_rmse,
-                        'is_hit_rate': is_hit_rate,
-                        'oos_hit_rate': oos_hit_rate,
+                        'is_win_rate': is_win_rate,
+                        'oos_win_rate': oos_win_rate,
                         'is_svd_error': is_svd_error
                     })
 
@@ -380,26 +410,44 @@ class BackwardSelector:
                     logger.error(f"    评估移除'{var}'时出错: {e}")
                     continue
 
+        # 获取容忍度配置
+        rmse_tolerance = self._eval_params.get('rmse_tolerance_percent', 1.0)
+        win_rate_tolerance = self._eval_params.get('win_rate_tolerance_percent', 5.0)
+
         # 处理评估结果，计算得分并找出最佳候选
+        best_is_win_rate = np.nan
+        best_oos_win_rate = np.nan
         for result in candidate_results:
             total_evals += 1
             if result.get('is_svd_error', False):
                 total_svd_errors += 1
 
-            score = calculate_combined_score(
+            # 使用加权得分计算（2025-12-20修改）
+            score = calculate_weighted_score(
                 result['is_rmse'],
                 result['oos_rmse'],
-                result.get('is_hit_rate', 0.0),
-                result.get('oos_hit_rate', 0.0)
+                result.get('is_win_rate', np.nan),
+                result.get('oos_win_rate', np.nan),
+                training_weight=self._eval_params.get('training_weight', 0.5)
             )
             result['score'] = score
 
-            # 更新最佳候选
-            if np.isfinite(score[1]) and score > best_score:
+            # 更新最佳候选（根据筛选策略）
+            comparison = compare_scores_with_winrate(
+                score,
+                best_score,
+                rmse_tolerance_percent=rmse_tolerance,
+                win_rate_tolerance_percent=win_rate_tolerance,
+                selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
+                prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+            )
+            if np.isfinite(score[1]) and comparison > 0:
                 best_score = score
                 best_var = result['var']
                 best_is_rmse = result['is_rmse']
                 best_oos_rmse = result['oos_rmse']
+                best_is_win_rate = result.get('is_win_rate', np.nan)
+                best_oos_win_rate = result.get('oos_win_rate', np.nan)
 
                 if not use_parallel:
                     # 串行模式下实时标记最佳候选
@@ -417,31 +465,36 @@ class BackwardSelector:
 
             for res in candidate_results:
                 is_best = " <- 最佳" if res['var'] == best_var else ""
+                win_rate_str = f", Win Rate={res.get('oos_win_rate', np.nan):.1f}%" if np.isfinite(res.get('oos_win_rate', np.nan)) else ""
                 msg = (
                     f"    '{res['var']}': 训练期RMSE={res['is_rmse']:.4f}, "
-                    f"验证期RMSE={res['oos_rmse']:.4f}{is_best}"
+                    f"验证期RMSE={res['oos_rmse']:.4f}{win_rate_str}{is_best}"
                 )
                 logger.info(msg)
                 if progress_callback:
                     progress_callback(msg)
 
-        return (best_var, best_score, total_evals, total_svd_errors, best_is_rmse, best_oos_rmse)
+        return (best_var, best_score, total_evals, total_svd_errors, best_is_rmse, best_oos_rmse, best_is_win_rate, best_oos_win_rate)
 
     def _apply_removal_and_record(
         self,
         current_predictors: List[str],
         removed_var: str,
-        new_score: Tuple[float, float],
-        old_score: Tuple[float, float],
+        new_score: Tuple[float, float, float],
+        old_score: Tuple[float, float, float],
         iteration: int,
         history: List[Dict],
         progress_callback: Optional[Callable],
         old_is_rmse: float,
         old_oos_rmse: float,
         new_is_rmse: float,
-        new_oos_rmse: float
+        new_oos_rmse: float,
+        old_is_win_rate: float,
+        old_oos_win_rate: float,
+        new_is_win_rate: float,
+        new_oos_win_rate: float
     ):
-        """应用变量移除并记录历史（精简输出）"""
+        """应用变量移除并记录历史"""
         current_predictors.remove(removed_var)
 
         # 记录选择历史
@@ -457,10 +510,17 @@ class BackwardSelector:
         delta_is_rmse = old_is_rmse - new_is_rmse
         delta_oos_rmse = old_oos_rmse - new_oos_rmse
 
+        # Win Rate变化字符串
+        win_rate_change_str = ""
+        if np.isfinite(old_oos_win_rate) or np.isfinite(new_oos_win_rate):
+            old_wr_str = f"{old_oos_win_rate:.1f}%" if np.isfinite(old_oos_win_rate) else "N/A"
+            new_wr_str = f"{new_oos_win_rate:.1f}%" if np.isfinite(new_oos_win_rate) else "N/A"
+            win_rate_change_str = f"\n  Win Rate: {old_wr_str} -> {new_wr_str}"
+
         logger.info(
             f"\n第{iteration}轮决策: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
             f"  训练期RMSE: {old_is_rmse:.4f} -> {new_is_rmse:.4f} (改善: {delta_is_rmse:+.4f})\n"
-            f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f} (改善: {delta_oos_rmse:+.4f})"
+            f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f} (改善: {delta_oos_rmse:+.4f}){win_rate_change_str}"
         )
 
         # 精简的回调输出格式
@@ -468,7 +528,7 @@ class BackwardSelector:
             progress_callback(
                 f"第{iteration}轮: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
                 f"  训练期RMSE: {old_is_rmse:.4f} -> {new_is_rmse:.4f}\n"
-                f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f}"
+                f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f}{win_rate_change_str}"
             )
 
     def _build_selection_result(

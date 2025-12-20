@@ -51,7 +51,7 @@ def _evaluate_dfm_model(
         **kwargs: 其他参数
 
     Returns:
-        9元组: (is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate,
+        9元组: (is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
                is_svd_error, _, _)
     """
     try:
@@ -60,7 +60,7 @@ def _evaluate_dfm_model(
 
         if len(predictor_vars) == 0:
             logger.warning("[Evaluator] 预测变量为空，返回无穷大RMSE")
-            return (np.inf, np.inf, None, None, -np.inf, -np.inf, False, None, None)
+            return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, False, None, None)
 
         # 准备数据
         predictor_data = full_data[predictor_vars]
@@ -131,7 +131,7 @@ def _evaluate_variable_selection_model(
         **kwargs: 其他参数
 
     Returns:
-        9元组: (is_rmse, oos_rmse, None, None, np.nan, np.nan, is_svd_error, None, None)
+        9元组: (is_rmse, oos_rmse, None, None, is_win_rate, oos_win_rate, is_svd_error, None, None)
     """
     try:
         # 分离预测变量
@@ -160,10 +160,15 @@ def _evaluate_variable_selection_model(
             progress_callback=None
         )
 
-        # 计算配对RMSE（根据alignment_mode选择配对模式）
-        from dashboard.models.DFM.train.evaluation.metrics import calculate_aligned_rmse
+        # 导入评估函数
+        from dashboard.models.DFM.train.evaluation.metrics import (
+            calculate_aligned_rmse,
+            calculate_aligned_win_rate
+        )
 
-        # 样本内RMSE（训练期）
+        # 样本内评估（训练期）
+        is_rmse = np.inf
+        is_win_rate = np.nan
         if model_result.forecast_is is not None and len(model_result.forecast_is) > 0:
             train_data_len = len(model_result.forecast_is)
             train_index = pd.to_datetime(predictor_data.index[:train_data_len])
@@ -172,10 +177,11 @@ def _evaluate_variable_selection_model(
                 index=train_index
             )
             is_rmse = calculate_aligned_rmse(train_nowcast, target_data, alignment_mode)
-        else:
-            is_rmse = np.inf
+            is_win_rate = calculate_aligned_win_rate(train_nowcast, target_data, alignment_mode)
 
-        # 样本外RMSE（验证期）
+        # 样本外评估（验证期）
+        oos_rmse = np.inf
+        oos_win_rate = np.nan
         if model_result.forecast_oos is not None and len(model_result.forecast_oos) > 0:
             train_data_len = len(model_result.forecast_is) if model_result.forecast_is is not None else 0
             val_index = pd.to_datetime(predictor_data.index[train_data_len:train_data_len+len(model_result.forecast_oos)])
@@ -186,14 +192,12 @@ def _evaluate_variable_selection_model(
                     index=val_index
                 )
                 oos_rmse = calculate_aligned_rmse(val_nowcast, target_data, alignment_mode)
+                oos_win_rate = calculate_aligned_win_rate(val_nowcast, target_data, alignment_mode)
             else:
                 logger.warning(f"[VarSelectionEvaluator] 验证期索引长度不匹配: {len(val_index)} vs {len(model_result.forecast_oos)}")
-                oos_rmse = np.inf
-        else:
-            oos_rmse = np.inf
 
-        # 返回简化的9元组（只有RMSE有意义）
-        return (is_rmse, oos_rmse, np.nan, np.nan, np.nan, np.nan, False, None, None)
+        # 返回9元组（位置[4]和[5]为Win Rate）
+        return (is_rmse, oos_rmse, np.nan, np.nan, is_win_rate, oos_win_rate, False, None, None)
 
     except Exception as e:
         logger.error(f"[VarSelectionEvaluator] 评估失败: {e}")
@@ -239,7 +243,7 @@ def create_dfm_evaluator(config: 'TrainingConfig') -> Callable:
                 - max_iter: 最大迭代次数
 
         Returns:
-            9元组: (is_rmse, oos_rmse, _, _, is_hit_rate, oos_hit_rate,
+            9元组: (is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
                    is_svd_error, _, _)
         """
         # 提取参数

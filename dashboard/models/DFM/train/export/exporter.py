@@ -187,8 +187,8 @@ class TrainingResultExporter:
             raise ValueError("训练结果缺少评估指标(metrics)，无法导出元数据")
 
         metadata.update({
-            'is_hit_rate': float(result.metrics.is_hit_rate),
-            'oos_hit_rate': float(result.metrics.oos_hit_rate),
+            'is_win_rate': float(result.metrics.is_win_rate),
+            'oos_win_rate': float(result.metrics.oos_win_rate),
             'is_rmse': float(result.metrics.is_rmse),
             'oos_rmse': float(result.metrics.oos_rmse),
             'is_mae': float(result.metrics.is_mae),
@@ -198,7 +198,7 @@ class TrainingResultExporter:
         # 观察期指标（如果存在）
         if result.metrics.obs_rmse != np.inf:
             metadata.update({
-                'obs_hit_rate': float(result.metrics.obs_hit_rate),
+                'obs_win_rate': float(result.metrics.obs_win_rate),
                 'obs_rmse': float(result.metrics.obs_rmse),
                 'obs_mae': float(result.metrics.obs_mae),
             })
@@ -1196,14 +1196,20 @@ class TrainingResultExporter:
                 # 获取变量数
                 n_variables = len(result.selected_variables) if result.selected_variables else 0
 
+                # 处理Win Rate可能为NaN的情况
+                is_wr = result.metrics.is_win_rate
+                oos_wr = result.metrics.oos_win_rate
+                is_wr_display = round(is_wr, 4) if np.isfinite(is_wr) else np.nan
+                oos_wr_display = round(oos_wr, 4) if np.isfinite(oos_wr) else np.nan
+
                 metrics_list.append({
                     '行业名称': industry,
                     '样本内RMSE': round(result.metrics.is_rmse, 4),
                     '样本外RMSE': round(result.metrics.oos_rmse, 4),
                     '样本内MAE': round(result.metrics.is_mae, 4),
                     '样本外MAE': round(result.metrics.oos_mae, 4),
-                    '样本内命中率': round(result.metrics.is_hit_rate, 4),
-                    '样本外命中率': round(result.metrics.oos_hit_rate, 4),
+                    '样本内胜率': is_wr_display,
+                    '样本外胜率': oos_wr_display,
                     '因子数': k_factors,
                     '变量数': n_variables
                 })

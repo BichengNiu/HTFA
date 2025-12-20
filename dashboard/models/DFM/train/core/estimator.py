@@ -13,7 +13,6 @@ from sklearn.linear_model import LinearRegression
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.constants import (
     MIN_EIGENVALUE_EPSILON,
-    SVD_FALLBACK_MIN_VALUE,
     R_MATRIX_MIN_VARIANCE,
     DEFAULT_AR1_COEFFICIENT,
     DEFAULT_Q_VARIANCE,
@@ -242,11 +241,7 @@ def estimate_covariance_matrices(
             Q = Sigma_corrected
 
         except np.linalg.LinAlgError as e:
-            logger.warning(f"Sigma特征值分解失败: {e}. 使用fallback值")
-            Q = np.eye(n_factors) * R_MATRIX_MIN_VARIANCE
-            B = np.zeros((n_factors, n_shocks))
-            min_dim_fallback = min(n_factors, n_shocks)
-            B[:min_dim_fallback, :min_dim_fallback] = np.eye(min_dim_fallback) * np.sqrt(SVD_FALLBACK_MIN_VALUE)
+            raise np.linalg.LinAlgError(f"Sigma特征值分解失败: {e}，请检查数据质量或减少因子数")
     else:
         # 如果没有n_shocks，只计算Q矩阵
         Q = _ensure_positive_definite(Sigma, epsilon=MIN_EIGENVALUE_EPSILON)

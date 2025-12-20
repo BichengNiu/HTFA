@@ -97,6 +97,24 @@ class TrainingConfigBuilder:
         # 7.5 获取目标变量配对模式（2025-12新增）
         target_alignment_mode = self.state.get('dfm_target_alignment_mode', 'next_month')
 
+        # 7.6 获取筛选策略配置（2025-12-20新增）
+        selection_criterion = 'hybrid'
+        prioritize_win_rate = True
+
+        if enable_var_selection:
+            selection_criterion = self.state.get('dfm_selection_criterion', 'hybrid')
+            hybrid_priority = self.state.get('dfm_hybrid_priority', 'win_rate_first')
+
+            # 转换为后端参数
+            if selection_criterion == 'hybrid':
+                prioritize_win_rate = (hybrid_priority == 'win_rate_first')
+            else:
+                prioritize_win_rate = None  # 纯策略不需要此参数
+
+        # 7.7 获取训练期权重配置（2025-12-20新增）
+        training_weight_pct = self.state.get('dfm_training_weight', 50)
+        training_weight = training_weight_pct / 100.0  # 转换为0-1范围
+
         # 8. 保存DataFrame到临时文件
         temp_data_path = self._save_dataframe_to_temp(input_df)
 
@@ -144,6 +162,13 @@ class TrainingConfigBuilder:
 
             # 目标变量配对模式（2025-12新增）
             target_alignment_mode=target_alignment_mode,
+
+            # 筛选策略配置（2025-12-20新增）
+            selection_criterion=selection_criterion,
+            prioritize_win_rate=prioritize_win_rate,
+
+            # 训练期权重配置（2025-12-20新增）
+            training_weight=training_weight,
         )
 
         return training_config
@@ -208,16 +233,19 @@ class TrainingConfigBuilder:
 
         Returns:
             train模块方法名
+
+        Raises:
+            ValueError: 无效的变量选择方法
         """
         var_selection_method_map = {
             'none': 'none',
-            'global_backward': 'backward',
-            'global_forward': 'forward',
             'backward': 'backward',
             'forward': 'forward',
-            'stepwise': 'stepwise'  # 向前向后法
+            'stepwise': 'stepwise'
         }
-        return var_selection_method_map.get(var_selection_method, 'none')
+        if var_selection_method not in var_selection_method_map:
+            raise ValueError(f"无效的变量选择方法: {var_selection_method}，有效值: {list(var_selection_method_map.keys())}")
+        return var_selection_method_map[var_selection_method]
 
     def _get_factor_selection_params(self):
         """

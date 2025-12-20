@@ -387,51 +387,43 @@ class TwoStageTrainer:
             'output_dir': self.config.output_dir
         }
 
-        try:
-            # 并行执行训练
-            results_list = Parallel(
-                n_jobs=self.config.first_stage_n_jobs,
-                backend=self.config.parallel_backend,
-                verbose=0,
-                prefer='processes'
-            )(
-                delayed(_train_single_industry)(
-                    industry,
-                    processor.data,  # 传递完整数据
-                    self.config.industry_map,
-                    self.config.industry_k_factors,
-                    config_dict,
-                    idx,
-                    len(industry_list)
-                )
-                for idx, industry in enumerate(industry_list, 1)
+        # 并行执行训练（失败时报错，不降级）
+        results_list = Parallel(
+            n_jobs=self.config.first_stage_n_jobs,
+            backend=self.config.parallel_backend,
+            verbose=0,
+            prefer='processes'
+        )(
+            delayed(_train_single_industry)(
+                industry,
+                processor.data,  # 传递完整数据
+                self.config.industry_map,
+                self.config.industry_k_factors,
+                config_dict,
+                idx,
+                len(industry_list)
             )
+            for idx, industry in enumerate(industry_list, 1)
+        )
 
-            # 聚合结果
-            results = {}
-            failed_industries = []
-            for industry, result in results_list:
-                if result is not None:
-                    results[industry] = result
-                    if progress_callback:
-                        progress_callback(
-                            f"  [{len(results)}/{len(industry_list)}] {industry} 训练完成，"
-                            f"RMSE(oos)={result.metrics.oos_rmse:.4f}"
-                        )
-                else:
-                    failed_industries.append(industry)
+        # 聚合结果
+        results = {}
+        failed_industries = []
+        for industry, result in results_list:
+            if result is not None:
+                results[industry] = result
+                if progress_callback:
+                    progress_callback(
+                        f"  [{len(results)}/{len(industry_list)}] {industry} 训练完成，"
+                        f"RMSE(oos)={result.metrics.oos_rmse:.4f}"
+                    )
+            else:
+                failed_industries.append(industry)
 
-            if failed_industries:
-                logger.warning(f"以下 {len(failed_industries)} 个行业训练失败: {', '.join(failed_industries)}")
+        if failed_industries:
+            logger.warning(f"以下 {len(failed_industries)} 个行业训练失败: {', '.join(failed_industries)}")
 
-            return results
-
-        except Exception as e:
-            logger.error(f"并行训练失败: {str(e)}，自动降级到串行模式")
-            logger.debug(f"详细错误信息:\n{traceback.format_exc()}")
-            return self._train_industry_models_serial(
-                processor, industry_list, progress_callback
-            )
+        return results
 
     def _train_industry_models_serial(
         self,
@@ -711,7 +703,13 @@ class TwoStageTrainer:
             parallel_backend=self.config.parallel_backend,
             min_variables_for_parallel=self.config.min_variables_for_parallel,
             output_dir=self.config.output_dir,
-            industry_map={}  # 第二阶段不需要行业映射
+            industry_map={},  # 第二阶段不需要行业映射
+            # 筛选策略参数（2025-12-20修复：确保第二阶段继承父配置）
+            selection_criterion=self.config.selection_criterion,
+            prioritize_win_rate=self.config.prioritize_win_rate,
+            rmse_tolerance_percent=self.config.rmse_tolerance_percent,
+            win_rate_tolerance_percent=self.config.win_rate_tolerance_percent,
+            training_weight=self.config.training_weight
         )
 
         # 训练第二阶段模型

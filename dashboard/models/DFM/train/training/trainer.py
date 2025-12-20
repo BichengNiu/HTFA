@@ -199,7 +199,14 @@ class DFMTrainer:
                     initial_variables=initial_vars,
                     target_variable=self.config.target_variable,
                     full_data=data,
-                    params={'k_factors': k_for_selection},
+                    params={
+                        'k_factors': k_for_selection,
+                        'rmse_tolerance_percent': self.config.rmse_tolerance_percent,
+                        'win_rate_tolerance_percent': self.config.win_rate_tolerance_percent,
+                        'selection_criterion': self.config.selection_criterion,
+                        'prioritize_win_rate': self.config.prioritize_win_rate,
+                        'training_weight': self.config.training_weight  # 训练期权重（2025-12-20修复）
+                    },
                     validation_start=self.config.validation_start,
                     validation_end=self.config.validation_end,
                     target_freq=self.config.target_freq,

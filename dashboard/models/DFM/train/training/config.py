@@ -8,7 +8,7 @@
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any
 from pathlib import Path
-from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig, create_default_parallel_config
+from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
 
 
 @dataclass
@@ -73,6 +73,17 @@ class TrainingConfig:
 
     # 目标变量配对模式（2025-12新增）
     target_alignment_mode: str = 'next_month'  # 'current_month'(本月) 或 'next_month'(下月)
+
+    # Win Rate优化配置（2025-12-19新增）
+    rmse_tolerance_percent: float = 1.0  # RMSE相近的容忍度（百分比）
+    win_rate_tolerance_percent: float = 5.0  # Win Rate相近的容忍度（百分比），用于胜率优先策略
+
+    # 筛选策略配置（2025-12-20新增）
+    selection_criterion: str = 'hybrid'  # 筛选标准: 'rmse', 'win_rate', 'hybrid'
+    prioritize_win_rate: Optional[bool] = True  # 混合策略时的优先级，仅hybrid模式有效
+
+    # 训练期权重配置（2025-12-20新增）
+    training_weight: float = 0.5  # 训练期权重 (0.0-1.0)，验证期权重自动为 1-training_weight
 
     def __post_init__(self):
         """后初始化验证"""
@@ -156,6 +167,33 @@ class TrainingConfig:
                 f"当前值: {self.target_alignment_mode}"
             )
 
+        # 验证Win Rate配置（2025-12-19）
+        if self.rmse_tolerance_percent < 0 or self.rmse_tolerance_percent > 100:
+            raise ValueError(
+                f"rmse_tolerance_percent必须在0-100之间，"
+                f"当前值: {self.rmse_tolerance_percent}"
+            )
+        if self.win_rate_tolerance_percent < 0 or self.win_rate_tolerance_percent > 100:
+            raise ValueError(
+                f"win_rate_tolerance_percent必须在0-100之间，"
+                f"当前值: {self.win_rate_tolerance_percent}"
+            )
+
+        # 验证筛选策略配置（2025-12-20）
+        valid_criteria = ['rmse', 'win_rate', 'hybrid']
+        if self.selection_criterion not in valid_criteria:
+            raise ValueError(
+                f"selection_criterion必须是{valid_criteria}之一，"
+                f"当前值: {self.selection_criterion}"
+            )
+
+        # 验证训练期权重（2025-12-20）
+        if not 0.0 <= self.training_weight <= 1.0:
+            raise ValueError(
+                f"training_weight必须在0.0到1.0之间，"
+                f"当前值: {self.training_weight}"
+            )
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':
         """从字典创建配置
@@ -221,37 +259,3 @@ class TrainingConfig:
             f"  variable_selection={self.enable_variable_selection}\n"
             f")"
         )
-
-
-def create_default_config(
-    data_path: str,
-    target_variable: str,
-    selected_indicators: List[str] = None,
-    k_factors: int = 4,
-    train_end: str = None,
-    validation_start: str = None,
-    validation_end: str = None
-) -> TrainingConfig:
-    """创建默认配置
-
-    Args:
-        data_path: 数据文件路径
-        target_variable: 目标变量名
-        selected_indicators: 已选变量列表
-        k_factors: 因子数量
-        train_end: 训练期结束日期
-        validation_start: 验证期开始日期
-        validation_end: 验证期结束日期
-
-    Returns:
-        TrainingConfig: 默认配置对象
-    """
-    return TrainingConfig(
-        data_path=data_path,
-        target_variable=target_variable,
-        selected_indicators=selected_indicators or [],
-        k_factors=k_factors,
-        train_end=train_end,
-        validation_start=validation_start,
-        validation_end=validation_end
-    )

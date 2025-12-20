@@ -89,7 +89,7 @@ class DFMMetadataAccessor:
         return ModelMetrics(
             mae=self._get_metric('is_mae'),
             rmse=self._get_metric('is_rmse'),
-            hit_rate=self._get_metric('is_hit_rate')
+            hit_rate=self._get_metric('is_win_rate')
         )
 
     @property
@@ -98,7 +98,7 @@ class DFMMetadataAccessor:
         return ModelMetrics(
             mae=self._get_metric('oos_mae'),
             rmse=self._get_metric('oos_rmse'),
-            hit_rate=self._get_metric('oos_hit_rate')
+            hit_rate=self._get_metric('oos_win_rate')
         )
 
     @property
@@ -107,7 +107,7 @@ class DFMMetadataAccessor:
         return ModelMetrics(
             mae=self._get_metric('obs_mae'),
             rmse=self._get_metric('obs_rmse'),
-            hit_rate=self._get_metric('obs_hit_rate')
+            hit_rate=self._get_metric('obs_win_rate')
         )
 
     def _get_metric(self, base_key: str) -> Optional[float]:

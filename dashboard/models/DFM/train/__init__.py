@@ -32,7 +32,10 @@ from dashboard.models.DFM.train.core.kalman import KalmanFilter
 from dashboard.models.DFM.train.core.prediction import generate_target_forecast
 
 # 评估指标
-from dashboard.models.DFM.train.evaluation.metrics import calculate_next_month_hit_rate, calculate_rmse
+from dashboard.models.DFM.train.evaluation.metrics import (
+    calculate_rmse,
+    calculate_aligned_win_rate
+)
 
 # 变量选择
 from dashboard.models.DFM.train.selection.backward_selector import BackwardSelector

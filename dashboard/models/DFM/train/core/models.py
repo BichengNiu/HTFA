@@ -21,13 +21,33 @@ class EvaluationMetrics:
     oos_rmse: float = np.inf
     is_mae: float = np.inf
     oos_mae: float = np.inf
-    is_hit_rate: float = -np.inf
-    oos_hit_rate: float = -np.inf
+
+    # Win Rate（2025-12-19新增）
+    is_win_rate: float = np.nan   # 样本内胜率（0-100）
+    oos_win_rate: float = np.nan  # 样本外胜率（0-100）
 
     # 观察期指标
     obs_rmse: float = np.inf
     obs_mae: float = np.inf
-    obs_hit_rate: float = -np.inf
+    obs_win_rate: float = np.nan  # 观察期胜率（0-100）
+
+    def to_tuple(self) -> Tuple[float, float, float, float, float, float, bool, float, float]:
+        """转换为9元组用于evaluator兼容性
+
+        Returns:
+            (is_rmse, oos_rmse, is_mae, oos_mae, is_win_rate, oos_win_rate, False, obs_rmse, obs_mae)
+        """
+        return (
+            self.is_rmse,
+            self.oos_rmse,
+            self.is_mae,
+            self.oos_mae,
+            self.is_win_rate,
+            self.oos_win_rate,
+            False,  # SVD error flag (固定False，实际错误在调用处处理)
+            self.obs_rmse,
+            self.obs_mae
+        )
 
 
 @dataclass
@@ -35,10 +55,10 @@ class MetricsResult:
     """详细评估指标结果"""
     is_rmse: float
     is_mae: float
-    is_hit_rate: float
+    is_win_rate: float
     oos_rmse: float
     oos_mae: float
-    oos_hit_rate: float
+    oos_win_rate: float
     aligned_data: Optional[pd.DataFrame] = None
 
 
@@ -278,14 +298,18 @@ class TwoStageTrainingResult:
         summary_data = []
 
         for industry, result in self.first_stage_results.items():
+            # 处理Win Rate可能为NaN的情况
+            is_wr = result.metrics.is_win_rate if result.metrics else np.nan
+            oos_wr = result.metrics.oos_win_rate if result.metrics else np.nan
+
             summary_data.append({
                 '行业': industry,
                 '因子数': self.industry_k_factors_used.get(industry, 0),
                 '变量数': len(result.selected_variables),
                 '样本内RMSE': result.metrics.is_rmse if result.metrics else np.nan,
                 '样本外RMSE': result.metrics.oos_rmse if result.metrics else np.nan,
-                '样本内命中率': result.metrics.is_hit_rate if result.metrics else np.nan,
-                '样本外命中率': result.metrics.oos_hit_rate if result.metrics else np.nan,
+                '样本内胜率': is_wr,
+                '样本外胜率': oos_wr,
                 '训练时间(秒)': result.training_time
             })
 
