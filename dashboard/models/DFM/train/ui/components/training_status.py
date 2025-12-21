@@ -18,15 +18,7 @@ from datetime import datetime
 from dashboard.models.DFM.ui import DFMComponent
 from dashboard.models.DFM.train import DFMTrainer, TrainingConfig, TrainingResult
 
-# train_model已被删除，所有功能已迁移到train模块
-# 这个组件提供训练状态监控和结果管理
-
-ENHANCED_SYSTEMS_AVAILABLE = False
-# 使用标准日志
 logger = logging.getLogger(__name__)
-dfm_logger = None
-error_handler = None
-print("[INFO] TrainingStatusComponent: 使用标准日志系统(train_model已废弃)")
 
 
 class TrainingStatusComponent(DFMComponent):
@@ -98,52 +90,18 @@ class TrainingStatusComponent(DFMComponent):
     
     def handle_service_error(self, error: Exception) -> None:
         """
-        处理服务错误（使用增强的错误处理系统）
-        
+        处理服务错误
+
         Args:
             error: 异常对象
         """
-        # 使用增强的错误处理（如果可用）
-        if ENHANCED_SYSTEMS_AVAILABLE and error_handler:
-            # 获取上下文信息
-            context = {
-                'component': 'TrainingStatusComponent',
-                'current_status': self._get_training_status(),
-                'timestamp': datetime.now().isoformat()
-            }
-            
-            # 处理错误
-            dfm_error = error_handler.handle_error(error, context)
-            
-            # 获取用户友好的错误消息
-            user_msg = dfm_error.get_user_friendly_message()
-            
-            # 显示错误信息和恢复建议
-            st.error(user_msg)
-            
-            # 记录技术详情到日志
-            if dfm_logger:
-                dfm_logger.error(f"训练状态服务错误: {dfm_error.message}")
-                dfm_logger.debug(f"错误详情: {dfm_error.get_technical_details()}")
-            
-            # 更新错误状态
-            self._set_state('dfm_training_error', user_msg)
-            self._set_state('dfm_training_error_details', dfm_error.to_dict())
-            
-            # 如果错误可恢复，提供恢复选项
-            if dfm_error.recoverable:
-                self._update_training_status(f"训练暂停: {dfm_error.message}")
-            else:
-                self._update_training_status(f"训练失败: {dfm_error.message}")
-        else:
-            # 使用原始错误处理
-            error_msg = f"训练状态服务错误: {str(error)}"
-            logger.error(error_msg)
-            st.error(error_msg)
-            
-            # 更新错误状态
-            self._set_state('dfm_training_error', str(error))
-            self._update_training_status(f"训练失败: {str(error)}")
+        error_msg = f"训练状态服务错误: {str(error)}"
+        logger.error(error_msg)
+        st.error(error_msg)
+
+        # 更新错误状态
+        self._set_state('dfm_training_error', str(error))
+        self._update_training_status(f"训练失败: {str(error)}")
     
     def render(self, st_obj, training_config: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
         """
@@ -322,10 +280,10 @@ class TrainingStatusComponent(DFMComponent):
         self._set_state('dfm_training_status', '未开始')
         self._set_state('dfm_training_progress', 0)
         self._set_state('dfm_training_logs', [])
-        self._set_state('dfm_model_results', None)  # [HOT] 新增：清理旧的结果状态
-        self._set_state('dfm_model_results_paths', None)  # [HOT] 新增：清理结果路径
-        self._set_state('training_completed_refreshed', None)  # [HOT] 新增：重置刷新标志
-        self._set_state('dfm_page_initialized', None)  # [HOT] 新增：重置页面初始化标志
+        self._set_state('dfm_model_results', None)
+        self._set_state('dfm_model_results_paths', None)
+        self._set_state('training_completed_refreshed', None)
+        self._set_state('dfm_page_initialized', None)
         self._add_training_log("训练状态已重置")
 
     def _add_training_log(self, message: str):
@@ -337,9 +295,6 @@ class TrainingStatusComponent(DFMComponent):
         current_logs = self._get_state('dfm_training_log', [])
         current_logs.append(log_entry)
         self._set_state('dfm_training_log', current_logs)
-
-
-        print(f"[HOT] [训练组件] 日志已添加: {log_entry}, 总计: {len(current_logs)} 条")
     
     def _update_training_status(self, status: str, log_entry: Optional[str] = None) -> None:
         """
@@ -350,21 +305,11 @@ class TrainingStatusComponent(DFMComponent):
             log_entry: 可选的日志条目
         """
         old_status = self._get_state('dfm_training_status', '等待开始')
-        print(f"[HOT] [训练组件] 开始更新训练状态: {old_status} -> {status}")
 
         # 更新状态
         try:
             self._set_state('dfm_training_status', status)
-            print(f"[HOT] [训练组件] 状态更新成功: {status}")
-
-            current_status = self._get_state('dfm_training_status')
-            if current_status == status:
-                print(f"[HOT] [训练组件] 状态验证成功: {current_status}")
-            else:
-                print(f"[HOT] [训练组件] 状态验证失败: 期望 {status}, 实际 {current_status}")
-
         except Exception as e:
-            print(f"[HOT] [训练组件] 状态更新失败: {e}")
             logger.error(f"Failed to update training status: {e}")
 
         # 添加日志条目
@@ -373,9 +318,8 @@ class TrainingStatusComponent(DFMComponent):
                 current_log = self._get_state('dfm_training_log', [])
                 current_log.append(log_entry)
                 self._set_state('dfm_training_log', current_log)
-                print(f"[HOT] [训练组件] 日志条目已添加: {log_entry}")
             except Exception as e:
-                print(f"[HOT] [训练组件] 添加日志条目失败: {e}")
+                logger.error(f"Failed to add log entry: {e}")
 
         logger.info(f"Training status updated: {old_status} -> {status}")
 
@@ -408,70 +352,30 @@ class TrainingStatusComponent(DFMComponent):
                 results = self._execute_training(training_config, progress_callback)
 
                 if results:
-                    print(f"[HOT] [训练组件] 训练成功完成，开始更新状态")
-                    
-                    def sync_training_completion_state():
-                        import streamlit as st
-                        sync_lock = threading.Lock()
-                        
-                        with sync_lock:
-                            # 确保所有状态都同步更新
-                            sync_timestamp = datetime.now().isoformat()
-                            
-                            # 1. 设置结果到统一状态管理器
-                            self._set_state('dfm_model_results_paths', results)
-                            
-                            # 2. 设置训练状态
-                            self._set_state('dfm_training_status', '训练完成')
-                            
-                            # 3. 设置刷新标志和时间戳
-                            self._set_state('ui_refresh_needed', True)
-                            self._set_state('training_completion_timestamp', sync_timestamp)
-                            
-                            # 4. 设置强制刷新标志
-                            self._set_state('force_ui_refresh', True)
-                            self._set_state('last_training_update', time.time())
-                            
-                            print(f"[HOT] [训练组件] 状态同步完成 - 时间戳: {sync_timestamp}")
-                    
-                    # 执行同步
-                    sync_training_completion_state()
+                    # 同步更新所有训练完成状态
+                    sync_lock = threading.Lock()
+                    with sync_lock:
+                        sync_timestamp = datetime.now().isoformat()
+                        training_duration = (datetime.now() - training_start_time).total_seconds()
 
-                    # 1. 先设置结果文件路径（保留原有逻辑）
-                    try:
+                        # 设置结果到状态管理器
                         self._set_state('dfm_model_results_paths', results)
-                        print(f"[HOT] [训练组件] 结果文件路径已设置: {len(results)} 个文件")
-                        
-                        print(f"[HOT] [训练组件] 结果文件路径已设置到统一状态管理器")
-                        
-                    except Exception as e:
-                        print(f"[HOT] [训练组件] 设置结果文件路径失败: {e}")
-
-                    # 2. 更新训练状态（这会自动触发事件）
-                    training_duration = (datetime.now() - training_start_time).total_seconds()
-                    completion_message = f"训练成功完成，生成 {len(results)} 个文件，耗时 {training_duration:.1f} 秒"
-                    self._update_training_status("训练完成", completion_message)
-
-                    try:
-                        # 使用session_state设置UI刷新标志
+                        self._set_state('dfm_training_status', '训练完成')
                         self._set_state('ui_refresh_needed', True)
-                        self._set_state('training_completion_timestamp', datetime.now().isoformat())
+                        self._set_state('training_completion_timestamp', sync_timestamp)
+                        self._set_state('force_ui_refresh', True)
+                        self._set_state('last_training_update', time.time())
 
-                        print("[HOT] [训练组件] 已设置UI刷新标志")
-                    except Exception as e:
-                        print(f"[HOT] [训练组件] 设置UI刷新标志失败: {e}")
+                        # 添加完成日志
+                        completion_message = f"训练成功完成，生成 {len(results)} 个文件，耗时 {training_duration:.1f} 秒"
+                        self._add_training_log(completion_message)
 
                     logger.info(f"Training completed successfully: {self._current_training_id}")
-                    print(f"[HOT] [训练组件] 训练状态已更新为: 训练完成")
 
                 else:
-                    print(f"[HOT] [训练组件] 训练失败，结果为空")
-
                     # 直接更新训练状态（这会自动触发事件）
                     self._update_training_status("训练失败: 训练结果为空", "训练执行完成但未生成有效结果")
-
                     logger.error(f"Training failed: {self._current_training_id}")
-                    print(f"[HOT] [训练组件] 训练状态已更新为: 训练失败")
 
         except Exception as e:
             # 训练异常 - 发布失败事件
@@ -650,15 +554,6 @@ class TrainingStatusComponent(DFMComponent):
 
         return params
 
-    def _create_progress_callback(self) -> Callable:
-        """
-        创建进度回调函数（保留用于兼容性）
-
-        Returns:
-            进度回调函数
-        """
-        return self._create_event_progress_callback()
-
     def _create_event_progress_callback(self) -> Callable:
         """
         创建进度回调函数
@@ -768,13 +663,9 @@ class TrainingStatusComponent(DFMComponent):
                 st.session_state[full_key] = value
                 return  # 成功则退出
             except Exception as e:
-                print(f"[HOT] [组件状态设置] 异常 - 键: {key}, 错误: {str(e)}, 尝试: {attempt + 1}")
-
                 # 如果不是最后一次尝试，等待后重试
                 if attempt < max_retries - 1:
                     time.sleep(0.1 * (attempt + 1))  # 递增延迟
                     continue
                 else:
-                    import traceback
-                    print(f"[HOT] [组件状态设置] 最终异常堆栈: {traceback.format_exc()}")
-                    logger.error(f"设置状态失败: {e}")
+                    logger.error(f"设置状态失败: {key}, 错误: {e}")

@@ -2,7 +2,7 @@
 """
 DFM模型训练页面组件
 
-完全版本，与dfm_old_ui/train_model_ui.py保持完全一致
+提供DFM模型训练的完整UI界面，包括数据上传、参数配置、变量选择和训练执行
 """
 
 import streamlit as st
@@ -47,27 +47,6 @@ logger = logging.getLogger(__name__)
 # 创建全局状态管理器实例
 _state = StateManager('train_model')
 
-def debug_training_state(message: str, show_in_ui: bool = False):
-    """
-    调试训练状态同步过程
-
-    Args:
-        message: 调试消息
-        show_in_ui: 是否在UI中显示调试信息
-    """
-    timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
-    debug_msg = f"[{timestamp}] {message}"
-
-    # 控制台输出
-    print(debug_msg)
-
-    # 日志记录
-    logger.debug(debug_msg)
-
-    # 可选的UI显示（用于开发调试）
-    if show_in_ui and hasattr(st, 'sidebar'):
-        with st.sidebar.expander("[CONFIG] 训练状态调试", expanded=False):
-            st.text(debug_msg)
 
 def check_current_training_state():
     """检查当前训练状态的详细信息"""
@@ -78,15 +57,6 @@ def check_current_training_state():
         polling_count = _state.get('training_completion_polling_count', 0)
         training_log = _state.get('dfm_training_log', [])
 
-        debug_msg = f"""
-当前训练状态检查:
-- dfm_training_status: {training_status}
-- dfm_model_results_paths: {training_results}
-- training_completed_refreshed: {training_completed_refreshed}
-- training_completion_polling_count: {polling_count}
-- dfm_training_log 条数: {len(training_log)}
-"""
-        print(debug_msg)
         return {
             'training_status': training_status,
             'training_results': training_results,
@@ -95,7 +65,7 @@ def check_current_training_state():
             'log_count': len(training_log)
         }
     except Exception as e:
-        print(f"[ERROR] 状态检查失败: {e}")
+        logger.error(f"状态检查失败: {e}")
         return None
 
 # 配置已移除，所有参数通过UI设置
@@ -115,61 +85,13 @@ class TrainModelConfig:
 
 config = TrainModelConfig()
 
-_TRAIN_UI_IMPORT_ERROR_MESSAGE = None # Stores combined error messages
-_DATA_PREPARATION_MODULE = None
-
-# 2. 导入数据预处理模块
-# 从data_prep目录导入
-data_prep_dir = os.path.join(dashboard_root, 'dashboard', 'DFM', 'data_prep')
-if data_prep_dir not in sys.path:
-    sys.path.insert(0, data_prep_dir)
-
-# 直接实现load_mappings函数，避免复杂的导入问题
-def load_mappings_direct(excel_path: str, sheet_name: str, indicator_col: str = '指标名称',
-                       type_col: str = '类型', industry_col: str = '行业'):
-    """直接实现的load_mappings函数"""
-    import pandas as pd
-    df = pd.read_excel(excel_path, sheet_name=sheet_name)
-
-    # 移除类型映射，只保留行业映射
-    var_industry_map = {}
-
-    if indicator_col in df.columns:
-        if industry_col in df.columns:
-            # 标准化键名（转换为小写）以与训练过程保持一致
-            raw_industry_map = dict(zip(df[indicator_col].fillna(''), df[industry_col].fillna('')))
-            var_industry_map = {
-                normalize_variable_name(k): str(v).strip()
-                for k, v in raw_industry_map.items()
-                if k and str(k).strip() and v and str(v).strip()
-            }
-
-    # 只返回行业映射（移除类型映射）
-    return {}, var_industry_map
-
-class MappingOnlyWrapper:
-    @staticmethod
-    def load_mappings(*args, **kwargs):
-        return load_mappings_direct(*args, **kwargs)
-
-_DATA_PREPARATION_MODULE = MappingOnlyWrapper()
-print("[SUCCESS] 数据预处理模块（直接实现）加载成功")
-# 清除任何之前的错误消息，因为导入成功了
+# 导入DFM训练脚本
 _TRAIN_UI_IMPORT_ERROR_MESSAGE = None
-
-# Make the data_preparation available for the rest of the module
-data_preparation = _DATA_PREPARATION_MODULE
-
-# 3. 导入DFM训练脚本
 try:
-    # 导入train模块
     from dashboard.models.DFM.train import DFMTrainer, TrainingConfig, TrainingResult
-    print("[SUCCESS] 成功导入DFMTrainer和TrainingConfig from train")
-    _TRAIN_UI_IMPORT_ERROR_MESSAGE = None
 except ImportError as e:
-    print(f"[ERROR] 导入train模块失败: {e}")
-    _TRAIN_UI_IMPORT_ERROR_MESSAGE = f"train module import error: {e}"
-    raise
+    _TRAIN_UI_IMPORT_ERROR_MESSAGE = f"train模块导入失败: {e}"
+    raise ImportError(f"导入train模块失败: {e}") from e
 
 # 模拟的UIDefaults和TrainDefaults类
 class UIDefaults:
@@ -221,12 +143,6 @@ class TrainDefaults:
     VALIDATION_END_YEAR = 2024
     VALIDATION_END_MONTH = 12
     VALIDATION_END_DAY = 31
-
-
-
-
-# 已删除 load_mappings_from_state() 函数 - 移除与数据准备模块的耦合
-# 现在完全依赖文件上传器加载的映射数据
 
 
 def _reset_training_state():
@@ -329,7 +245,7 @@ def render_dfm_model_training_page(st_instance):
 
     training_results = _state.get('dfm_model_results_paths')
     if training_results and training_status != '训练完成':
-        print(f"[状态修复] 检测到训练结果存在但状态未更新: {training_status} -> 训练完成")
+        logger.info(f"状态修复: 检测到训练结果存在但状态未更新: {training_status} -> 训练完成")
         _state.set('dfm_training_status', '训练完成')
         training_status = '训练完成'
 
@@ -435,7 +351,7 @@ def render_dfm_model_training_page(st_instance):
             else:
                 return static_defaults
         except Exception as e:
-            print(f"[WARNING] 计算数据默认日期失败: {e}，使用静态默认值")
+            logger.warning(f"计算数据默认日期失败: {e}，使用静态默认值")
             return static_defaults
 
     # 获取智能默认值
@@ -587,7 +503,7 @@ def render_dfm_model_training_page(st_instance):
 
     # ===== 卡片3: 高级选项 (折叠) =====
     with st_instance.expander("高级选项", expanded=False):
-        # 因子参数（根据策略条件显示）
+        # 因子参数（根据策略条件显示）- 两列布局
         st_instance.markdown("**因子参数**")
 
         # 初始化默认值
@@ -601,54 +517,59 @@ def render_dfm_model_training_page(st_instance):
             if _state.get('dfm_kaiser_threshold') is None:
                 _state.set('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD)
 
-        # 根据策略条件显示参数
-        if strategy_value == 'fixed_number':
-            fixed_factors_value = st_instance.number_input(
-                "因子数",
-                min_value=UIConfig.K_FACTORS_MIN,
-                max_value=UIConfig.K_FACTORS_MAX,
-                value=_state.get('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS),
-                step=1,
-                key='dfm_fixed_number_of_factors',
-                help="指定使用的因子数量"
-            )
-            _state.set('dfm_fixed_number_of_factors', fixed_factors_value)
-        elif strategy_value == 'cumulative_variance':
-            cum_var_value = st_instance.number_input(
-                "累积方差阈值",
-                min_value=UIConfig.CUM_VARIANCE_MIN,
-                max_value=UIConfig.CUM_VARIANCE_MAX,
-                value=_state.get('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE),
-                step=UIConfig.CUM_VARIANCE_STEP,
-                format="%.2f",
-                key='dfm_cumulative_variance_threshold_input',
-                help="因子累积解释方差的阈值"
-            )
-            _state.set('dfm_cumulative_variance_threshold', cum_var_value)
-        elif strategy_value == 'kaiser':
-            kaiser_threshold_value = st_instance.number_input(
-                "特征值阈值",
-                min_value=UIConfig.KAISER_THRESHOLD_MIN,
-                max_value=UIConfig.KAISER_THRESHOLD_MAX,
-                value=_state.get('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD),
-                step=UIConfig.KAISER_THRESHOLD_STEP,
-                format="%.1f",
-                key='dfm_kaiser_threshold_input',
-                help="选择特征值大于此阈值的因子"
-            )
-            _state.set('dfm_kaiser_threshold', kaiser_threshold_value)
+        # 两列布局：左列策略参数，右列因子自回归阶数
+        factor_col1, factor_col2 = st_instance.columns(2)
 
-        # 因子自回归阶数
-        ar_order_value = st_instance.number_input(
-            "因子自回归阶数",
-            min_value=UIConfig.FACTOR_AR_ORDER_MIN,
-            max_value=UIConfig.FACTOR_AR_ORDER_MAX,
-            value=_state.get('dfm_factor_ar_order', UIConfig.DEFAULT_FACTOR_AR_ORDER),
-            step=1,
-            key='dfm_factor_ar_order_input',
-            help="因子的自回归阶数，通常设为1"
-        )
-        _state.set('dfm_factor_ar_order', ar_order_value)
+        # 左列：根据策略条件显示参数
+        with factor_col1:
+            if strategy_value == 'fixed_number':
+                fixed_factors_value = st_instance.number_input(
+                    "因子数",
+                    min_value=UIConfig.K_FACTORS_MIN,
+                    max_value=UIConfig.K_FACTORS_MAX,
+                    value=_state.get('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS),
+                    step=1,
+                    key='dfm_fixed_number_of_factors',
+                    help="指定使用的因子数量"
+                )
+                _state.set('dfm_fixed_number_of_factors', fixed_factors_value)
+            elif strategy_value == 'cumulative_variance':
+                cum_var_value = st_instance.number_input(
+                    "累积方差阈值",
+                    min_value=UIConfig.CUM_VARIANCE_MIN,
+                    max_value=UIConfig.CUM_VARIANCE_MAX,
+                    value=_state.get('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE),
+                    step=UIConfig.CUM_VARIANCE_STEP,
+                    format="%.2f",
+                    key='dfm_cumulative_variance_threshold_input',
+                    help="因子累积解释方差的阈值"
+                )
+                _state.set('dfm_cumulative_variance_threshold', cum_var_value)
+            elif strategy_value == 'kaiser':
+                kaiser_threshold_value = st_instance.number_input(
+                    "特征值阈值",
+                    min_value=UIConfig.KAISER_THRESHOLD_MIN,
+                    max_value=UIConfig.KAISER_THRESHOLD_MAX,
+                    value=_state.get('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD),
+                    step=UIConfig.KAISER_THRESHOLD_STEP,
+                    format="%.1f",
+                    key='dfm_kaiser_threshold_input',
+                    help="选择特征值大于此阈值的因子"
+                )
+                _state.set('dfm_kaiser_threshold', kaiser_threshold_value)
+
+        # 右列：因子自回归阶数
+        with factor_col2:
+            ar_order_value = st_instance.number_input(
+                "因子自回归阶数",
+                min_value=UIConfig.FACTOR_AR_ORDER_MIN,
+                max_value=UIConfig.FACTOR_AR_ORDER_MAX,
+                value=_state.get('dfm_factor_ar_order', UIConfig.DEFAULT_FACTOR_AR_ORDER),
+                step=1,
+                key='dfm_factor_ar_order_input',
+                help="因子的自回归阶数，通常设为1"
+            )
+            _state.set('dfm_factor_ar_order', ar_order_value)
 
         # === 第一阶段分行业因子数（仅二次估计法）===
         if estimation_method == 'two_stage':
@@ -691,7 +612,7 @@ def render_dfm_model_training_page(st_instance):
             else:
                 st_instance.warning("请先上传预处理后的数据文件")
 
-        # 筛选策略和混合优先级（筛选启用时显示）
+        # 筛选策略和混合优先级（筛选启用时显示）- 两列布局
         if enable_var_selection:
             st_instance.divider()
             st_instance.markdown("**筛选参数**")
@@ -701,37 +622,43 @@ def render_dfm_model_training_page(st_instance):
             if current_criterion not in UIConfig.SELECTION_CRITERIA:
                 raise ValueError(f"无效的筛选策略: {current_criterion}，有效值: {list(UIConfig.SELECTION_CRITERIA.keys())}")
 
-            criterion_value = st_instance.selectbox(
-                "筛选策略",
-                options=list(UIConfig.SELECTION_CRITERIA.keys()),
-                format_func=lambda x: UIConfig.SELECTION_CRITERIA[x],
-                index=UIConfig.get_safe_option_index(
-                    UIConfig.SELECTION_CRITERIA, current_criterion, UIConfig.DEFAULT_SELECTION_CRITERION
-                ),
-                key='dfm_selection_criterion_input',
-                help="RMSE/胜率/混合"
-            )
-            _state.set('dfm_selection_criterion', criterion_value)
+            # 两列布局：左列筛选策略，右列混合优先级
+            selection_col1, selection_col2 = st_instance.columns(2)
 
-            # 混合优先级（条件显示）
-            if criterion_value == 'hybrid':
-                current_priority = _state.get('dfm_hybrid_priority', UIConfig.DEFAULT_HYBRID_PRIORITY)
-                # 验证优先级有效性
-                if current_priority not in UIConfig.HYBRID_PRIORITIES:
-                    raise ValueError(f"无效的混合优先级: {current_priority}，有效值: {list(UIConfig.HYBRID_PRIORITIES.keys())}")
-
-                priority_value = st_instance.selectbox(
-                    "混合优先级",
-                    options=list(UIConfig.HYBRID_PRIORITIES.keys()),
-                    format_func=lambda x: UIConfig.HYBRID_PRIORITIES[x],
+            with selection_col1:
+                criterion_value = st_instance.selectbox(
+                    "筛选策略",
+                    options=list(UIConfig.SELECTION_CRITERIA.keys()),
+                    format_func=lambda x: UIConfig.SELECTION_CRITERIA[x],
                     index=UIConfig.get_safe_option_index(
-                        UIConfig.HYBRID_PRIORITIES, current_priority, UIConfig.DEFAULT_HYBRID_PRIORITY
+                        UIConfig.SELECTION_CRITERIA, current_criterion, UIConfig.DEFAULT_SELECTION_CRITERION
                     ),
-                    key='dfm_hybrid_priority_input',
-                    help="胜率优先或RMSE优先"
+                    key='dfm_selection_criterion_input',
+                    help="RMSE/胜率/混合"
                 )
-                _state.set('dfm_hybrid_priority', priority_value)
+                _state.set('dfm_selection_criterion', criterion_value)
 
+            # 右列：混合优先级（仅在混合策略时显示）
+            with selection_col2:
+                if criterion_value == 'hybrid':
+                    current_priority = _state.get('dfm_hybrid_priority', UIConfig.DEFAULT_HYBRID_PRIORITY)
+                    # 验证优先级有效性
+                    if current_priority not in UIConfig.HYBRID_PRIORITIES:
+                        raise ValueError(f"无效的混合优先级: {current_priority}，有效值: {list(UIConfig.HYBRID_PRIORITIES.keys())}")
+
+                    priority_value = st_instance.selectbox(
+                        "混合优先级",
+                        options=list(UIConfig.HYBRID_PRIORITIES.keys()),
+                        format_func=lambda x: UIConfig.HYBRID_PRIORITIES[x],
+                        index=UIConfig.get_safe_option_index(
+                            UIConfig.HYBRID_PRIORITIES, current_priority, UIConfig.DEFAULT_HYBRID_PRIORITY
+                        ),
+                        key='dfm_hybrid_priority_input',
+                        help="胜率优先或RMSE优先"
+                    )
+                    _state.set('dfm_hybrid_priority', priority_value)
+
+            # 评分权重 - 独占一行
             st_instance.divider()
             st_instance.markdown("**评分权重**")
 
@@ -792,7 +719,6 @@ def render_dfm_model_training_page(st_instance):
             # 唯一目标变量
             target_var = single_stage_targets[0]
             _state.set('dfm_target_variable', target_var)
-            st_instance.info(f"已从映射文件自动识别目标变量：{target_var}")
     else:
         # 二次估计法：从映射文件自动识别目标变量
         first_stage_target_map = _state.get('dfm_first_stage_target_map', {})
@@ -813,7 +739,6 @@ def render_dfm_model_training_page(st_instance):
 
         # 显示识别到的目标变量
         if first_stage_targets or second_stage_targets:
-            st_instance.info(f"已从映射文件自动识别目标变量")
 
             if first_stage_targets:
                 with st_instance.expander("一阶段目标变量（各行业）", expanded=False):
@@ -1302,18 +1227,12 @@ def render_dfm_model_training_page(st_instance):
                     var_industry_map=_state.get('dfm_industry_map_obj', {})
                 )
 
-                print(f"[TRAIN_CONFIG] 因子选择策略: {training_config.factor_selection_method}")
-                print(f"[TRAIN_CONFIG] 最大迭代次数: {training_config.max_iterations}")
-                print(f"[TRAIN_CONFIG] AR阶数: {training_config.max_lags}")
-                print(f"[TRAIN_CONFIG] 训练期: {training_config.training_start} 至 {training_config.train_end}")
-                print(f"[TRAIN_CONFIG] 验证期: {training_config.validation_start} 至 {training_config.validation_end}")
-                print(f"[TRAIN_CONFIG] 选择的指标数: {len(training_config.selected_indicators)}")
-                print(f"[TRAIN_CONFIG] 变量选择: {training_config.enable_variable_selection}")
+                logger.info(f"训练配置: 因子选择={training_config.factor_selection_method}, "
+                           f"最大迭代={training_config.max_iterations}, AR阶数={training_config.max_lags}")
 
                 # 创建进度回调函数
                 def progress_callback(message: str):
                     """进度回调函数"""
-                    print(f"[TRAIN_REF] {message}")
                     # 更新训练日志
                     training_log = _state.get('dfm_training_log', [])
                     training_log.append(message)
@@ -1423,7 +1342,7 @@ def render_dfm_model_training_page(st_instance):
             except Exception as e:
                 import traceback
                 error_msg = f"启动训练失败: {str(e)}\n{traceback.format_exc()}"
-                print(f"[ERROR] {error_msg}")
+                logger.error(error_msg)
                 _state.set('dfm_training_status', f'训练失败: {str(e)}')
                 _state.set('dfm_training_error', error_msg)
                 st_instance.error(f"[ERROR] {error_msg}")
@@ -1472,16 +1391,8 @@ def render_dfm_model_training_page(st_instance):
     debug_log(f"UI状态检查 - 结果文件数量: {len(training_results) if training_results else 0}", "DEBUG")
 
     if training_status == '训练完成':
-        print(f"[UI状态检查] 检测到训练完成状态")
-        debug_training_state("训练完成，显示最终结果", show_in_ui=False)
-
         if training_results:
-            print(f"[UI状态检查] 开始处理训练结果，类型: {type(training_results)}")
-            print(f"[UI状态检查] 训练结果内容: {training_results}")
-
             if isinstance(training_results, dict) and training_results:
-                print(f"[UI状态检查] 处理字典格式结果，包含 {len(training_results)} 个条目")
-
                 target_files = ['final_model_joblib', 'metadata', 'training_summary']
                 available_files = []
 
@@ -1490,9 +1401,6 @@ def render_dfm_model_training_page(st_instance):
                     if file_path and os.path.exists(file_path):
                         file_name = os.path.basename(file_path)
                         available_files.append((file_key, file_path, file_name))
-                        print(f"[UI状态检查] 文件存在: {file_name}")
-                    else:
-                        print(f"[UI状态检查] 文件不存在或路径为空: {file_key}")
 
                 if available_files:
                     # 创建ZIP压缩包

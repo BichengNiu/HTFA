@@ -242,11 +242,14 @@ class TrainingResultExporter:
 
                             # 确保长度匹配
                             if len(date_index) != factors_transposed.shape[0]:
-                                logger.warning(f"日期索引长度({len(date_index)})与因子数据长度({factors_transposed.shape[0]})不匹配")
-                                date_index = None
+                                raise ValueError(
+                                    f"日期索引长度({len(date_index)})与因子数据长度({factors_transposed.shape[0]})不匹配，"
+                                    "请检查训练数据和模型是否一致"
+                                )
+                        except ValueError:
+                            raise  # 重新抛出长度不匹配错误
                         except Exception as e:
-                            logger.warning(f"获取因子序列日期索引失败: {e}")
-                            date_index = None
+                            raise ValueError(f"获取因子序列日期索引失败: {e}") from e
 
                     metadata['factor_series'] = pd.DataFrame(
                         factors_transposed,
@@ -263,17 +266,15 @@ class TrainingResultExporter:
             metadata['factor_series'] = None
 
         # 保存卡尔曼增益历史（用于新闻分解分析）
-        if result.model_result and hasattr(result.model_result, 'kalman_gains_history'):
-            kalman_gains = result.model_result.kalman_gains_history
-            if kalman_gains is not None:
-                metadata['kalman_gains_history'] = kalman_gains
-                logger.info(f"保存卡尔曼增益历史: {len(kalman_gains)} 个时间步")
-            else:
-                metadata['kalman_gains_history'] = None
-                logger.warning("卡尔曼增益历史为None，跳过保存")
-        else:
-            metadata['kalman_gains_history'] = None
-            logger.warning("模型结果中未找到卡尔曼增益历史")
+        # 注意：早期验证已在kalman.py的filter()方法中完成
+        # 这里仅作为安全检查，使用断言而非异常
+        assert result.model_result and hasattr(result.model_result, 'kalman_gains_history'), \
+            "内部错误：model_result缺少kalman_gains_history属性"
+        kalman_gains = result.model_result.kalman_gains_history
+        assert kalman_gains is not None, \
+            "内部错误：kalman_gains_history为None（应在滤波阶段验证）"
+        metadata['kalman_gains_history'] = kalman_gains
+        logger.info(f"保存卡尔曼增益历史: {len(kalman_gains)} 个时间步")
 
         # PCA结果DataFrame
         if result.pca_analysis:

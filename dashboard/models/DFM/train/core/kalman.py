@@ -10,7 +10,7 @@ import pandas as pd
 from typing import Tuple, Optional
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import KalmanFilterResult, KalmanSmootherResult
-from dashboard.models.DFM.train.constants import R_MATRIX_MIN_VARIANCE
+from dashboard.models.DFM.train.constants import R_MATRIX_MIN_VARIANCE, INNOVATION_COVARIANCE_JITTER
 
 
 logger = get_logger(__name__)
@@ -140,7 +140,7 @@ class KalmanFilter:
 
             S_t = H_t @ P_pred[t] @ H_t.T + R_t
             # 添加jitter保证数值稳定性
-            jitter = np.eye(S_t.shape[0]) * 1e-4
+            jitter = np.eye(S_t.shape[0]) * INNOVATION_COVARIANCE_JITTER
 
             try:
                 # 使用scipy.linalg.solve提高数值稳定性
@@ -177,6 +177,16 @@ class KalmanFilter:
         P_pred_array = np.array([P_pred[t] for t in range(n_time)])
         P_filt_array = np.transpose(P_filt_array, (1, 2, 0))
         P_pred_array = np.transpose(P_pred_array, (1, 2, 0))
+
+        # 验证卡尔曼增益历史有效性（早期验证，避免导出时才发现问题）
+        if kalman_gains_history:
+            valid_gains = [g for g in kalman_gains_history[1:] if g is not None]
+            if not valid_gains:
+                raise ValueError(
+                    "Kalman滤波未能生成有效的卡尔曼增益历史。"
+                    "可能原因：所有观测数据都是NaN或数据质量严重不足。"
+                    "请检查输入数据并确保至少有部分有效观测值。"
+                )
 
         return KalmanFilterResult(
             x_filtered=x_filt,

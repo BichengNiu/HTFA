@@ -84,6 +84,11 @@ def estimate_loadings(
         return reg.coef_
 
     # 情况2：多个变量（DataFrame）
+    # 检查全NaN变量
+    all_nan_cols = obs_data.columns[obs_data.isna().all()]
+    if len(all_nan_cols) > 0:
+        raise ValueError(f"以下变量全为NaN，无法估计载荷: {list(all_nan_cols)}")
+
     n_obs = obs_data.shape[1]
     Lambda = np.full((n_obs, n_factors), np.nan)
 

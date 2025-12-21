@@ -106,6 +106,20 @@ class DFMModel:
         # 根据训练期日期范围切分数据
         Z_train = data.loc[training_start:train_end]
 
+        # 验证训练期数据有效性
+        if Z_train.empty:
+            raise ValueError(
+                f"训练期({training_start}至{train_end})内没有数据。"
+                f"请检查日期范围是否正确。数据时间范围：{data.index.min()}至{data.index.max()}"
+            )
+
+        min_train_rows = max(self.n_factors * 3, 20)
+        if len(Z_train) < min_train_rows:
+            raise ValueError(
+                f"训练期数据不足：仅有{len(Z_train)}行，至少需要{min_train_rows}行。"
+                f"请扩大训练期范围或减少因子数（当前因子数：{self.n_factors}）。"
+            )
+
         # 数据预处理：计算中心化和标准化数据（使用训练期参数）
         obs_centered, Z_standardized_full, means, stds = self._preprocess_data(Z_train, data)
 

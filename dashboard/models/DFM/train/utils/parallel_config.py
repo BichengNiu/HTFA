@@ -6,7 +6,6 @@
 """
 
 import os
-import multiprocessing
 from typing import Optional, Callable
 from dataclasses import dataclass
 import logging
@@ -105,25 +104,10 @@ def get_cpu_count() -> int:
     Returns:
         可用的CPU核心数
     """
-    try:
-        # 优先使用os.cpu_count()（Python 3.4+）
-        count = os.cpu_count()
-        if count is not None and count > 0:
-            return count
-    except AttributeError:
-        pass
-
-    try:
-        # 备选：使用multiprocessing
-        count = multiprocessing.cpu_count()
-        if count > 0:
-            return count
-    except (NotImplementedError, AttributeError):
-        pass
-
-    # 默认值
-    logger.warning("无法检测CPU核心数，使用默认值1")
-    return 1
+    count = os.cpu_count()
+    if count is None or count < 1:
+        raise RuntimeError("无法检测CPU核心数")
+    return count
 
 
 def create_default_parallel_config(

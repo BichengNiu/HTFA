@@ -33,5 +33,9 @@ MIN_EIGENVALUE_EPSILON = 1e-7
 # 零标准差的替代值
 ZERO_STD_REPLACEMENT = 1.0
 
-# R矩阵最小方差
+# R矩阵最小方差（用于P矩阵正则化）
 R_MATRIX_MIN_VARIANCE = 1e-6
+
+# 新息协方差矩阵正则化因子（用于S_t矩阵）
+# 较大的值是因为S_t通常有更大的数值范围
+INNOVATION_COVARIANCE_JITTER = 1e-4

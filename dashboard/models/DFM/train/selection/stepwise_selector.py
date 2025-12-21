@@ -220,6 +220,11 @@ class StepwiseSelector:
             # 添加变量
             delta_oos_rmse = current_oos_rmse - new_oos_rmse
             current_vars.append(best_add)
+            if best_add not in remaining_vars:
+                raise RuntimeError(
+                    f"内部错误：变量'{best_add}'不在remaining_vars中。"
+                    f"这是一个逻辑错误，请报告此问题。"
+                )
             remaining_vars.remove(best_add)
 
             # 记录前向步骤历史
@@ -356,7 +361,7 @@ class StepwiseSelector:
             'validation_start': self._eval_params['validation_start'],
             'validation_end': self._eval_params['validation_end'],
             'max_iterations': self._eval_params.get('max_iter', 30),
-            'tolerance': 1e-4,
+            'tolerance': self._eval_params.get('tolerance', 1e-4),
             'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
         }
 
@@ -597,7 +602,7 @@ class StepwiseSelector:
             'validation_start': self._eval_params['validation_start'],
             'validation_end': self._eval_params['validation_end'],
             'max_iterations': self._eval_params.get('max_iter', 30),
-            'tolerance': 1e-4,
+            'tolerance': self._eval_params.get('tolerance', 1e-4),
             'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
         }
 
@@ -700,7 +705,7 @@ class StepwiseSelector:
             'validation_start': self._eval_params['validation_start'],
             'validation_end': self._eval_params['validation_end'],
             'max_iterations': self._eval_params.get('max_iter', 30),
-            'tolerance': 1e-4,
+            'tolerance': self._eval_params.get('tolerance', 1e-4),
             'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
         }
 
@@ -779,6 +784,11 @@ class StepwiseSelector:
 
             # 移除变量
             delta_oos_rmse = working_oos_rmse - best_removal_oos_rmse
+            if best_removal not in working_vars:
+                raise RuntimeError(
+                    f"内部错误：变量'{best_removal}'不在working_vars中。"
+                    f"这是一个逻辑错误，请报告此问题。"
+                )
             working_vars.remove(best_removal)
             removed_vars.append(best_removal)
             working_score = best_removal_score

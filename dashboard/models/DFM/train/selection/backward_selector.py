@@ -232,8 +232,10 @@ class BackwardSelector:
             result_tuple = self.evaluator_func(variables=initial_vars, **self._eval_params)
 
             if len(result_tuple) != 9:
-                logger.error(f"评估函数返回了{len(result_tuple)}个值(预期9)，使用默认分数")
-                return ((np.nan, -np.inf, np.inf), 1, 0, np.inf, np.inf, np.nan, np.nan)
+                raise ValueError(
+                    f"评估函数返回了{len(result_tuple)}个值(预期9)。"
+                    f"请检查评估函数实现是否正确。"
+                )
 
             is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
             svd_count = 1 if is_svd_error else 0
@@ -265,8 +267,7 @@ class BackwardSelector:
 
         except Exception as e:
             logger.error(f"计算初始基准性能时出错: {e}")
-            logger.warning("使用默认分数继续")
-            return ((np.nan, -np.inf, np.inf), 1, 0, np.inf, np.inf, np.nan, np.nan)
+            raise RuntimeError(f"计算初始基准性能失败: {e}") from e
 
     def _should_continue_selection(
         self,
@@ -329,7 +330,7 @@ class BackwardSelector:
                 'validation_start': self._eval_params['validation_start'],
                 'validation_end': self._eval_params['validation_end'],
                 'max_iterations': self._eval_params.get('max_iter', 30),
-                'tolerance': 1e-4,  # 使用默认值
+                'tolerance': self._eval_params.get('tolerance', 1e-4),
                 'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
             }
 
@@ -495,6 +496,11 @@ class BackwardSelector:
         new_oos_win_rate: float
     ):
         """应用变量移除并记录历史"""
+        if removed_var not in current_predictors:
+            raise RuntimeError(
+                f"内部错误：变量'{removed_var}'不在current_predictors中。"
+                f"这是一个逻辑错误，请报告此问题。"
+            )
         current_predictors.remove(removed_var)
 
         # 记录选择历史
