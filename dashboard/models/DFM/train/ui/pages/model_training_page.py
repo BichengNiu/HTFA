@@ -90,8 +90,6 @@ except ImportError as e:
     _TRAIN_UI_IMPORT_ERROR_MESSAGE = f"train模块导入失败: {e}"
     raise ImportError(f"导入train模块失败: {e}") from e
 
-from dashboard.models.DFM.config import UIDefaults, TrainDefaults
-
 
 def _reset_training_state():
     """重置所有训练相关状态"""

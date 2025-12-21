@@ -98,8 +98,29 @@ def print_training_summary(
         progress_callback(summary.strip())
 
 
+def generate_progress_bar(current: int, total: int, width: int = 20) -> str:
+    """
+    生成简单的进度条
+
+    Args:
+        current: 当前进度值
+        total: 总进度值
+        width: 进度条宽度（字符数）
+
+    Returns:
+        str: 格式化的进度条字符串，如 "[========------------]"
+    """
+    if total <= 0:
+        return "[" + "=" * width + "]"
+    percent = min(1.0, current / total)
+    filled = int(width * percent)
+    bar = '=' * filled + '-' * (width - filled)
+    return f"[{bar}]"
+
+
 __all__ = [
     'format_training_config',
     'format_training_summary',
     'print_training_summary',
+    'generate_progress_bar',
 ]

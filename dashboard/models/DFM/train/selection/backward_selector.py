@@ -15,6 +15,7 @@ from dashboard.models.DFM.train.evaluation.metrics import (
     compare_scores_with_winrate
 )
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
+from dashboard.models.DFM.train.utils.formatting import generate_progress_bar
 from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_removals
 
 logger = get_logger(__name__)
@@ -141,6 +142,10 @@ class BackwardSelector:
         total_evaluations += eval_count
         svd_error_count += svd_count
 
+        # 保存基线值用于最终汇总
+        baseline_oos_rmse = current_oos_rmse
+        baseline_oos_win_rate = current_oos_win_rate
+
         # 3. 迭代移除变量
         iteration = 0
         while self._should_continue_selection(current_predictors, iteration):
@@ -194,17 +199,10 @@ class BackwardSelector:
         return self._build_selection_result(
             current_predictors, selection_history,
             current_best_score, total_evaluations, svd_error_count,
-            len(initial_variables)
+            len(initial_variables), progress_callback,
+            baseline_oos_rmse, baseline_oos_win_rate,
+            current_oos_rmse, current_oos_win_rate
         )
-
-    def _generate_progress_bar(self, current: int, total: int, width: int = 20) -> str:
-        """生成简单的进度条"""
-        if total <= 0:
-            return "[====================]"
-        percent = min(1.0, current / total)
-        filled = int(width * percent)
-        bar = '=' * filled + '-' * (width - filled)
-        return f"[{bar}]"
 
     def _initialize_predictors(
         self,
@@ -256,12 +254,17 @@ class BackwardSelector:
                 f"变量数: {len(current_predictors)}"
             )
 
-            # 输出基线模型RMSE和Win Rate
+            # 输出基线模型RMSE和Win Rate（同时输出到控制台和回调）
+            wr_display = f"{oos_win_rate:.1f}%" if np.isfinite(oos_win_rate) else "N/A"
+            baseline_msg = (
+                f"========== 变量选择开始 ==========\n"
+                f"初始变量数: {len(current_predictors)}\n"
+                f"基线验证期RMSE: {oos_rmse:.4f}\n"
+                f"基线验证期胜率: {wr_display}"
+            )
+            print(baseline_msg)
             if progress_callback:
-                progress_callback(
-                    f"========== 变量选择 ==========\n"
-                    f"基线模型 - 训练期RMSE: {is_rmse:.4f}, 验证期RMSE: {oos_rmse:.4f}{win_rate_str}"
-                )
+                progress_callback(baseline_msg)
 
             return (score, 1, svd_count, is_rmse, oos_rmse, is_win_rate, oos_win_rate)
 
@@ -294,16 +297,18 @@ class BackwardSelector:
         logger.info(f"变量选择 - 第{iteration}轮 (当前{n_vars}个变量)")
         logger.info(f"{'='*60}")
 
-        # 进度显示（简化格式）
+        # 进度显示（同时输出到控制台和回调）
+        max_rounds = n_vars - self.min_variables
+        progress_bar = generate_progress_bar(iteration, max_rounds)
+        iter_msg = f"{progress_bar} 第{iteration}轮 (当前{n_vars}个变量)"
+        print(iter_msg)
         if progress_callback:
-            max_rounds = n_vars - self.min_variables
-            progress_bar = self._generate_progress_bar(iteration, max_rounds)
-            progress_callback(f"{progress_bar} 第{iteration}轮 (当前{n_vars}个变量)")
+            progress_callback(iter_msg)
 
     def _find_best_removal_candidate(
         self,
         current_predictors: List[str]
-    ) -> Tuple[Optional[str], Tuple[float, float], int, int, Optional[float], Optional[float]]:
+    ) -> Tuple[Optional[str], Tuple[float, float, float], int, int, Optional[float], Optional[float], float, float]:
         """找到本轮最佳移除候选（扩展返回is_rmse和oos_rmse）"""
         best_score = (np.nan, -np.inf, np.inf)
         best_var = None
@@ -321,8 +326,6 @@ class BackwardSelector:
 
         if use_parallel:
             # 准备可序列化的评估器配置（从eval_params提取，移除不可序列化的progress_callback）
-            from dashboard.models.DFM.train.training.evaluator_strategy import extract_serializable_config
-
             # 从self._eval_params提取可序列化的配置
             evaluator_config = {
                 'training_start': self._eval_params['training_start_date'],
@@ -419,9 +422,11 @@ class BackwardSelector:
         best_is_win_rate = np.nan
         best_oos_win_rate = np.nan
         for result in candidate_results:
-            total_evals += 1
-            if result.get('is_svd_error', False):
-                total_svd_errors += 1
+            # 仅并行模式在此处计数（串行模式已在评估时计数）
+            if use_parallel:
+                total_evals += 1
+                if result.get('is_svd_error', False):
+                    total_svd_errors += 1
 
             # 使用加权得分计算（2025-12-20修改）
             score = calculate_weighted_score(
@@ -529,22 +534,39 @@ class BackwardSelector:
             f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f} (改善: {delta_oos_rmse:+.4f}){win_rate_change_str}"
         )
 
-        # 精简的回调输出格式
+        # 精简的回调输出格式（带改善百分比，同时输出到控制台）
+        # 计算改善百分比
+        rmse_improve_pct = (old_oos_rmse - new_oos_rmse) / old_oos_rmse * 100 if old_oos_rmse > 0 else 0
+        rmse_change = f"降低{rmse_improve_pct:.1f}%" if rmse_improve_pct > 0 else f"上升{-rmse_improve_pct:.1f}%"
+
+        # Win Rate改善
+        wr_line = ""
+        if np.isfinite(old_oos_win_rate) and np.isfinite(new_oos_win_rate):
+            wr_improve = new_oos_win_rate - old_oos_win_rate
+            wr_change = f"提升{wr_improve:.1f}%" if wr_improve > 0 else f"下降{-wr_improve:.1f}%"
+            wr_line = f"\n  验证期胜率: {old_oos_win_rate:.1f}% -> {new_oos_win_rate:.1f}% ({wr_change})"
+
+        removal_msg = (
+            f"第{iteration}轮: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
+            f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f} ({rmse_change}){wr_line}"
+        )
+        print(removal_msg)
         if progress_callback:
-            progress_callback(
-                f"第{iteration}轮: 移除'{removed_var}', 剩余{len(current_predictors)}个变量\n"
-                f"  训练期RMSE: {old_is_rmse:.4f} -> {new_is_rmse:.4f}\n"
-                f"  验证期RMSE: {old_oos_rmse:.4f} -> {new_oos_rmse:.4f}{win_rate_change_str}"
-            )
+            progress_callback(removal_msg)
 
     def _build_selection_result(
         self,
         final_predictors: List[str],
         history: List[Dict],
-        final_score: Tuple[float, float],
+        final_score: Tuple[float, float, float],
         total_evals: int,
         svd_errors: int,
-        n_initial_vars: int
+        n_initial_vars: int,
+        progress_callback: Optional[Callable] = None,
+        baseline_oos_rmse: float = 0.0,
+        baseline_oos_win_rate: float = 0.0,
+        final_oos_rmse: float = 0.0,
+        final_oos_win_rate: float = 0.0
     ) -> SelectionResult:
         """构建选择结果对象"""
         target_variable = self._eval_params['target_variable']
@@ -554,6 +576,32 @@ class BackwardSelector:
             f"变量选择完成: 从{n_initial_vars-1}个变量剔除到{len(final_predictors)}个, "
             f"最终验证期RMSE={-final_score[1]:.6f}"
         )
+
+        # 输出最终汇总（同时输出到控制台和回调）
+        if len(history) > 0:
+            # 获取移除的变量列表
+            removed_vars = [h['removed_variable'] for h in history]
+
+            # 计算总改善百分比
+            rmse_improve_pct = (baseline_oos_rmse - final_oos_rmse) / baseline_oos_rmse * 100 if baseline_oos_rmse > 0 else 0
+            rmse_summary = f"降低{rmse_improve_pct:.1f}%" if rmse_improve_pct > 0 else f"上升{-rmse_improve_pct:.1f}%"
+
+            wr_summary = ""
+            if np.isfinite(baseline_oos_win_rate) and np.isfinite(final_oos_win_rate):
+                wr_improve = final_oos_win_rate - baseline_oos_win_rate
+                wr_change = f"提升{wr_improve:.1f}%" if wr_improve > 0 else f"下降{-wr_improve:.1f}%"
+                wr_summary = f"\n胜率总改善: {baseline_oos_win_rate:.1f}% -> {final_oos_win_rate:.1f}% ({wr_change})"
+
+            final_msg = (
+                f"\n========== 变量选择完成 ==========\n"
+                f"总轮次: {len(history)}\n"
+                f"移除变量: {', '.join(removed_vars)}\n"
+                f"RMSE总改善: {baseline_oos_rmse:.4f} -> {final_oos_rmse:.4f} ({rmse_summary}){wr_summary}\n"
+                f"最终变量数: {len(final_predictors)}个"
+            )
+            print(final_msg)
+            if progress_callback:
+                progress_callback(final_msg)
 
         return SelectionResult(
             selected_variables=final_variables,

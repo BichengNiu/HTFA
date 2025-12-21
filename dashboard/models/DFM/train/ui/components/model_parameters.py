@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime
 
 from dashboard.models.DFM.ui import DFMComponent
-from dashboard.models.DFM.config import TrainDefaults, UIDefaults
+from dashboard.models.DFM.train.config import UIConfig
 
 
 logger = logging.getLogger(__name__)
@@ -268,13 +268,13 @@ class ModelParametersComponent(DFMComponent):
             默认参数字典
         """
         return {
-            'variable_selection_method': TrainDefaults.VARIABLE_SELECTION_METHOD,
+            'variable_selection_method': UIConfig.DEFAULT_VAR_SELECTION,
             'enable_variable_selection': False,
-            'max_iter': UIDefaults.MAX_ITERATIONS_DEFAULT,
-            'factor_ar_order': TrainDefaults.FACTOR_AR_ORDER,
-            'factor_selection_strategy': TrainDefaults.FACTOR_SELECTION_STRATEGY,
-            'fixed_number_of_factors': TrainDefaults.FIXED_NUMBER_OF_FACTORS,
-            'cumulative_variance_threshold': TrainDefaults.CUM_VARIANCE_THRESHOLD
+            'max_iter': UIConfig.EM_MAX_ITERATIONS,
+            'factor_ar_order': UIConfig.DEFAULT_FACTOR_AR_ORDER,
+            'factor_selection_strategy': UIConfig.DEFAULT_FACTOR_STRATEGY,
+            'fixed_number_of_factors': UIConfig.DEFAULT_K_FACTORS,
+            'cumulative_variance_threshold': UIConfig.DEFAULT_CUM_VARIANCE
         }
     
     def _validate_parameter_constraints(self, parameters: Dict[str, Any]) -> Tuple[bool, List[str]]:
