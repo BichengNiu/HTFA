@@ -52,9 +52,6 @@ def set_dfm_state(key, value):
 from typing import Optional, Dict, Any
 from datetime import datetime
 
-# 配置已移除，所有参数通过UI设置
-CONFIG_AVAILABLE = False
-
 # Import backend functions
 from dashboard.models.DFM.results.dfm_backend import (
     load_dfm_results_from_uploads,
@@ -794,13 +791,10 @@ def render_dfm_tab(st):
         if factor_series_data is not None and isinstance(factor_series_data, pd.DataFrame) and not factor_series_data.empty:
             factor_names = factor_series_data.columns.tolist()
             num_factors = len(factor_names)
-            
+
             if num_factors > 0:
                 # 确定每行显示的图表数量
-                if CONFIG_AVAILABLE:
-                    cols_per_row = VisualizationDefaults.FACTOR_PLOT_COLS_EVEN if num_factors % 2 == 0 else VisualizationDefaults.FACTOR_PLOT_COLS_ODD
-                else:
-                    cols_per_row = 2 if num_factors % 2 == 0 else 3
+                cols_per_row = 2 if num_factors % 2 == 0 else 3
                 
                 # 计算需要的行数
                 num_rows = (num_factors + cols_per_row - 1) // cols_per_row

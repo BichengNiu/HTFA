@@ -68,9 +68,6 @@ def check_current_training_state():
         logger.error(f"状态检查失败: {e}")
         return None
 
-# 配置已移除，所有参数通过UI设置
-CONFIG_AVAILABLE = False
-
 # 配置已移除，使用硬编码默认值
 class TrainModelConfig:
     # 基于项目结构的路径设置
@@ -93,56 +90,7 @@ except ImportError as e:
     _TRAIN_UI_IMPORT_ERROR_MESSAGE = f"train模块导入失败: {e}"
     raise ImportError(f"导入train模块失败: {e}") from e
 
-# 模拟的UIDefaults和TrainDefaults类
-class UIDefaults:
-    NUM_COLS_INDUSTRY = 3
-    VARIABLE_SELECTION_OPTIONS = {
-        'none': "无筛选 (使用全部已选变量)",
-        'global_backward': "全局后向剔除 (在已选变量中筛选)"
-    }
-    FACTOR_SELECTION_STRATEGY_OPTIONS = {
-        'information_criteria': "信息准则",
-        'fixed_number': "固定因子数",
-        'cumulative_variance': "累积方差贡献"
-    }
-    INFORMATION_CRITERION_OPTIONS = {
-        'bic': "BIC",
-        'aic': "AIC",
-        'hqc': "HQC"
-    }
-    EM_CONVERGENCE_CRITERION_OPTIONS = {
-        'params': "参数变化",
-        'likelihood': "似然函数"
-    }
-    MISSING_VALUE_OPTIONS = {
-        'interpolate': "线性插值",
-        'forward_fill': "前向填充",
-        'drop': "删除缺失"
-    }
-    IC_MAX_FACTORS_DEFAULT = 10
-    MAX_ITERATIONS_DEFAULT = 30
-    MAX_ITERATIONS_MIN = 1
-    MAX_ITERATIONS_STEP = 10
-    CUM_VARIANCE_MIN = 0.1
-
-class TrainDefaults:
-    VARIABLE_SELECTION_METHOD = 'none'
-    FACTOR_SELECTION_STRATEGY = 'information_criteria'
-    EM_MAX_ITER = 100
-    FIXED_NUMBER_OF_FACTORS = 3
-    CUM_VARIANCE_THRESHOLD = 0.8
-    FACTOR_AR_ORDER = 1
-    INFORMATION_CRITERION = 'bic'
-    EM_CONVERGENCE_CRITERION = 'params'
-    EM_TOLERANCE = 1e-6
-    MISSING_VALUE_METHOD = 'interpolate'
-
-    IC_MAX_FACTORS = 10
-    K_FACTORS_RANGE_MIN = 1
-    TRAINING_YEARS_BACK = 5
-    VALIDATION_END_YEAR = 2024
-    VALIDATION_END_MONTH = 12
-    VALIDATION_END_DAY = 31
+from dashboard.models.DFM.config import UIDefaults, TrainDefaults
 
 
 def _reset_training_state():

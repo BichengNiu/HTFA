@@ -263,48 +263,19 @@ class ModelParametersComponent(DFMComponent):
     def _get_default_parameters(self) -> Dict[str, Any]:
         """
         获取默认参数
-        
+
         Returns:
             默认参数字典
         """
-        try:
-            # 尝试从配置获取默认值
-            config_available = True
-            
-            if config_available:
-                return {
-                    'variable_selection_method': 'none',  # 默认不启用变量选择
-                    'enable_variable_selection': False,
-                    'max_iter': getattr(UIDefaults, 'MAX_ITERATIONS_DEFAULT', 30),  # 修正键名
-                    'factor_ar_order': 1,  # 修正键名
-                    'factor_selection_strategy': getattr(TrainDefaults, 'FACTOR_SELECTION_STRATEGY', 'fixed_number'),
-                    'fixed_number_of_factors': getattr(TrainDefaults, 'FIXED_NUMBER_OF_FACTORS', 3),
-                    'cumulative_variance_threshold': getattr(TrainDefaults, 'CUM_VARIANCE_THRESHOLD', 0.8)  # 修正键名
-                }
-            else:
-                # 硬编码默认值
-                return {
-                    'variable_selection_method': 'none',  # 默认不启用变量选择
-                    'enable_variable_selection': False,
-                    'max_iter': 30,  # 修正键名
-                    'factor_ar_order': 1,  # 修正键名
-                    'factor_selection_strategy': 'fixed_number',
-                    'fixed_number_of_factors': 3,
-                    'cumulative_variance_threshold': 0.8  # 修正键名
-                }
-                
-        except Exception as e:
-            logger.error(f"获取默认参数失败: {e}")
-            # 最基本的默认值
-            return {
-                'variable_selection_method': 'none',  # 默认不启用变量选择
-                'enable_variable_selection': False,
-                'max_iter': 30,  # 修正键名
-                'factor_ar_order': 1,  # 修正键名
-                'factor_selection_strategy': 'fixed_number',
-                'fixed_number_of_factors': 3,
-                'cumulative_variance_threshold': 0.8  # 修正键名
-            }
+        return {
+            'variable_selection_method': TrainDefaults.VARIABLE_SELECTION_METHOD,
+            'enable_variable_selection': False,
+            'max_iter': UIDefaults.MAX_ITERATIONS_DEFAULT,
+            'factor_ar_order': TrainDefaults.FACTOR_AR_ORDER,
+            'factor_selection_strategy': TrainDefaults.FACTOR_SELECTION_STRATEGY,
+            'fixed_number_of_factors': TrainDefaults.FIXED_NUMBER_OF_FACTORS,
+            'cumulative_variance_threshold': TrainDefaults.CUM_VARIANCE_THRESHOLD
+        }
     
     def _validate_parameter_constraints(self, parameters: Dict[str, Any]) -> Tuple[bool, List[str]]:
         """

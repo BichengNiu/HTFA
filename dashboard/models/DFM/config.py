@@ -2,38 +2,7 @@
 """
 配置文件 - DFM模块配置
 """
-import os
 
-# 全局配置
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-NOWCAST_MODEL_INPUT_DIR = 'models'
-NOWCAST_MODEL_FILENAME = 'final_dfm_model.joblib'
-NOWCAST_METADATA_FILENAME = 'final_model_metadata.pkl'
-NOWCAST_EVOLUTION_OUTPUT_DIR = os.path.join(SCRIPT_DIR, 'news_analysis_output')
-
-# 目标变量和频率
-TARGET_VARIABLE = '规模以上工业增加值:当月同比'
-TARGET_FREQ = 'M'
-
-class DataDefaults:
-    """数据相关的默认配置"""
-    TARGET_VARIABLE = '规模以上工业增加值:当月同比'
-    TARGET_FREQ = 'M'
-    DEFAULT_START_DATE = '2010-01-31'
-    DEFAULT_END_DATE = '2025-07-03'
-
-class NewsAnalysisDefaults:
-    """新闻分析相关的默认配置"""
-    DEFAULT_MODEL_FREQUENCY = 'MS'  # Month Start frequency
-    DEFAULT_TARGET_MONTH = None
-    DEFAULT_PLOT_START_DATE = None
-    DEFAULT_PLOT_END_DATE = None
-
-class ModelDefaults:
-    """模型相关的默认配置"""
-    DEFAULT_N_FACTORS = 3
-    DEFAULT_MAX_ITER = 100
-    DEFAULT_TOL = 1e-4
 
 class UIDefaults:
     """UI相关的默认配置"""
@@ -56,16 +25,12 @@ class UIDefaults:
         'params': "参数变化",
         'likelihood': "似然函数"
     }
-    MISSING_VALUE_OPTIONS = {
-        'interpolate': "线性插值",
-        'forward_fill': "前向填充",
-        'drop': "删除缺失"
-    }
     IC_MAX_FACTORS_DEFAULT = 10
     MAX_ITERATIONS_DEFAULT = 30
     MAX_ITERATIONS_MIN = 1
     MAX_ITERATIONS_STEP = 10
     CUM_VARIANCE_MIN = 0.1
+
 
 class TrainDefaults:
     """训练相关的默认配置"""
@@ -78,7 +43,6 @@ class TrainDefaults:
     INFORMATION_CRITERION = 'bic'
     EM_CONVERGENCE_CRITERION = 'params'
     EM_TOLERANCE = 1e-6
-    MISSING_VALUE_METHOD = 'interpolate'
     IC_MAX_FACTORS = 10
     K_FACTORS_RANGE_MIN = 1
     TRAINING_YEARS_BACK = 5
