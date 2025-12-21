@@ -38,7 +38,9 @@ from dashboard.models.DFM.train.ui.utils.text_helpers import (
     normalize_variable_name,
     normalize_variable_name_no_space,
     build_normalized_mapping,
-    filter_exclude_targets
+    filter_exclude_targets,
+    get_valid_indicators_for_industry,
+    build_exclude_targets_list
 )
 
 # 配置日志记录器
@@ -47,26 +49,6 @@ logger = logging.getLogger(__name__)
 # 创建全局状态管理器实例
 _state = StateManager('train_model')
 
-
-def check_current_training_state():
-    """检查当前训练状态的详细信息"""
-    try:
-        training_status = _state.get('dfm_training_status')
-        training_results = _state.get('dfm_model_results_paths')
-        training_completed_refreshed = _state.get('training_completed_refreshed')
-        polling_count = _state.get('training_completion_polling_count', 0)
-        training_log = _state.get('dfm_training_log', [])
-
-        return {
-            'training_status': training_status,
-            'training_results': training_results,
-            'training_completed_refreshed': training_completed_refreshed,
-            'polling_count': polling_count,
-            'log_count': len(training_log)
-        }
-    except Exception as e:
-        logger.error(f"状态检查失败: {e}")
-        return None
 
 # 配置已移除，使用硬编码默认值
 class TrainModelConfig:
@@ -79,6 +61,7 @@ class TrainModelConfig:
     INDICATOR_COLUMN_NAME_IN_EXCEL = '指标名称'
     INDUSTRY_COLUMN_NAME_IN_EXCEL = '行业'
     TYPE_COLUMN_NAME_IN_EXCEL = '类型'
+    EXCLUDE_COLS_FROM_TARGET = []  # 排除的目标变量列名列表
 
 config = TrainModelConfig()
 
@@ -123,27 +106,9 @@ def _reset_training_state():
     debug_log("状态重置 - 已重置所有训练状态到初始值", "DEBUG")
 
 
-
-
-def convert_to_datetime(date_input):
-    """将日期输入转换为datetime对象"""
-    if date_input is None:
-        return None
-
-    if isinstance(date_input, datetime):
-        return date_input
-    elif isinstance(date_input, date):
-        return datetime.combine(date_input, time.min)
-    elif isinstance(date_input, str):
-        try:
-            return datetime.strptime(date_input, '%Y-%m-%d')
-        except ValueError:
-            try:
-                return datetime.strptime(date_input, '%Y/%m/%d')
-            except ValueError:
-                return None
-    else:
-        return None
+def _get_default_target_variable() -> str:
+    """获取默认目标变量名称"""
+    return config.TARGET_VARIABLE
 
 
 def render_dfm_model_training_page(st_instance):
@@ -210,13 +175,9 @@ def render_dfm_model_training_page(st_instance):
     available_target_vars = []
     if input_df is not None:
         # 从已加载数据中获取可选的目标变量
-        available_target_vars = [col for col in input_df.columns if 'date' not in col.lower() and 'time' not in col.lower() and col not in getattr(config, 'EXCLUDE_COLS_FROM_TARGET', [])]
+        available_target_vars = [col for col in input_df.columns if 'date' not in col.lower() and 'time' not in col.lower() and col not in config.EXCLUDE_COLS_FROM_TARGET]
 
-        default_target = None
-        if hasattr(config, 'TARGET_VARIABLE'):
-            default_target = config.TARGET_VARIABLE
-        else:
-            default_target = '规模以上工业增加值:当月同比'  # 硬编码的默认值
+        default_target = _get_default_target_variable()
 
         # 如果默认目标变量在数据中存在但不在过滤列表中，则添加它
         if default_target and default_target in input_df.columns and default_target not in available_target_vars:
@@ -240,11 +201,7 @@ def render_dfm_model_training_page(st_instance):
 
         st_instance.warning("数据尚未准备，请先在\"数据准备\"选项卡中处理数据。变量选择功能将受限。")
 
-        default_target = None
-        if hasattr(config, 'TARGET_VARIABLE'):
-            default_target = config.TARGET_VARIABLE
-        else:
-            default_target = '规模以上工业增加值:当月同比'  # 硬编码的默认值
+        default_target = _get_default_target_variable()
 
         if default_target:
             available_target_vars = [default_target]
@@ -732,6 +689,35 @@ def render_dfm_model_training_page(st_instance):
         current_target_var
     )
 
+    # 预计算各行业有效指标（DRY：只计算一次，后续复用）
+    first_stage_targets = _state.get('dfm_first_stage_target_variables', [])
+    exclude_targets = build_exclude_targets_list(current_target_var, first_stage_targets)
+
+    var_industry_map = None
+    if current_estimation_method == 'two_stage':
+        var_industry_map = _state.get('dfm_industry_map_obj')
+        if not var_industry_map:
+            raise ValueError("行业映射数据未加载，请先上传并加载指标体系文件")
+
+    # 构建行业→有效指标映射缓存
+    industry_available_indicators = {}
+    for industry in filtered_industries:
+        all_indicators = var_to_indicators_map_by_industry.get(industry, [])
+        valid_indicators = get_valid_indicators_for_industry(
+            all_indicators,
+            exclude_targets,
+            var_industry_map or {},
+            is_two_stage=(current_estimation_method == 'two_stage')
+        )
+        if valid_indicators:
+            industry_available_indicators[industry] = valid_indicators
+
+    # 二次估计法：根据预计算结果过滤行业
+    if current_estimation_method == 'two_stage':
+        original_count = len(filtered_industries)
+        filtered_industries = list(industry_available_indicators.keys())
+        logger.info(f"二次估计法行业过滤: 移除了 {original_count - len(filtered_industries)} 个无预测指标的行业")
+
     # 暂时存储过滤后的行业，以供后续步骤3中使用
     if not filtered_industries:
         st_instance.info("没有可用的行业数据。")
@@ -752,49 +738,7 @@ def render_dfm_model_training_page(st_instance):
         final_selected_indicators_flat = []
         current_selected_industries = filtered_industries  # 直接使用过滤后的所有行业
 
-        # 全局控制：预先计算每个行业的可用指标
-        industry_available_indicators = {}
-        if current_selected_industries:
-            current_target_var = _state.get('dfm_target_variable', None)
-            first_stage_targets = _state.get('dfm_first_stage_target_variables', [])
-
-            # 构建排除列表
-            exclude_targets = []
-            if current_target_var:
-                exclude_targets.append(current_target_var)
-            if first_stage_targets:
-                exclude_targets.extend(first_stage_targets)
-
-            for industry_name in current_selected_industries:
-                all_indicators_for_industry = var_to_indicators_map_by_industry.get(industry_name, [])
-
-                # 排除目标变量
-                if exclude_targets:
-                    indicators_for_this_industry = [
-                        indicator for indicator in all_indicators_for_industry
-                        if indicator not in exclude_targets
-                    ]
-                else:
-                    indicators_for_this_industry = all_indicators_for_industry
-
-                # 二次估计法：排除"综合"类变量
-                if current_estimation_method == 'two_stage':
-                    var_industry_map = _state.get('dfm_industry_map_filtered', None)
-                    if var_industry_map is None:
-                        var_industry_map = _state.get('dfm_industry_map_obj', {})
-
-                    if var_industry_map:
-                        indicators_for_this_industry = [
-                            indicator for indicator in indicators_for_this_industry
-                            if var_industry_map.get(
-                                normalize_variable_name(indicator),
-                                None
-                            ) != '综合'
-                        ]
-
-                # 只保存有可用指标的行业
-                if indicators_for_this_industry:
-                    industry_available_indicators[industry_name] = indicators_for_this_industry
+        # 注意：industry_available_indicators 已在上方预计算，直接复用
 
         # 添加全局控制按钮
         if current_selected_industries and industry_available_indicators:
@@ -856,60 +800,25 @@ def render_dfm_model_training_page(st_instance):
             cols = st_instance.columns(num_cols)
             col_idx = 0
 
+            # 从预计算缓存获取默认映射
+            dfm_default_map = _state.get('dfm_default_variables_map', {})
+
             for industry_name in current_selected_industries:
-                all_indicators_for_industry = var_to_indicators_map_by_industry.get(industry_name, [])
+                # 使用预计算的有效指标缓存（DRY：不重复计算）
+                indicators_for_this_industry = industry_available_indicators.get(industry_name, [])
 
-                # 修复：排除目标变量，确保用户无法选择目标变量作为预测变量
-                current_target_var = _state.get('dfm_target_variable', None)
-                first_stage_targets = _state.get('dfm_first_stage_target_variables', [])
-                current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
-
-                # 构建排除列表：包括全局目标变量和一阶段目标变量
-                exclude_targets = []
-                if current_target_var:
-                    exclude_targets.append(current_target_var)
-                if first_stage_targets:
-                    exclude_targets.extend(first_stage_targets)
-
-                # 排除所有目标变量
-                if exclude_targets:
-                    indicators_for_this_industry = [
-                        indicator for indicator in all_indicators_for_industry
-                        if indicator not in exclude_targets
-                    ]
-                else:
-                    indicators_for_this_industry = all_indicators_for_industry
-
-                # 二次估计法：第一阶段排除"综合"类变量（综合变量应该在第二阶段使用）
-                if current_estimation_method == 'two_stage':
-                    var_industry_map = _state.get('dfm_industry_map_filtered', None)
-                    if var_industry_map is None:
-                        var_industry_map = _state.get('dfm_industry_map_obj', {})
-
-                    if var_industry_map:
-                        indicators_before_filter = indicators_for_this_industry.copy()
-                        indicators_for_this_industry = [
-                            indicator for indicator in indicators_for_this_industry
-                            if var_industry_map.get(
-                                normalize_variable_name(indicator),
-                                None
-                            ) != '综合'
-                        ]
-                        excluded_general_count = len(indicators_before_filter) - len(indicators_for_this_industry)
-
-                # 修复：完全跳过没有可用指标的行业，不显示任何内容
+                # 完全跳过没有可用指标的行业
                 if not indicators_for_this_industry:
                     current_selection[industry_name] = []
                     col_idx += 1
                     continue
 
+                all_indicators_for_industry = var_to_indicators_map_by_industry.get(industry_name, [])
+
                 with cols[col_idx % num_cols]:
                     # 只有在有指标被排除且仍有可用指标时才显示提示
                     excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
 
-                    # 从状态读取已设置的默认变量映射（在目标变量识别后已根据估计方法设置）
-                    dfm_default_map = _state.get('dfm_default_variables_map', {})
-                    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
                     method_label = "一阶段预测" if current_estimation_method == 'two_stage' else "一次估计"
 
 
@@ -1013,9 +922,9 @@ def render_dfm_model_training_page(st_instance):
                 # 获取需要排除的变量
                 target_variable = _state.get('dfm_target_variable', None)
                 first_stage_selected_indicators = _state.get('dfm_selected_indicators', [])
-                var_industry_map = _state.get('dfm_industry_map_filtered', None)
-                if var_industry_map is None:
-                    var_industry_map = _state.get('dfm_industry_map_obj', {})
+                var_industry_map = _state.get('dfm_industry_map_obj')
+                if not var_industry_map:
+                    raise ValueError("行业映射数据未加载，请先上传并加载指标体系文件")
 
                 # 构建排除集合（使用标准化名称）
                 excluded_vars = set()
@@ -1067,7 +976,10 @@ def render_dfm_model_training_page(st_instance):
                 ]
 
                 # 获取二阶段目标的默认变量
-                dfm_second_stage_target_map = _state.get('dfm_second_stage_target_map', {})
+                dfm_second_stage_target_map = _state.get('dfm_second_stage_target_map')
+                if dfm_second_stage_target_map is None:
+                    logger.warning("二阶段目标映射未加载，无法自动选择额外预测变量")
+                    dfm_second_stage_target_map = {}
 
                 # 计算默认选中的变量
                 default_extra_vars = [
@@ -1271,14 +1183,19 @@ def render_dfm_model_training_page(st_instance):
                 training_log.append(f"[RESULT] 因子数: {k_factors_display}")
 
                 if metrics_obj:
-                    training_log.append(f"[METRICS] 样本外RMSE: {metrics_obj.oos_rmse:.4f}")
-                    # 检查Win Rate是否有效
-                    import numpy as np
-                    win_rate_value = metrics_obj.oos_win_rate
-                    if np.isnan(win_rate_value) or np.isinf(win_rate_value):
-                        win_rate_str = "N/A (数据不足)"
+                    # 检查RMSE是否有效
+                    rmse_value = metrics_obj.oos_rmse
+                    if rmse_value is not None and not (np.isnan(rmse_value) or np.isinf(rmse_value)):
+                        training_log.append(f"[METRICS] 样本外RMSE: {rmse_value:.4f}")
                     else:
+                        training_log.append(f"[METRICS] 样本外RMSE: N/A")
+
+                    # 检查Win Rate是否有效
+                    win_rate_value = metrics_obj.oos_win_rate
+                    if win_rate_value is not None and not (np.isnan(win_rate_value) or np.isinf(win_rate_value)):
                         win_rate_str = f"{win_rate_value:.2f}%"
+                    else:
+                        win_rate_str = "N/A (数据不足)"
                     training_log.append(f"[METRICS] 样本外Win Rate: {win_rate_str}")
 
                 _state.set('dfm_training_log', training_log)

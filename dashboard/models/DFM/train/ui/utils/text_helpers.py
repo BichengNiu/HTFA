@@ -106,3 +106,89 @@ def filter_exclude_targets(
 
     exclude_set = set(exclude_list)
     return [ind for ind in all_indicators if ind not in exclude_set]
+
+
+def filter_exclude_zonghe(
+    indicators: List[str],
+    var_industry_map: Dict[str, str]
+) -> List[str]:
+    """
+    从指标列表中排除"综合"类变量
+
+    Args:
+        indicators: 指标列表
+        var_industry_map: 变量名(标准化) -> 行业名的映射
+
+    Returns:
+        排除"综合"变量后的指标列表
+
+    Examples:
+        >>> filter_exclude_zonghe(
+        ...     ['工业增加值', '综合指标'],
+        ...     {'综合指标': '综合'}
+        ... )
+        ['工业增加值']
+    """
+    if not var_industry_map:
+        return indicators
+
+    return [
+        ind for ind in indicators
+        if var_industry_map.get(normalize_variable_name(ind), None) != '综合'
+    ]
+
+
+def build_exclude_targets_list(
+    current_target_var: str,
+    first_stage_targets: List[str] = None
+) -> List[str]:
+    """
+    构建排除目标变量列表（二阶段目标 + 一阶段目标）
+
+    Args:
+        current_target_var: 当前目标变量（二阶段目标）
+        first_stage_targets: 一阶段目标变量列表
+
+    Returns:
+        完整的排除目标列表
+
+    Examples:
+        >>> build_exclude_targets_list('GDP', ['工业增加值', 'CPI'])
+        ['GDP', '工业增加值', 'CPI']
+        >>> build_exclude_targets_list(None, ['工业增加值'])
+        ['工业增加值']
+    """
+    exclude_targets = []
+    if current_target_var:
+        exclude_targets.append(current_target_var)
+    if first_stage_targets:
+        exclude_targets.extend(first_stage_targets)
+    return exclude_targets
+
+
+def get_valid_indicators_for_industry(
+    all_indicators: List[str],
+    exclude_targets: List[str],
+    var_industry_map: Dict[str, str],
+    is_two_stage: bool
+) -> List[str]:
+    """
+    获取行业的有效预测指标（排除目标变量和综合变量）
+
+    Args:
+        all_indicators: 该行业的所有指标
+        exclude_targets: 要排除的目标变量列表
+        var_industry_map: 变量名(标准化) -> 行业名的映射
+        is_two_stage: 是否为二次估计法
+
+    Returns:
+        有效的预测指标列表
+    """
+    # 排除目标变量
+    indicators = filter_exclude_targets(all_indicators, exclude_targets)
+
+    # 二次估计法：排除"综合"类变量
+    if is_two_stage:
+        indicators = filter_exclude_zonghe(indicators, var_industry_map)
+
+    return indicators

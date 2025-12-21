@@ -60,22 +60,30 @@ def _train_single_industry(
         # 1. 创建IndustryDataProcessor
         processor = IndustryDataProcessor(data, industry_map)
 
-        # 2. 验证行业数据
-        is_valid, error_msg = processor.validate_industry_data(industry, min_predictors=1)
+        # 2. 验证行业数据（二次估计法需排除"综合"变量）
+        is_valid, error_msg = processor.validate_industry_data(
+            industry,
+            min_predictors=1,
+            exclude_zonghe=True
+        )
         if not is_valid:
             logger.warning(f"跳过行业 {industry}: {error_msg}")
             return (industry, None)
 
         # 3. 获取行业因子数
         k_factors = industry_k_factors.get(industry)
-        if not k_factors:
+        if k_factors is None:  # 明确检查None，0是无效值但应该由配置验证处理
             logger.warning(f"跳过行业 {industry}: 未设置因子数")
             return (industry, None)
 
         # 4. 构建行业训练数据
         industry_data = processor.build_industry_training_data(industry)
         target_col = processor.get_industry_target_column(industry)
-        predictor_cols = processor.get_industry_predictors(industry, exclude_target=True)
+        predictor_cols = processor.get_industry_predictors(
+            industry,
+            exclude_target=True,
+            exclude_zonghe=True  # 二次估计法排除"综合"变量
+        )
 
         if not predictor_cols:
             logger.warning(f"跳过行业 {industry}: 没有有效的预测变量")
@@ -126,7 +134,6 @@ def _train_single_industry(
 
     except Exception as e:
         logger.error(f"行业 {industry} 训练失败: {str(e)}")
-        import traceback
         logger.debug(f"详细错误信息:\n{traceback.format_exc()}")
         return (industry, None)
 
@@ -155,9 +162,9 @@ class TwoStageTrainer:
         if not config.industry_k_factors:
             raise ValueError("二次估计法需要设置各行业因子数（industry_k_factors不能为空）")
 
-        # 验证行业映射
-        if config.industry_map is None or (isinstance(config.industry_map, pd.DataFrame) and config.industry_map.empty):
-            raise ValueError("二次估计法需要提供行业映射（industry_map不能为空或None）")
+        # 验证行业映射：必须是非空字典
+        if config.industry_map is None:
+            raise ValueError("二次估计法需要提供行业映射（industry_map不能为None）")
 
         if not isinstance(config.industry_map, dict):
             raise ValueError(f"industry_map必须是字典类型，当前类型: {type(config.industry_map).__name__}")
@@ -272,7 +279,8 @@ class TwoStageTrainer:
                 progress_callback("正在加载训练数据...")
 
             data = pd.read_csv(self.config.data_path, index_col=0, parse_dates=True)
-            var_industry_map = self.config.industry_map or {}
+            # industry_map已在__init__中验证，不能为None或空字典
+            var_industry_map = self.config.industry_map
 
             processor = IndustryDataProcessor(data, var_industry_map)
             industry_list = processor.get_industry_list()
@@ -524,8 +532,16 @@ class TwoStageTrainer:
                 logger.info(f"开始训练行业模型: {industry}")
 
                 # 获取行业变量信息（调试前）
-                predictor_cols_with_target = processor.get_industry_predictors(industry, exclude_target=False)
-                predictor_cols_without_target = processor.get_industry_predictors(industry, exclude_target=True)
+                predictor_cols_with_target = processor.get_industry_predictors(
+                    industry,
+                    exclude_target=False,
+                    exclude_zonghe=True
+                )
+                predictor_cols_without_target = processor.get_industry_predictors(
+                    industry,
+                    exclude_target=True,
+                    exclude_zonghe=True
+                )
                 target_col = processor.get_industry_target_column(industry)
 
                 logger.info(f"[{industry}] 目标列: {target_col}")
@@ -535,8 +551,12 @@ class TwoStageTrainer:
                 if len(predictor_cols_without_target) <= 5:
                     logger.info(f"[{industry}] 预测变量列表: {predictor_cols_without_target}")
 
-                # 验证行业数据（允许单变量行业）
-                is_valid, error_msg = processor.validate_industry_data(industry, min_predictors=1)
+                # 验证行业数据（允许单变量行业，二次估计法需排除"综合"变量）
+                is_valid, error_msg = processor.validate_industry_data(
+                    industry,
+                    min_predictors=1,
+                    exclude_zonghe=True
+                )
                 if not is_valid:
                     logger.warning(f"跳过行业 {industry}: {error_msg}")
                     logger.warning(f"  - 目标列: {target_col}")
@@ -554,7 +574,7 @@ class TwoStageTrainer:
 
                 # 获取行业因子数
                 k_factors = self.config.industry_k_factors.get(industry)
-                if not k_factors:
+                if k_factors is None:  # 明确检查None，0是无效值但应该由配置验证处理
                     logger.warning(f"跳过行业 {industry}: 未设置因子数")
                     failed_industries.append(industry)
                     continue
@@ -562,8 +582,12 @@ class TwoStageTrainer:
                 # 构建行业训练数据
                 industry_data = processor.build_industry_training_data(industry)
                 target_col = processor.get_industry_target_column(industry)
-                # 重要：预测变量必须排除目标变量本身
-                predictor_cols = processor.get_industry_predictors(industry, exclude_target=True)
+                # 重要：预测变量必须排除目标变量本身和"综合"变量
+                predictor_cols = processor.get_industry_predictors(
+                    industry,
+                    exclude_target=True,
+                    exclude_zonghe=True  # 二次估计法排除"综合"变量
+                )
 
                 logger.info(f"[{industry}] 构建训练数据: {industry_data.shape[0]} 行, {industry_data.shape[1]} 列")
                 logger.info(f"[{industry}] 将使用 {len(predictor_cols)} 个预测变量训练模型")

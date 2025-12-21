@@ -158,6 +158,14 @@ class TrainingConfig:
                     "请确保指标体系表的'一阶段目标'列中至少有一个变量标记为'是'"
                 )
 
+            # 验证first_stage_target_map中是否有变量标记为'是'
+            has_valid_target = any(v == '是' for v in self.first_stage_target_map.values())
+            if not has_valid_target:
+                raise ValueError(
+                    "first_stage_target_map中没有任何变量标记为'是'。"
+                    "请确保指标体系表的'一阶段目标'列中至少有一个变量标记为'是'"
+                )
+
             for industry, k in self.industry_k_factors.items():
                 if not isinstance(k, int) or k <= 0:
                     raise ValueError(f"行业 {industry} 的因子数必须为正整数，当前值: {k}")

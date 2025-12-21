@@ -91,13 +91,19 @@ class IndustryDataProcessor:
 
         return self._industry_targets.get(industry)
 
-    def get_industry_predictors(self, industry: str, exclude_target: bool = True) -> List[str]:
+    def get_industry_predictors(
+        self,
+        industry: str,
+        exclude_target: bool = True,
+        exclude_zonghe: bool = False
+    ) -> List[str]:
         """
         获取指定行业的预测变量列表
 
         Args:
             industry: 行业名称
             exclude_target: 是否排除该行业的目标变量（默认True）
+            exclude_zonghe: 是否排除"综合"类变量（默认False，二次估计法应设为True）
 
         Returns:
             预测变量列名列表
@@ -111,10 +117,19 @@ class IndustryDataProcessor:
 
         predictors = self._industry_to_predictors.get(industry, [])
 
+        # 排除目标变量
         if exclude_target:
             target_col = self.get_industry_target_column(industry)
             if target_col:
                 predictors = [p for p in predictors if p != target_col]
+
+        # 排除"综合"类变量（二次估计法）
+        if exclude_zonghe:
+            from dashboard.models.DFM.utils.text_utils import normalize_text
+            predictors = [
+                p for p in predictors
+                if self.var_industry_map.get(normalize_text(p), None) != '综合'
+            ]
 
         return predictors
 
@@ -159,7 +174,8 @@ class IndustryDataProcessor:
     def validate_industry_data(
         self,
         industry: str,
-        min_predictors: int = 1
+        min_predictors: int = 1,
+        exclude_zonghe: bool = False
     ) -> Tuple[bool, Optional[str]]:
         """
         验证指定行业的数据完整性
@@ -167,6 +183,7 @@ class IndustryDataProcessor:
         Args:
             industry: 行业名称
             min_predictors: 最少预测变量数量
+            exclude_zonghe: 是否排除"综合"类变量（默认False，二次估计法应设为True）
 
         Returns:
             (是否有效, 错误信息)
@@ -178,7 +195,11 @@ class IndustryDataProcessor:
         if target_col not in self.prepared_data.columns:
             return False, f"目标变量列 {target_col} 不存在于数据中"
 
-        predictors = self.get_industry_predictors(industry)
+        predictors = self.get_industry_predictors(
+            industry,
+            exclude_target=True,
+            exclude_zonghe=exclude_zonghe
+        )
         if len(predictors) < min_predictors:
             return False, f"行业 {industry} 预测变量数量不足（需要至少{min_predictors}个，实际{len(predictors)}个）"
 
@@ -235,7 +256,7 @@ class IndustryDataProcessor:
         self._industry_to_predictors = {}
 
         # 导入normalize_text函数，与行业映射文件保持一致的标准化方式
-        from dashboard.models.DFM.prep.utils.text_utils import normalize_text
+        from dashboard.models.DFM.utils.text_utils import normalize_text
 
         # 构建标准化列名到原始列名的映射
         col_name_map = {
