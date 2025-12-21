@@ -71,6 +71,9 @@ class TrainingConfig:
     first_stage_n_jobs: int = -1  # 第一阶段并行任务数（-1=所有核心，1=串行）
     min_industries_for_parallel: int = 3  # 启用第一阶段并行的最小行业数
 
+    # 一阶段目标变量映射（2025-12新增）
+    first_stage_target_map: Dict[str, str] = field(default_factory=dict)  # 变量名(normalized) -> "是"
+
     # 目标变量配对模式（2025-12新增）
     target_alignment_mode: str = 'next_month'  # 'current_month'(本月) 或 'next_month'(下月)
 
@@ -148,6 +151,12 @@ class TrainingConfig:
         if self.estimation_method == 'two_stage':
             if not self.industry_k_factors:
                 raise ValueError("二次估计法需要设置各行业因子数（industry_k_factors不能为空）")
+
+            if not self.first_stage_target_map:
+                raise ValueError(
+                    "二次估计法需要提供一阶段目标映射（first_stage_target_map不能为空）。"
+                    "请确保指标体系表的'一阶段目标'列中至少有一个变量标记为'是'"
+                )
 
             for industry, k in self.industry_k_factors.items():
                 if not isinstance(k, int) or k <= 0:

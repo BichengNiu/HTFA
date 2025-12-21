@@ -84,15 +84,12 @@ class TrainingConfigBuilder:
         # 7. 二次估计法特定配置
         industry_k_factors_dict = {}
         second_stage_extra_predictors = []
+        first_stage_target_map = {}
 
         if estimation_method == 'two_stage':
             industry_k_factors_dict = self.state.get('dfm_industry_k_factors', {})
             second_stage_extra_predictors = self.state.get('dfm_second_stage_extra_predictors', [])
-
-            if not industry_k_factors_dict:
-                raise ValueError("二次估计法需要设置各行业因子数")
-            if not var_industry_map:
-                raise ValueError("二次估计法需要提供行业映射")
+            first_stage_target_map = self.state.get('dfm_first_stage_target_map', {})
 
         # 7.5 获取目标变量配对模式（2025-12新增）
         target_alignment_mode = self.state.get('dfm_target_alignment_mode', 'next_month')
@@ -159,6 +156,7 @@ class TrainingConfigBuilder:
             estimation_method=estimation_method,
             industry_k_factors=industry_k_factors_dict,
             second_stage_extra_predictors=second_stage_extra_predictors,
+            first_stage_target_map=first_stage_target_map,
 
             # 目标变量配对模式（2025-12新增）
             target_alignment_mode=target_alignment_mode,

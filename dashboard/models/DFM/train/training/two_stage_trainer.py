@@ -166,6 +166,7 @@ class TwoStageTrainer:
             raise ValueError("industry_map不能为空字典，请确保已正确加载行业映射文件")
 
         logger.info(f"行业映射验证通过: {len(config.industry_map)} 个变量")
+        logger.info(f"一阶段目标映射: {len(config.first_stage_target_map)} 个变量")
 
         self.config = config
 
@@ -179,6 +180,71 @@ class TwoStageTrainer:
         # 训练统计
         self.total_evaluations = 0
         self.svd_error_count = 0
+
+    def _filter_industries_by_target_map(
+        self,
+        industry_list: List[str],
+        processor: 'IndustryDataProcessor'
+    ) -> List[str]:
+        """
+        根据first_stage_target_map过滤行业列表
+
+        只保留目标变量被标记为"一阶段目标=是"的行业
+
+        Args:
+            industry_list: 原始行业列表
+            processor: 行业数据处理器
+
+        Returns:
+            过滤后的行业列表
+
+        Raises:
+            ValueError: 如果过滤后没有任何行业
+        """
+        from dashboard.models.DFM.utils.text_utils import normalize_text
+
+        first_stage_target_map = self.config.first_stage_target_map
+
+        filtered_industries = []
+        skipped_industries = []
+
+        for industry in industry_list:
+            # 获取该行业的目标列名
+            target_col = processor.get_industry_target_column(industry)
+            if target_col is None:
+                skipped_industries.append((industry, "无目标列"))
+                continue
+
+            # 标准化目标列名，与first_stage_target_map的键进行匹配
+            target_col_normalized = normalize_text(target_col)
+
+            if target_col_normalized in first_stage_target_map:
+                # 映射中存在且值为"是"
+                if first_stage_target_map[target_col_normalized] == '是':
+                    filtered_industries.append(industry)
+                    logger.info(f"行业 '{industry}' 的目标变量被标记为一阶段目标，将参与训练")
+                else:
+                    skipped_industries.append((industry, f"标记值为'{first_stage_target_map[target_col_normalized]}'"))
+            else:
+                skipped_industries.append((industry, "未在一阶段目标映射中找到"))
+
+        # 日志输出
+        if skipped_industries:
+            logger.info(f"以下 {len(skipped_industries)} 个行业未通过一阶段目标过滤:")
+            for industry, reason in skipped_industries:
+                logger.info(f"  - {industry}: {reason}")
+
+        logger.info(f"一阶段目标过滤结果: {len(industry_list)} -> {len(filtered_industries)} 个行业")
+
+        # 错误处理
+        if not filtered_industries:
+            raise ValueError(
+                f"经一阶段目标映射过滤后没有任何行业可训练。\n"
+                f"原始行业数: {len(industry_list)}\n"
+                f"请检查指标体系表的'一阶段目标'列，确保至少有一个行业的目标变量标记为'是'"
+            )
+
+        return filtered_industries
 
     def train(
         self,
@@ -214,7 +280,12 @@ class TwoStageTrainer:
             if not industry_list:
                 raise ValueError("未能从数据中识别到任何行业信息")
 
-            logger.info(f"识别到 {len(industry_list)} 个行业: {', '.join(industry_list[:5])}...")
+            logger.info(f"从数据中识别到 {len(industry_list)} 个行业: {', '.join(industry_list[:5])}...")
+
+            # 根据first_stage_target_map过滤行业
+            industry_list = self._filter_industries_by_target_map(industry_list, processor)
+
+            logger.info(f"经过滤后将训练 {len(industry_list)} 个行业: {', '.join(industry_list[:5])}{'...' if len(industry_list) > 5 else ''}")
             if progress_callback:
                 progress_callback(f"识别到 {len(industry_list)} 个行业")
 
