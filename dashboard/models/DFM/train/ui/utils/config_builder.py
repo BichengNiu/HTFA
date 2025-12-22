@@ -15,6 +15,12 @@ from datetime import timedelta
 from typing import Dict, List, Optional, Any
 
 from dashboard.models.DFM.train import TrainingConfig
+from dashboard.models.DFM.train.ui.utils.date_helpers import (
+    get_target_frequency,
+    get_previous_period_date,
+    freq_code_to_pandas_freq,
+    validate_date_ranges,
+)
 
 
 class TrainingConfigBuilder:
@@ -32,7 +38,8 @@ class TrainingConfigBuilder:
     def build(
         self,
         input_df: pd.DataFrame,
-        var_industry_map: Dict[str, str]
+        var_industry_map: Dict[str, str],
+        var_frequency_map: Optional[Dict[str, str]] = None
     ) -> TrainingConfig:
         """
         构建TrainingConfig对象
@@ -40,6 +47,7 @@ class TrainingConfigBuilder:
         Args:
             input_df: 输入数据DataFrame
             var_industry_map: 变量到行业的映射
+            var_frequency_map: 变量到频率的映射（可选）
 
         Returns:
             TrainingConfig对象
@@ -60,12 +68,40 @@ class TrainingConfigBuilder:
         training_start_value = self.state.get('dfm_training_start_date')
         validation_start_value = self.state.get('dfm_validation_start_date')
         validation_end_value = self.state.get('dfm_validation_end_date')
+        observation_start_value = self.state.get('dfm_observation_start_date')
 
-        if not all([training_start_value, validation_start_value, validation_end_value]):
+        if not all([training_start_value, validation_start_value, validation_end_value, observation_start_value]):
             raise ValueError("日期配置不完整")
 
-        # 计算train_end_date
-        train_end_date = validation_start_value - timedelta(days=1)
+        # 获取算法类型（需要提前获取以计算train_end_date）
+        algorithm = self.state.get('dfm_algorithm', 'classical')
+
+        # 获取目标变量的频率
+        target_freq_code = get_target_frequency(
+            target_variable,
+            var_frequency_map or {},
+            default_freq='W'
+        )
+
+        # 根据算法类型和数据频率计算train_end_date
+        if algorithm == 'deep_learning':
+            # DDFM模式：训练期延伸到观察期开始前一期
+            prev_period = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
+            train_end_date = prev_period - timedelta(days=1)
+        else:
+            # 经典DFM模式：训练期结束于验证期开始前一天
+            train_end_date = validation_start_value - timedelta(days=1)
+
+        # 日期范围验证（使用date_helpers中的统一验证函数）
+        validation_error = validate_date_ranges(
+            algorithm=algorithm,
+            training_start=training_start_value,
+            validation_start=validation_start_value,
+            observation_start=observation_start_value,
+            target_freq=target_freq_code
+        )
+        if validation_error:
+            raise ValueError(validation_error)
 
         # 3. 修正变量名（大小写匹配）
         corrected_indicators = self._correct_variable_names(input_df, current_selected_indicators)
@@ -112,62 +148,81 @@ class TrainingConfigBuilder:
         training_weight_pct = self.state.get('dfm_training_weight', 50)
         training_weight = training_weight_pct / 100.0  # 转换为0-1范围
 
+        # 7.8 algorithm已在步骤2中获取（用于计算train_end_date）
+
+        # 7.9 获取DDFM专用参数（仅当algorithm='deep_learning'时）
+        ddfm_params = {}
+        if algorithm == 'deep_learning':
+            ddfm_params = self._get_ddfm_params()
+
         # 8. 保存DataFrame到临时文件
         temp_data_path = self._save_dataframe_to_temp(input_df)
 
-        # 9. 构建TrainingConfig
-        training_config = TrainingConfig(
+        # 9. 构建TrainingConfig（基础配置）
+        config_kwargs = {
             # 核心配置
-            data_path=temp_data_path,
-            target_variable=target_variable,
-            selected_indicators=corrected_indicators,
+            'data_path': temp_data_path,
+            'target_variable': target_variable,
+            'selected_indicators': corrected_indicators,
 
             # 训练/验证期配置
-            training_start=training_start_value.strftime('%Y-%m-%d'),
-            train_end=train_end_date.strftime('%Y-%m-%d'),
-            validation_start=validation_start_value.strftime('%Y-%m-%d'),
-            validation_end=validation_end_value.strftime('%Y-%m-%d'),
-            target_freq='W-FRI',
+            'training_start': training_start_value.strftime('%Y-%m-%d'),
+            'train_end': train_end_date.strftime('%Y-%m-%d'),
+            'validation_start': validation_start_value.strftime('%Y-%m-%d'),
+            'validation_end': validation_end_value.strftime('%Y-%m-%d'),
+            'target_freq': freq_code_to_pandas_freq(target_freq_code),
 
             # 模型参数
-            k_factors=factor_params.get('k_factors', 4),
-            max_lags=self.state.get('dfm_factor_ar_order', 1),
-            tolerance=1e-6,
+            'k_factors': factor_params.get('k_factors', 4),
+            'max_lags': self.state.get('dfm_factor_ar_order', 1),
+            'tolerance': 1e-6,
 
             # 变量选择配置
-            enable_variable_selection=enable_var_selection,
-            variable_selection_method=mapped_var_selection_method,
+            'enable_variable_selection': enable_var_selection,
+            'variable_selection_method': mapped_var_selection_method,
 
             # 因子数选择配置
-            factor_selection_method=factor_selection_method,
-            pca_threshold=factor_params.get('pca_threshold'),
-            kaiser_threshold=factor_params.get('kaiser_threshold'),
+            'factor_selection_method': factor_selection_method,
+            'pca_threshold': factor_params.get('pca_threshold'),
+            'kaiser_threshold': factor_params.get('kaiser_threshold'),
 
             # 并行计算配置
-            enable_parallel=True,
-            n_jobs=-1,
-            parallel_backend='loky',
-            min_variables_for_parallel=5,
+            'enable_parallel': True,
+            'n_jobs': -1,
+            'parallel_backend': 'loky',
+            'min_variables_for_parallel': 5,
 
             # 行业映射
-            industry_map=var_industry_map,
+            'industry_map': var_industry_map,
 
             # 二次估计法配置
-            estimation_method=estimation_method,
-            industry_k_factors=industry_k_factors_dict,
-            second_stage_extra_predictors=second_stage_extra_predictors,
-            first_stage_target_map=first_stage_target_map,
+            'estimation_method': estimation_method,
+            'industry_k_factors': industry_k_factors_dict,
+            'second_stage_extra_predictors': second_stage_extra_predictors,
+            'first_stage_target_map': first_stage_target_map,
 
             # 目标变量配对模式（2025-12新增）
-            target_alignment_mode=target_alignment_mode,
+            'target_alignment_mode': target_alignment_mode,
 
             # 筛选策略配置（2025-12-20新增）
-            selection_criterion=selection_criterion,
-            prioritize_win_rate=prioritize_win_rate,
+            'selection_criterion': selection_criterion,
+            'prioritize_win_rate': prioritize_win_rate,
 
             # 训练期权重配置（2025-12-20新增）
-            training_weight=training_weight,
-        )
+            'training_weight': training_weight,
+
+            # 算法选择（2025-12-21新增）
+            'algorithm': algorithm,
+        }
+
+        # 添加DDFM专用参数
+        if algorithm == 'deep_learning':
+            config_kwargs.update(ddfm_params)
+            # DDFM不支持变量选择
+            config_kwargs['enable_variable_selection'] = False
+            config_kwargs['variable_selection_method'] = 'none'
+
+        training_config = TrainingConfig(**config_kwargs)
 
         return training_config
 
@@ -305,3 +360,63 @@ class TrainingConfigBuilder:
         input_df.to_csv(temp_data_path)
         print(f"[INFO] 临时数据文件: {temp_data_path}")
         return temp_data_path
+
+    def _get_ddfm_params(self) -> Dict[str, Any]:
+        """
+        获取DDFM专用参数
+
+        Returns:
+            DDFM参数字典
+        """
+        from dashboard.models.DFM.train.config import UIConfig
+
+        # 解析编码器结构字符串
+        encoder_structure_str = self.state.get(
+            'dfm_encoder_structure',
+            UIConfig.ENCODER_STRUCTURE_DEFAULT
+        )
+        encoder_structure = self._parse_encoder_structure(encoder_structure_str)
+
+        return {
+            # 自编码器结构
+            'encoder_structure': encoder_structure,
+            'decoder_structure': None,  # 使用默认对称结构
+            'use_bias': True,
+            'batch_norm': True,  # 默认使用批量归一化
+            'activation': self.state.get('dfm_ddfm_activation', UIConfig.DDFM_ACTIVATION_DEFAULT),
+
+            # 因子动态
+            'factor_order': self.state.get('dfm_ddfm_factor_order', UIConfig.DDFM_FACTOR_ORDER_DEFAULT),
+            'lags_input': self.state.get('dfm_ddfm_lags_input', UIConfig.LAGS_INPUT_DEFAULT),
+
+            # 训练参数
+            'learning_rate': self.state.get('dfm_ddfm_learning_rate', UIConfig.LEARNING_RATE_DEFAULT),
+            'ddfm_optimizer': self.state.get('dfm_ddfm_optimizer', UIConfig.DDFM_OPTIMIZER_DEFAULT),
+            'decay_learning_rate': True,
+            'epochs_per_mcmc': self.state.get('dfm_ddfm_epochs', UIConfig.EPOCHS_PER_MCMC_DEFAULT),
+            'batch_size': self.state.get('dfm_ddfm_batch_size', UIConfig.BATCH_SIZE_DEFAULT),
+            'mcmc_max_iter': self.state.get('dfm_ddfm_max_iter', UIConfig.MCMC_MAX_ITER_DEFAULT),
+            'mcmc_tolerance': self.state.get('dfm_ddfm_tolerance', UIConfig.MCMC_TOLERANCE_DEFAULT),
+            'display_interval': 10,
+            'ddfm_seed': 3,
+        }
+
+    def _parse_encoder_structure(self, structure_str: str) -> tuple:
+        """
+        解析编码器结构字符串
+
+        Args:
+            structure_str: 如 "16, 4" 或 "32, 16, 8"
+
+        Returns:
+            整数元组，如 (16, 4)
+        """
+        try:
+            parts = [int(x.strip()) for x in structure_str.split(',')]
+            if not parts:
+                raise ValueError("编码器结构不能为空")
+            if any(p <= 0 for p in parts):
+                raise ValueError("编码器结构中所有值必须为正整数")
+            return tuple(parts)
+        except ValueError as e:
+            raise ValueError(f"无效的编码器结构 '{structure_str}': {e}")

@@ -15,7 +15,11 @@ from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import TrainingResult
 
 # 导入统一训练和评估函数
-from dashboard.models.DFM.train.training.model_ops import train_dfm_with_forecast, evaluate_model_performance
+from dashboard.models.DFM.train.training.model_ops import (
+    train_dfm_with_forecast,
+    train_ddfm_with_forecast,
+    evaluate_model_performance
+)
 
 # 导入流程步骤
 from dashboard.models.DFM.train.utils.data_utils import load_and_validate_data
@@ -147,124 +151,172 @@ class DFMTrainer:
             if progress_callback:
                 progress_callback(config_summary.strip())
 
-            # 步骤2: 阶段1变量选择
-            if self.config.enable_variable_selection:
-                # 创建变量筛选专用评估器（使用下月配对RMSE）
-                evaluator = create_variable_selection_evaluator(self.config)
+            # ========== 算法分支：深度学习 vs 经典 ==========
+            if self.config.algorithm == 'deep_learning':
+                # DDFM: 使用全部变量，不进行变量选择
+                selected_vars = predictor_vars
+                selection_history = []
+                k_factors = self.config.encoder_structure[-1]  # 因子数由编码器结构决定
 
-                # 根据选择方法创建对应的选择器
-                if self.config.variable_selection_method == 'backward':
-                    # 后向选择器
-                    selector = BackwardSelector(
-                        evaluator_func=evaluator,
-                        criterion='rmse',
-                        min_variables=self.config.min_variables_after_selection or 1,
-                        parallel_config=self.config.get_parallel_config()
-                    )
-                elif self.config.variable_selection_method == 'stepwise':
-                    # 向前向后法选择器
-                    from dashboard.models.DFM.train.selection import StepwiseSelector
-                    selector = StepwiseSelector(
-                        evaluator_func=evaluator,
-                        criterion='rmse',
-                        min_variables=self.config.min_variables_after_selection or 1,
-                        parallel_config=self.config.get_parallel_config()
-                    )
-                elif self.config.variable_selection_method == 'forward':
-                    # forward方法目前未实现
-                    raise NotImplementedError(
-                        "forward方法尚未实现，请使用'backward'或'stepwise'"
-                    )
-                else:
-                    # 默认使用后向选择器
-                    selector = BackwardSelector(
-                        evaluator_func=evaluator,
-                        criterion='rmse',
-                        min_variables=self.config.min_variables_after_selection or 1,
-                        parallel_config=self.config.get_parallel_config()
-                    )
+                if progress_callback:
+                    progress_callback(f"[DDFM] 使用深度学习算法，因子数={k_factors}")
 
-                # 根据因子选择策略确定k_factors用于变量选择
-                if self.config.factor_selection_method == 'fixed':
-                    # 如果使用固定因子数策略，直接使用用户设置的k_factors
-                    k_for_selection = self.config.k_factors
-                else:  # cumulative, kaiser
-                    # 如果使用累积方差贡献策略或Kaiser准则，计算合理的k_factors用于变量选择
-                    # 最终的k_factors会在阶段2通过PCA确定
-                    k_for_selection = max(2, min(len(predictor_vars) // 2, len(predictor_vars) - 2))
+                # DDFM训练
+                predictor_data = data[selected_vars]
 
-                # 执行变量选择
-                initial_vars = [self.config.target_variable] + predictor_vars
-                selection_result = selector.select(
-                    initial_variables=initial_vars,
-                    target_variable=self.config.target_variable,
-                    full_data=data,
-                    params={
-                        'k_factors': k_for_selection,
-                        'rmse_tolerance_percent': self.config.rmse_tolerance_percent,
-                        'win_rate_tolerance_percent': self.config.win_rate_tolerance_percent,
-                        'selection_criterion': self.config.selection_criterion,
-                        'prioritize_win_rate': self.config.prioritize_win_rate,
-                        'training_weight': self.config.training_weight  # 训练期权重（2025-12-20修复）
-                    },
+                model_result = train_ddfm_with_forecast(
+                    predictor_data=predictor_data,
+                    target_data=target_data,
+                    encoder_structure=self.config.encoder_structure,
+                    training_start=self.config.training_start,
+                    train_end=self.config.train_end,
                     validation_start=self.config.validation_start,
                     validation_end=self.config.validation_end,
-                    target_freq=self.config.target_freq,
-                    training_start_date=self.config.training_start,
-                    train_end_date=self.config.train_end,
-                    target_mean_original=target_data.mean(),
-                    target_std_original=target_data.std(),
-                    max_iter=self.config.max_iterations,
-                    max_lags=1,
+                    observation_end=observation_end,
+                    decoder_structure=self.config.decoder_structure,
+                    use_bias=self.config.use_bias,
+                    factor_order=self.config.factor_order,
+                    lags_input=self.config.lags_input,
+                    batch_norm=self.config.batch_norm,
+                    activation=self.config.activation,
+                    learning_rate=self.config.learning_rate,
+                    optimizer=self.config.ddfm_optimizer,
+                    decay_learning_rate=self.config.decay_learning_rate,
+                    epochs=self.config.epochs_per_mcmc,
+                    batch_size=self.config.batch_size,
+                    max_iter=self.config.mcmc_max_iter,
+                    tolerance=self.config.mcmc_tolerance,
+                    display_interval=self.config.display_interval,
+                    seed=self.config.ddfm_seed,
                     progress_callback=progress_callback
                 )
 
-                # 提取选定的预测变量
-                selected_vars = [
-                    v for v in selection_result.selected_variables
-                    if v != self.config.target_variable
-                ]
-                selection_history = selection_result.selection_history
+                # PCA分析不适用于DDFM
+                pca_analysis = None
 
-                # 更新统计
-                self.total_evaluations += selection_result.total_evaluations
-                self.svd_error_count += selection_result.svd_error_count
             else:
-                selected_vars = predictor_vars
-                selection_history = []
+                # 经典DFM: EM算法
 
-            # 步骤3: 阶段2因子数选择
-            print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}, kaiser_threshold={self.config.kaiser_threshold or 1.0}")
-            k_factors, pca_analysis = select_num_factors(
-                data=data,
-                selected_vars=selected_vars,
-                method=self.config.factor_selection_method,
-                fixed_k=self.config.k_factors,
-                pca_threshold=self.config.pca_threshold or 0.9,
-                kaiser_threshold=self.config.kaiser_threshold or 1.0,
-                train_end=self.config.train_end,
-                progress_callback=progress_callback
-            )
-            print(f"[FACTOR_SELECTION] 输出结果: k_factors={k_factors}")
+                # 步骤2: 阶段1变量选择
+                if self.config.enable_variable_selection:
+                    # 创建变量筛选专用评估器（使用下月配对RMSE）
+                    evaluator = create_variable_selection_evaluator(self.config)
 
-            # 步骤4: 最终模型训练（直接调用）
-            # 准备数据并训练
-            predictor_data = data[selected_vars]
+                    # 根据选择方法创建对应的选择器
+                    if self.config.variable_selection_method == 'backward':
+                        # 后向选择器
+                        selector = BackwardSelector(
+                            evaluator_func=evaluator,
+                            criterion='rmse',
+                            min_variables=self.config.min_variables_after_selection or 1,
+                            parallel_config=self.config.get_parallel_config()
+                        )
+                    elif self.config.variable_selection_method == 'stepwise':
+                        # 向前向后法选择器
+                        from dashboard.models.DFM.train.selection import StepwiseSelector
+                        selector = StepwiseSelector(
+                            evaluator_func=evaluator,
+                            criterion='rmse',
+                            min_variables=self.config.min_variables_after_selection or 1,
+                            parallel_config=self.config.get_parallel_config()
+                        )
+                    elif self.config.variable_selection_method == 'forward':
+                        # forward方法目前未实现
+                        raise NotImplementedError(
+                            "forward方法尚未实现，请使用'backward'或'stepwise'"
+                        )
+                    else:
+                        # 默认使用后向选择器
+                        selector = BackwardSelector(
+                            evaluator_func=evaluator,
+                            criterion='rmse',
+                            min_variables=self.config.min_variables_after_selection or 1,
+                            parallel_config=self.config.get_parallel_config()
+                        )
 
-            model_result = train_dfm_with_forecast(
-                predictor_data=predictor_data,
-                target_data=target_data,
-                k_factors=k_factors,
-                training_start=self.config.training_start,
-                train_end=self.config.train_end,
-                validation_start=self.config.validation_start,
-                validation_end=self.config.validation_end,
-                observation_end=observation_end,
-                max_iter=self.config.max_iterations,
-                max_lags=1,
-                tolerance=self.config.tolerance,
-                progress_callback=progress_callback
-            )
+                    # 根据因子选择策略确定k_factors用于变量选择
+                    if self.config.factor_selection_method == 'fixed':
+                        # 如果使用固定因子数策略，直接使用用户设置的k_factors
+                        k_for_selection = self.config.k_factors
+                    else:  # cumulative, kaiser
+                        # 如果使用累积方差贡献策略或Kaiser准则，计算合理的k_factors用于变量选择
+                        # 最终的k_factors会在阶段2通过PCA确定
+                        k_for_selection = max(2, min(len(predictor_vars) // 2, len(predictor_vars) - 2))
+
+                    # 执行变量选择
+                    initial_vars = [self.config.target_variable] + predictor_vars
+                    selection_result = selector.select(
+                        initial_variables=initial_vars,
+                        target_variable=self.config.target_variable,
+                        full_data=data,
+                        params={
+                            'k_factors': k_for_selection,
+                            'rmse_tolerance_percent': self.config.rmse_tolerance_percent,
+                            'win_rate_tolerance_percent': self.config.win_rate_tolerance_percent,
+                            'selection_criterion': self.config.selection_criterion,
+                            'prioritize_win_rate': self.config.prioritize_win_rate,
+                            'training_weight': self.config.training_weight  # 训练期权重（2025-12-20修复）
+                        },
+                        validation_start=self.config.validation_start,
+                        validation_end=self.config.validation_end,
+                        target_freq=self.config.target_freq,
+                        training_start_date=self.config.training_start,
+                        train_end_date=self.config.train_end,
+                        target_mean_original=target_data.mean(),
+                        target_std_original=target_data.std(),
+                        max_iter=self.config.max_iterations,
+                        max_lags=1,
+                        progress_callback=progress_callback
+                    )
+
+                    # 提取选定的预测变量
+                    selected_vars = [
+                        v for v in selection_result.selected_variables
+                        if v != self.config.target_variable
+                    ]
+                    selection_history = selection_result.selection_history
+
+                    # 更新统计
+                    self.total_evaluations += selection_result.total_evaluations
+                    self.svd_error_count += selection_result.svd_error_count
+                else:
+                    selected_vars = predictor_vars
+                    selection_history = []
+
+                # 步骤3: 阶段2因子数选择
+                print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}, kaiser_threshold={self.config.kaiser_threshold or 1.0}")
+                k_factors, pca_analysis = select_num_factors(
+                    data=data,
+                    selected_vars=selected_vars,
+                    method=self.config.factor_selection_method,
+                    fixed_k=self.config.k_factors,
+                    pca_threshold=self.config.pca_threshold or 0.9,
+                    kaiser_threshold=self.config.kaiser_threshold or 1.0,
+                    train_end=self.config.train_end,
+                    progress_callback=progress_callback
+                )
+                print(f"[FACTOR_SELECTION] 输出结果: k_factors={k_factors}")
+
+                # 步骤4: 最终模型训练（直接调用）
+                # 准备数据并训练
+                predictor_data = data[selected_vars]
+
+                model_result = train_dfm_with_forecast(
+                    predictor_data=predictor_data,
+                    target_data=target_data,
+                    k_factors=k_factors,
+                    training_start=self.config.training_start,
+                    train_end=self.config.train_end,
+                    validation_start=self.config.validation_start,
+                    validation_end=self.config.validation_end,
+                    observation_end=observation_end,
+                    max_iter=self.config.max_iterations,
+                    max_lags=1,
+                    tolerance=self.config.tolerance,
+                    progress_callback=progress_callback
+                )
+
+            # ========== 公共部分：评估和结果构建 ==========
 
             # 步骤5: 模型评估（直接调用）
 

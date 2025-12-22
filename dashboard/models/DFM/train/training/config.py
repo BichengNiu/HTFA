@@ -6,7 +6,7 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
 
@@ -87,6 +87,34 @@ class TrainingConfig:
 
     # 训练期权重配置（2025-12-20新增）
     training_weight: float = 0.5  # 训练期权重 (0.0-1.0)，验证期权重自动为 1-training_weight
+
+    # ========== 算法选择配置（2025-12-21新增）==========
+    algorithm: str = 'classical'  # 算法类型: 'classical'(经典EM算法) 或 'deep_learning'(深度学习)
+
+    # ========== DDFM专用参数（仅当algorithm='deep_learning'时生效）==========
+    # 自编码器结构
+    encoder_structure: Tuple[int, ...] = (16, 4)  # 编码器层结构，最后一个数为因子数
+    decoder_structure: Optional[Tuple[int, ...]] = None  # 解码器层结构(None=对称单层线性)
+    use_bias: bool = True  # 解码器最后一层是否使用偏置
+    batch_norm: bool = True  # 是否使用批量归一化
+    activation: str = 'relu'  # 激活函数: 'relu', 'tanh', 'sigmoid'
+
+    # 因子动态
+    factor_order: int = 2  # 因子AR阶数(1或2)
+    lags_input: int = 0  # 输入滞后期数
+
+    # 训练参数
+    learning_rate: float = 0.005  # 学习率
+    ddfm_optimizer: str = 'Adam'  # 优化器: 'Adam', 'SGD'
+    decay_learning_rate: bool = True  # 是否使用学习率衰减
+    epochs_per_mcmc: int = 100  # 每次MCMC迭代的epoch数
+    batch_size: int = 100  # 批量大小
+    mcmc_max_iter: int = 200  # MCMC最大迭代次数
+    mcmc_tolerance: float = 0.0005  # MCMC收敛阈值
+    display_interval: int = 10  # 显示间隔
+
+    # 随机种子
+    ddfm_seed: int = 3  # DDFM随机种子
 
     def __post_init__(self):
         """后初始化验证"""
@@ -211,6 +239,77 @@ class TrainingConfig:
                 f"当前值: {self.training_weight}"
             )
 
+        # 验证算法选择（2025-12-21）
+        valid_algorithms = ['classical', 'deep_learning']
+        if self.algorithm not in valid_algorithms:
+            raise ValueError(
+                f"algorithm必须是{valid_algorithms}之一，"
+                f"当前值: {self.algorithm}"
+            )
+
+        # 验证DDFM专用参数（仅当algorithm='deep_learning'时）
+        if self.algorithm == 'deep_learning':
+            # 验证因子阶数
+            if self.factor_order not in [1, 2]:
+                raise ValueError(
+                    f"factor_order必须为1或2，当前值: {self.factor_order}"
+                )
+            # 验证编码器结构
+            if not self.encoder_structure or len(self.encoder_structure) < 1:
+                raise ValueError("encoder_structure不能为空")
+            # 验证所有层的神经元数都为正整数
+            for i, neurons in enumerate(self.encoder_structure):
+                if not isinstance(neurons, int) or neurons <= 0:
+                    raise ValueError(
+                        f"encoder_structure第{i+1}层神经元数必须为正整数，"
+                        f"当前值: {neurons}"
+                    )
+            # 验证激活函数
+            valid_activations = ['relu', 'tanh', 'sigmoid']
+            if self.activation not in valid_activations:
+                raise ValueError(
+                    f"activation必须是{valid_activations}之一，"
+                    f"当前值: {self.activation}"
+                )
+            # 验证优化器
+            valid_optimizers = ['Adam', 'SGD']
+            if self.ddfm_optimizer not in valid_optimizers:
+                raise ValueError(
+                    f"ddfm_optimizer必须是{valid_optimizers}之一，"
+                    f"当前值: {self.ddfm_optimizer}"
+                )
+            # 验证学习率
+            if self.learning_rate <= 0 or self.learning_rate > 1:
+                raise ValueError(
+                    f"learning_rate必须在(0, 1]范围内，当前值: {self.learning_rate}"
+                )
+            # 验证输入滞后期
+            if self.lags_input < 0:
+                raise ValueError(
+                    f"lags_input必须>=0，当前值: {self.lags_input}"
+                )
+            # 验证批量大小
+            if self.batch_size <= 0:
+                raise ValueError(
+                    f"batch_size必须>0，当前值: {self.batch_size}"
+                )
+            # 验证MCMC迭代次数
+            if self.mcmc_max_iter <= 0:
+                raise ValueError(
+                    f"mcmc_max_iter必须>0，当前值: {self.mcmc_max_iter}"
+                )
+            # 验证每次MCMC的epoch数
+            if self.epochs_per_mcmc <= 0:
+                raise ValueError(
+                    f"epochs_per_mcmc必须>0，当前值: {self.epochs_per_mcmc}"
+                )
+            # DDFM不支持变量选择
+            if self.enable_variable_selection:
+                raise ValueError(
+                    "深度学习算法(DDFM)不支持变量选择，"
+                    "请设置enable_variable_selection=False"
+                )
+
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'TrainingConfig':
         """从字典创建配置
@@ -266,13 +365,23 @@ class TrainingConfig:
 
     def __repr__(self) -> str:
         """字符串表示"""
-        return (
+        base_repr = (
             f"TrainingConfig(\n"
             f"  data_path={self.data_path},\n"
             f"  target_variable={self.target_variable},\n"
             f"  indicators={len(self.selected_indicators)},\n"
-            f"  k_factors={self.k_factors},\n"
-            f"  factor_selection={self.factor_selection_method},\n"
-            f"  variable_selection={self.enable_variable_selection}\n"
-            f")"
+            f"  algorithm={self.algorithm},\n"
         )
+        if self.algorithm == 'deep_learning':
+            base_repr += (
+                f"  encoder_structure={self.encoder_structure},\n"
+                f"  factor_order={self.factor_order},\n"
+            )
+        else:
+            base_repr += (
+                f"  k_factors={self.k_factors},\n"
+                f"  factor_selection={self.factor_selection_method},\n"
+                f"  variable_selection={self.enable_variable_selection},\n"
+            )
+        base_repr += ")"
+        return base_repr

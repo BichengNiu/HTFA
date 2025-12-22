@@ -85,6 +85,79 @@ class UIConfig:
     TRAINING_WEIGHT_MAX = 100     # 100%=仅训练期
     TRAINING_WEIGHT_STEP = 10
 
+    # ========== 算法选择配置（2025-12-21新增）==========
+    ALGORITHM_OPTIONS = {
+        'classical': '经典DFM (EM算法)',
+        'deep_learning': '深度学习DFM (自编码器)'
+    }
+    DEFAULT_ALGORITHM = 'classical'
+
+    # ========== DDFM专用参数配置 ==========
+    # 编码器结构
+    ENCODER_STRUCTURE_DEFAULT = "16, 4"  # 默认编码器结构字符串
+    ENCODER_STRUCTURE_HELP = "逗号分隔的神经元数，最后一个数为因子数。如'16, 4'表示两层网络，最终4个因子"
+
+    # 学习率
+    LEARNING_RATE_DEFAULT = 0.005
+    LEARNING_RATE_MIN = 0.0001
+    LEARNING_RATE_MAX = 0.1
+    LEARNING_RATE_STEP = 0.0001
+
+    # MCMC迭代
+    MCMC_MAX_ITER_DEFAULT = 200
+    MCMC_MAX_ITER_MIN = 50
+    MCMC_MAX_ITER_MAX = 500
+    MCMC_MAX_ITER_STEP = 10
+
+    # 批量大小
+    BATCH_SIZE_DEFAULT = 100
+    BATCH_SIZE_MIN = 16
+    BATCH_SIZE_MAX = 512
+    BATCH_SIZE_STEP = 16
+
+    # 每次MCMC的epoch数
+    EPOCHS_PER_MCMC_DEFAULT = 100
+    EPOCHS_PER_MCMC_MIN = 10
+    EPOCHS_PER_MCMC_MAX = 500
+    EPOCHS_PER_MCMC_STEP = 10
+
+    # MCMC收敛阈值
+    MCMC_TOLERANCE_DEFAULT = 0.0005
+    MCMC_TOLERANCE_MIN = 0.00001
+    MCMC_TOLERANCE_MAX = 0.01
+
+    # 因子AR阶数（DDFM专用）
+    DDFM_FACTOR_ORDER_OPTIONS = {
+        1: "AR(1)",
+        2: "AR(2)"
+    }
+    DDFM_FACTOR_ORDER_DEFAULT = 2
+
+    # 优化器选项
+    DDFM_OPTIMIZER_OPTIONS = {
+        'Adam': 'Adam (推荐)',
+        'SGD': 'SGD'
+    }
+    DDFM_OPTIMIZER_DEFAULT = 'Adam'
+
+    # 激活函数选项
+    DDFM_ACTIVATION_OPTIONS = {
+        'relu': 'ReLU (推荐)',
+        'tanh': 'Tanh',
+        'sigmoid': 'Sigmoid'
+    }
+    DDFM_ACTIVATION_DEFAULT = 'relu'
+
+    # 输入滞后期配置
+    LAGS_INPUT_MIN = 0
+    LAGS_INPUT_MAX = 5
+    LAGS_INPUT_DEFAULT = 0
+    LAGS_INPUT_HELP = "包含多少期滞后变量作为输入（0=仅当期）"
+
+    # 批量归一化配置
+    BATCH_NORM_DEFAULT = True
+    BATCH_NORM_HELP = "批量归一化可提高训练稳定性"
+
     # EM算法配置
     EM_MAX_ITERATIONS = 100
     EM_MIN_ITERATIONS = 10

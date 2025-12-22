@@ -10,7 +10,8 @@ import pandas as pd
 import numpy as np
 import os
 import sys
-from datetime import datetime, timedelta, date, time
+import re
+from datetime import datetime, timedelta, date
 from collections import defaultdict
 import traceback
 from typing import Dict, List, Optional, Union, Any
@@ -34,6 +35,12 @@ from dashboard.models.DFM.train.utils import StateManager, filter_industries_by_
 from dashboard.models.DFM.train.ui.components.file_uploader_component import FileUploaderComponent
 from dashboard.models.DFM.train.config import UIConfig
 from dashboard.models.DFM.train.ui.utils.config_builder import TrainingConfigBuilder
+from dashboard.models.DFM.train.ui.utils.date_helpers import (
+    get_target_frequency,
+    get_previous_period_date,
+    get_frequency_label,
+    validate_date_ranges,
+)
 from dashboard.models.DFM.train.ui.utils.text_helpers import (
     normalize_variable_name,
     normalize_variable_name_no_space,
@@ -277,8 +284,46 @@ def render_dfm_model_training_page(st_instance):
                 default_obs_start_timestamp = pd.Timestamp(date_defaults['validation_end']) + pd.Timedelta(weeks=1)
                 _state.set('dfm_observation_start_date', default_obs_start_timestamp.date())
 
+    # ===== 训练算法选择 =====
+    st_instance.subheader("训练算法")
+
+    current_algorithm = _state.get('dfm_algorithm', UIConfig.DEFAULT_ALGORITHM)
+    if current_algorithm not in UIConfig.ALGORITHM_OPTIONS:
+        current_algorithm = UIConfig.DEFAULT_ALGORITHM
+
+    algorithm_value = st_instance.selectbox(
+        "选择算法",
+        options=list(UIConfig.ALGORITHM_OPTIONS.keys()),
+        format_func=lambda x: UIConfig.ALGORITHM_OPTIONS[x],
+        index=UIConfig.get_safe_option_index(
+            UIConfig.ALGORITHM_OPTIONS, current_algorithm, UIConfig.DEFAULT_ALGORITHM
+        ),
+        key='dfm_algorithm_selector',
+        help="经典DFM使用EM算法，深度学习DFM使用神经网络自编码器"
+    )
+    _state.set('dfm_algorithm', algorithm_value)
+    current_algorithm = algorithm_value
+
     # ===== 卡片1: 训练周期设置 =====
     st_instance.subheader("训练周期设置")
+
+    # 获取目标变量的频率标签（用于动态文案）
+    target_variable = _state.get('dfm_target_variable', '')
+    var_frequency_map = _state.get('dfm_frequency_map_obj', {})
+    target_freq_code = get_target_frequency(target_variable, var_frequency_map, default_freq='W')
+    freq_label = get_frequency_label(target_freq_code)
+
+    # 显示算法模式说明
+    if current_algorithm == 'deep_learning':
+        st_instance.info(
+            f"**DDFM模式说明**: 深度学习算法将使用从训练期开始到观察期上一{freq_label}的全部数据进行训练。"
+            "验证期参数仅用于模型预测后的性能评估，不参与模型训练过程。"
+        )
+    else:
+        st_instance.info(
+            "**经典DFM模式说明**: 模型在训练期数据上拟合参数，在验证期数据上评估性能。"
+        )
+
     col_time1, col_time2, col_time3 = st_instance.columns(3)
 
     with col_time1:
@@ -291,31 +336,53 @@ def render_dfm_model_training_page(st_instance):
         _state.set('dfm_training_start_date', training_start_value)
 
     with col_time2:
-        validation_start_value = st_instance.date_input(
-            "验证期开始",
-            value=_state.get('dfm_validation_start_date', date_defaults['validation_start']),
-            key='dfm_validation_start_date_input',
-            help="验证期开始日期"
-        )
-        _state.set('dfm_validation_start_date', validation_start_value)
+        # 判断是否为DDFM模式
+        is_ddfm_mode = (current_algorithm == 'deep_learning')
+
+        if is_ddfm_mode:
+            # DDFM模式：禁用验证期开始控件，根据数据频率自动计算上一期
+            observation_start_temp = _state.get('dfm_observation_start_date', date_defaults['validation_end'])
+            auto_validation_start = get_previous_period_date(observation_start_temp, target_freq_code, periods=1)
+
+            validation_start_value = st_instance.date_input(
+                "验证期开始（DDFM自动设置）",
+                value=auto_validation_start,
+                key='dfm_validation_start_date_input',
+                disabled=True,
+                help=f"DDFM模式下，训练期将延伸到观察期上一{freq_label}，验证期参数仅用于预测评估"
+            )
+            _state.set('dfm_validation_start_date', auto_validation_start)
+        else:
+            # 经典DFM模式：正常可编辑
+            validation_start_value = st_instance.date_input(
+                "验证期开始",
+                value=_state.get('dfm_validation_start_date', date_defaults['validation_start']),
+                key='dfm_validation_start_date_input',
+                help="验证期开始日期，训练期将在此日期前一天结束"
+            )
+            _state.set('dfm_validation_start_date', validation_start_value)
 
     with col_time3:
         observation_start_value = st_instance.date_input(
             "观察期开始",
             value=_state.get('dfm_observation_start_date', date_defaults['validation_end']),
             key='dfm_observation_start_date_input',
-            help="观察期开始日期，验证期结束日期自动设置为该日期的前一周"
+            help=f"观察期开始日期，验证期结束日期自动设置为该日期的上一{freq_label}"
         )
         _state.set('dfm_observation_start_date', observation_start_value)
 
-    # 自动计算验证期结束日期
-    validation_end_timestamp = pd.Timestamp(observation_start_value) - pd.Timedelta(weeks=1)
-    validation_end_value = validation_end_timestamp.date()
+    # 自动计算验证期结束日期（基于数据频率）
+    validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
     _state.set('dfm_validation_end_date', validation_end_value)
-    st_instance.caption(f"验证期结束: {validation_end_value.strftime('%Y-%m-%d')}")
+    # 仅在经典DFM模式下显示验证期结束提示
+    if current_algorithm != 'deep_learning':
+        st_instance.caption(f"验证期结束: {validation_end_value.strftime('%Y-%m-%d')}")
 
     # ===== 卡片2: 模型核心配置 =====
     st_instance.subheader("模型核心配置")
+
+    # 深度学习模式标志（复用上面的algorithm_value）
+    is_deep_learning = (algorithm_value == 'deep_learning')
 
     # 估计方法回调函数
     def on_estimation_method_change():
@@ -362,117 +429,250 @@ def render_dfm_model_training_page(st_instance):
         )
         _state.set('dfm_target_alignment_mode', alignment_value)
 
-    # 第二行: 变量筛选方法 + 因子选择策略
-    col_core3, col_core4 = st_instance.columns(2)
+    # 第二行: 变量筛选方法 + 因子选择策略（仅经典算法显示）
+    if not is_deep_learning:
+        col_core3, col_core4 = st_instance.columns(2)
 
-    with col_core3:
-        current_var_method = _state.get('dfm_variable_selection_method', UIConfig.DEFAULT_VAR_SELECTION)
-        # 验证方法有效性
-        if current_var_method not in UIConfig.VARIABLE_SELECTION_METHODS:
-            raise ValueError(f"无效的变量筛选方法: {current_var_method}，有效值: {list(UIConfig.VARIABLE_SELECTION_METHODS.keys())}")
+        with col_core3:
+            current_var_method = _state.get('dfm_variable_selection_method', UIConfig.DEFAULT_VAR_SELECTION)
+            # 验证方法有效性
+            if current_var_method not in UIConfig.VARIABLE_SELECTION_METHODS:
+                raise ValueError(f"无效的变量筛选方法: {current_var_method}，有效值: {list(UIConfig.VARIABLE_SELECTION_METHODS.keys())}")
 
-        var_method_value = st_instance.selectbox(
-            "变量筛选方法",
-            options=list(UIConfig.VARIABLE_SELECTION_METHODS.keys()),
-            format_func=lambda x: UIConfig.VARIABLE_SELECTION_METHODS[x],
-            index=UIConfig.get_safe_option_index(
-                UIConfig.VARIABLE_SELECTION_METHODS, current_var_method, UIConfig.DEFAULT_VAR_SELECTION
-            ),
-            key='dfm_variable_selection_method_input',
-            help="选择在已选变量基础上的筛选方法"
-        )
-        _state.set('dfm_variable_selection_method', var_method_value)
+            var_method_value = st_instance.selectbox(
+                "变量筛选方法",
+                options=list(UIConfig.VARIABLE_SELECTION_METHODS.keys()),
+                format_func=lambda x: UIConfig.VARIABLE_SELECTION_METHODS[x],
+                index=UIConfig.get_safe_option_index(
+                    UIConfig.VARIABLE_SELECTION_METHODS, current_var_method, UIConfig.DEFAULT_VAR_SELECTION
+                ),
+                key='dfm_variable_selection_method_input',
+                help="选择在已选变量基础上的筛选方法"
+            )
+            _state.set('dfm_variable_selection_method', var_method_value)
 
-        enable_var_selection = (var_method_value != 'none')
-        _state.set('dfm_enable_variable_selection', enable_var_selection)
+            enable_var_selection = (var_method_value != 'none')
+            _state.set('dfm_enable_variable_selection', enable_var_selection)
 
-    with col_core4:
-        current_strategy = _state.get('dfm_factor_selection_strategy', UIConfig.DEFAULT_FACTOR_STRATEGY)
-        # 验证策略有效性
-        if current_strategy not in UIConfig.FACTOR_STRATEGIES:
-            raise ValueError(f"无效的因子选择策略: {current_strategy}，有效值: {list(UIConfig.FACTOR_STRATEGIES.keys())}")
+        with col_core4:
+            current_strategy = _state.get('dfm_factor_selection_strategy', UIConfig.DEFAULT_FACTOR_STRATEGY)
+            # 验证策略有效性
+            if current_strategy not in UIConfig.FACTOR_STRATEGIES:
+                raise ValueError(f"无效的因子选择策略: {current_strategy}，有效值: {list(UIConfig.FACTOR_STRATEGIES.keys())}")
 
-        strategy_value = st_instance.selectbox(
-            "因子选择策略",
-            options=list(UIConfig.FACTOR_STRATEGIES.keys()),
-            format_func=lambda x: UIConfig.FACTOR_STRATEGIES[x],
-            index=UIConfig.get_safe_option_index(
-                UIConfig.FACTOR_STRATEGIES, current_strategy, UIConfig.DEFAULT_FACTOR_STRATEGY
-            ),
-            key='dfm_factor_selection_strategy',
-            help="选择确定因子数量的方法"
-        )
-        _state.set('dfm_factor_selection_strategy', strategy_value)
+            strategy_value = st_instance.selectbox(
+                "因子选择策略",
+                options=list(UIConfig.FACTOR_STRATEGIES.keys()),
+                format_func=lambda x: UIConfig.FACTOR_STRATEGIES[x],
+                index=UIConfig.get_safe_option_index(
+                    UIConfig.FACTOR_STRATEGIES, current_strategy, UIConfig.DEFAULT_FACTOR_STRATEGY
+                ),
+                key='dfm_factor_selection_strategy',
+                help="选择确定因子数量的方法"
+            )
+            _state.set('dfm_factor_selection_strategy', strategy_value)
+    else:
+        # 深度学习模式：禁用变量选择
+        _state.set('dfm_variable_selection_method', 'none')
+        _state.set('dfm_enable_variable_selection', False)
+        enable_var_selection = False
+        strategy_value = 'fixed_number'  # DDFM使用固定因子数（由编码器决定）
 
     # ===== 卡片3: 高级选项 (折叠) =====
     with st_instance.expander("高级选项", expanded=False):
-        # 因子参数（根据策略条件显示）- 两列布局
-        st_instance.markdown("**因子参数**")
 
-        # 初始化默认值
-        if strategy_value == 'fixed_number':
-            if _state.get('dfm_fixed_number_of_factors') is None:
-                _state.set('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS)
-        elif strategy_value == 'cumulative_variance':
-            if _state.get('dfm_cumulative_variance_threshold') is None:
-                _state.set('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE)
-        elif strategy_value == 'kaiser':
-            if _state.get('dfm_kaiser_threshold') is None:
-                _state.set('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD)
+        # ===== DDFM专用参数（仅深度学习算法显示）=====
+        if is_deep_learning:
+            st_instance.markdown("**深度学习参数**")
 
-        # 两列布局：左列策略参数，右列因子自回归阶数
-        factor_col1, factor_col2 = st_instance.columns(2)
+            # 第一行：编码器结构 + 因子AR阶数
+            ddfm_col1, ddfm_col2 = st_instance.columns(2)
 
-        # 左列：根据策略条件显示参数
-        with factor_col1:
-            if strategy_value == 'fixed_number':
-                fixed_factors_value = st_instance.number_input(
-                    "因子数",
-                    min_value=UIConfig.K_FACTORS_MIN,
-                    max_value=UIConfig.K_FACTORS_MAX,
-                    value=_state.get('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS),
+            with ddfm_col1:
+                # 解析因子数用于显示
+                encoder_structure_str = _state.get('dfm_encoder_structure', UIConfig.ENCODER_STRUCTURE_DEFAULT)
+                try:
+                    parts = [int(x.strip()) for x in encoder_structure_str.split(',')]
+                    factor_label = f"编码器结构（因子数: {parts[-1]}）" if parts else "编码器结构"
+                except ValueError:
+                    factor_label = "编码器结构"
+
+                encoder_structure_value = st_instance.text_input(
+                    factor_label,
+                    value=encoder_structure_str,
+                    key='dfm_encoder_structure_input',
+                    help=UIConfig.ENCODER_STRUCTURE_HELP
+                )
+                _state.set('dfm_encoder_structure', encoder_structure_value)
+
+            with ddfm_col2:
+                ddfm_factor_order = st_instance.selectbox(
+                    "因子AR阶数",
+                    options=list(UIConfig.DDFM_FACTOR_ORDER_OPTIONS.keys()),
+                    format_func=lambda x: UIConfig.DDFM_FACTOR_ORDER_OPTIONS[x],
+                    index=0 if _state.get('dfm_ddfm_factor_order', UIConfig.DDFM_FACTOR_ORDER_DEFAULT) == 1 else 1,
+                    key='dfm_ddfm_factor_order_input',
+                    help="因子的自回归阶数"
+                )
+                _state.set('dfm_ddfm_factor_order', ddfm_factor_order)
+
+            # 第二行：学习率 + 优化器
+            ddfm_col3, ddfm_col4 = st_instance.columns(2)
+
+            with ddfm_col3:
+                learning_rate_value = st_instance.number_input(
+                    "学习率",
+                    min_value=UIConfig.LEARNING_RATE_MIN,
+                    max_value=UIConfig.LEARNING_RATE_MAX,
+                    value=_state.get('dfm_ddfm_learning_rate', UIConfig.LEARNING_RATE_DEFAULT),
+                    step=UIConfig.LEARNING_RATE_STEP,
+                    format="%.4f",
+                    key='dfm_ddfm_learning_rate_input',
+                    help="神经网络学习率"
+                )
+                _state.set('dfm_ddfm_learning_rate', learning_rate_value)
+
+            with ddfm_col4:
+                current_optimizer = _state.get('dfm_ddfm_optimizer', UIConfig.DDFM_OPTIMIZER_DEFAULT)
+                optimizer_value = st_instance.selectbox(
+                    "优化器",
+                    options=list(UIConfig.DDFM_OPTIMIZER_OPTIONS.keys()),
+                    format_func=lambda x: UIConfig.DDFM_OPTIMIZER_OPTIONS[x],
+                    index=0 if current_optimizer == 'Adam' else 1,
+                    key='dfm_ddfm_optimizer_input',
+                    help="神经网络优化器"
+                )
+                _state.set('dfm_ddfm_optimizer', optimizer_value)
+
+            # 第三行：MCMC迭代次数 + 批量大小
+            ddfm_col5, ddfm_col6 = st_instance.columns(2)
+
+            with ddfm_col5:
+                mcmc_max_iter_value = st_instance.number_input(
+                    "MCMC最大迭代",
+                    min_value=UIConfig.MCMC_MAX_ITER_MIN,
+                    max_value=UIConfig.MCMC_MAX_ITER_MAX,
+                    value=_state.get('dfm_ddfm_max_iter', UIConfig.MCMC_MAX_ITER_DEFAULT),
+                    step=UIConfig.MCMC_MAX_ITER_STEP,
+                    key='dfm_ddfm_max_iter_input',
+                    help="MCMC算法最大迭代次数"
+                )
+                _state.set('dfm_ddfm_max_iter', mcmc_max_iter_value)
+
+            with ddfm_col6:
+                batch_size_value = st_instance.number_input(
+                    "批量大小",
+                    min_value=UIConfig.BATCH_SIZE_MIN,
+                    max_value=UIConfig.BATCH_SIZE_MAX,
+                    value=_state.get('dfm_ddfm_batch_size', UIConfig.BATCH_SIZE_DEFAULT),
+                    step=UIConfig.BATCH_SIZE_STEP,
+                    key='dfm_ddfm_batch_size_input',
+                    help="神经网络训练批量大小"
+                )
+                _state.set('dfm_ddfm_batch_size', batch_size_value)
+
+            # 第四行：激活函数 + 输入滞后期数
+            ddfm_col7, ddfm_col8 = st_instance.columns(2)
+
+            with ddfm_col7:
+                current_activation = _state.get('dfm_ddfm_activation', UIConfig.DDFM_ACTIVATION_DEFAULT)
+                activation_value = st_instance.selectbox(
+                    "激活函数",
+                    options=list(UIConfig.DDFM_ACTIVATION_OPTIONS.keys()),
+                    format_func=lambda x: UIConfig.DDFM_ACTIVATION_OPTIONS[x],
+                    index=UIConfig.get_safe_option_index(
+                        UIConfig.DDFM_ACTIVATION_OPTIONS,
+                        current_activation,
+                        UIConfig.DDFM_ACTIVATION_DEFAULT
+                    ),
+                    key='dfm_ddfm_activation_input',
+                    help="神经网络激活函数"
+                )
+                _state.set('dfm_ddfm_activation', activation_value)
+
+            with ddfm_col8:
+                lags_input_value = st_instance.number_input(
+                    "输入滞后期数",
+                    min_value=UIConfig.LAGS_INPUT_MIN,
+                    max_value=UIConfig.LAGS_INPUT_MAX,
+                    value=_state.get('dfm_ddfm_lags_input', UIConfig.LAGS_INPUT_DEFAULT),
                     step=1,
-                    key='dfm_fixed_number_of_factors',
-                    help="指定使用的因子数量"
+                    key='dfm_ddfm_lags_input_input',
+                    help=UIConfig.LAGS_INPUT_HELP
                 )
-                _state.set('dfm_fixed_number_of_factors', fixed_factors_value)
-            elif strategy_value == 'cumulative_variance':
-                cum_var_value = st_instance.number_input(
-                    "累积方差阈值",
-                    min_value=UIConfig.CUM_VARIANCE_MIN,
-                    max_value=UIConfig.CUM_VARIANCE_MAX,
-                    value=_state.get('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE),
-                    step=UIConfig.CUM_VARIANCE_STEP,
-                    format="%.2f",
-                    key='dfm_cumulative_variance_threshold_input',
-                    help="因子累积解释方差的阈值"
-                )
-                _state.set('dfm_cumulative_variance_threshold', cum_var_value)
-            elif strategy_value == 'kaiser':
-                kaiser_threshold_value = st_instance.number_input(
-                    "特征值阈值",
-                    min_value=UIConfig.KAISER_THRESHOLD_MIN,
-                    max_value=UIConfig.KAISER_THRESHOLD_MAX,
-                    value=_state.get('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD),
-                    step=UIConfig.KAISER_THRESHOLD_STEP,
-                    format="%.1f",
-                    key='dfm_kaiser_threshold_input',
-                    help="选择特征值大于此阈值的因子"
-                )
-                _state.set('dfm_kaiser_threshold', kaiser_threshold_value)
+                _state.set('dfm_ddfm_lags_input', lags_input_value)
 
-        # 右列：因子自回归阶数
-        with factor_col2:
-            ar_order_value = st_instance.number_input(
-                "因子自回归阶数",
-                min_value=UIConfig.FACTOR_AR_ORDER_MIN,
-                max_value=UIConfig.FACTOR_AR_ORDER_MAX,
-                value=_state.get('dfm_factor_ar_order', UIConfig.DEFAULT_FACTOR_AR_ORDER),
-                step=1,
-                key='dfm_factor_ar_order_input',
-                help="因子的自回归阶数，通常设为1"
-            )
-            _state.set('dfm_factor_ar_order', ar_order_value)
+            st_instance.divider()
+
+        # ===== 经典DFM因子参数（仅经典算法显示）=====
+        if not is_deep_learning:
+            # 因子参数（根据策略条件显示）- 两列布局
+            st_instance.markdown("**因子参数**")
+
+            # 初始化默认值
+            if strategy_value == 'fixed_number':
+                if _state.get('dfm_fixed_number_of_factors') is None:
+                    _state.set('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS)
+            elif strategy_value == 'cumulative_variance':
+                if _state.get('dfm_cumulative_variance_threshold') is None:
+                    _state.set('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE)
+            elif strategy_value == 'kaiser':
+                if _state.get('dfm_kaiser_threshold') is None:
+                    _state.set('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD)
+
+            # 两列布局：左列策略参数，右列因子自回归阶数
+            factor_col1, factor_col2 = st_instance.columns(2)
+
+            # 左列：根据策略条件显示参数
+            with factor_col1:
+                if strategy_value == 'fixed_number':
+                    fixed_factors_value = st_instance.number_input(
+                        "因子数",
+                        min_value=UIConfig.K_FACTORS_MIN,
+                        max_value=UIConfig.K_FACTORS_MAX,
+                        value=_state.get('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS),
+                        step=1,
+                        key='dfm_fixed_number_of_factors',
+                        help="指定使用的因子数量"
+                    )
+                    _state.set('dfm_fixed_number_of_factors', fixed_factors_value)
+                elif strategy_value == 'cumulative_variance':
+                    cum_var_value = st_instance.number_input(
+                        "累积方差阈值",
+                        min_value=UIConfig.CUM_VARIANCE_MIN,
+                        max_value=UIConfig.CUM_VARIANCE_MAX,
+                        value=_state.get('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE),
+                        step=UIConfig.CUM_VARIANCE_STEP,
+                        format="%.2f",
+                        key='dfm_cumulative_variance_threshold_input',
+                        help="因子累积解释方差的阈值"
+                    )
+                    _state.set('dfm_cumulative_variance_threshold', cum_var_value)
+                elif strategy_value == 'kaiser':
+                    kaiser_threshold_value = st_instance.number_input(
+                        "特征值阈值",
+                        min_value=UIConfig.KAISER_THRESHOLD_MIN,
+                        max_value=UIConfig.KAISER_THRESHOLD_MAX,
+                        value=_state.get('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD),
+                        step=UIConfig.KAISER_THRESHOLD_STEP,
+                        format="%.1f",
+                        key='dfm_kaiser_threshold_input',
+                        help="选择特征值大于此阈值的因子"
+                    )
+                    _state.set('dfm_kaiser_threshold', kaiser_threshold_value)
+
+            # 右列：因子自回归阶数
+            with factor_col2:
+                ar_order_value = st_instance.number_input(
+                    "因子自回归阶数",
+                    min_value=UIConfig.FACTOR_AR_ORDER_MIN,
+                    max_value=UIConfig.FACTOR_AR_ORDER_MAX,
+                    value=_state.get('dfm_factor_ar_order', UIConfig.DEFAULT_FACTOR_AR_ORDER),
+                    step=1,
+                    key='dfm_factor_ar_order_input',
+                    help="因子的自回归阶数，通常设为1"
+                )
+                _state.set('dfm_factor_ar_order', ar_order_value)
 
         # === 第一阶段分行业因子数（仅二次估计法）===
         if estimation_method == 'two_stage':
@@ -1026,21 +1226,25 @@ def render_dfm_model_training_page(st_instance):
     current_target_var = _state.get('dfm_target_variable', None)
     current_selected_indicators = _state.get('dfm_selected_indicators', [])
 
-    # 日期验证
+    # 日期验证 - 使用算法感知的验证函数
     training_start_value = _state.get('dfm_training_start_date')
     validation_start_value = _state.get('dfm_validation_start_date')
-    validation_end_value = _state.get('dfm_validation_end_date')
+    observation_start_value = _state.get('dfm_observation_start_date')
+    current_algorithm = _state.get('dfm_algorithm', UIConfig.DEFAULT_ALGORITHM)
 
     date_validation_passed = True
-    if training_start_value and validation_start_value and validation_end_value:
-        if training_start_value >= validation_start_value:
-            st_instance.error("[ERROR] 训练期开始日期必须早于验证期开始日期")
+    if training_start_value and observation_start_value:
+        # 调用算法感知的验证函数
+        validation_error = validate_date_ranges(
+            algorithm=current_algorithm,
+            training_start=training_start_value,
+            validation_start=validation_start_value,
+            observation_start=observation_start_value,
+            target_freq=target_freq_code
+        )
+        if validation_error:
+            st_instance.error(f"[ERROR] {validation_error}")
             date_validation_passed = False
-        elif validation_start_value >= validation_end_value:
-            st_instance.error("[ERROR] 验证期开始日期必须早于验证期结束日期")
-            date_validation_passed = False
-        else:
-            pass
     else:
         st_instance.warning("[WARNING] 请设置完整的日期范围")
         date_validation_passed = False
@@ -1082,19 +1286,44 @@ def render_dfm_model_training_page(st_instance):
 
                 training_config = config_builder.build(
                     input_df=input_df,
-                    var_industry_map=_state.get('dfm_industry_map_obj', {})
+                    var_industry_map=_state.get('dfm_industry_map_obj', {}),
+                    var_frequency_map=_state.get('dfm_frequency_map_obj', {})
                 )
 
                 logger.info(f"训练配置: 因子选择={training_config.factor_selection_method}, "
                            f"最大迭代={training_config.max_iterations}, AR阶数={training_config.max_lags}")
 
+                # 创建进度条组件（DDFM模式下显示）
+                is_ddfm_mode = (algorithm_value == 'deep_learning')
+                if is_ddfm_mode:
+                    progress_container = st_instance.container()
+                    with progress_container:
+                        progress_bar = st_instance.progress(0, text="准备训练...")
+                        progress_status = st_instance.empty()
+                else:
+                    progress_bar = None
+                    progress_status = None
+
                 # 创建进度回调函数
                 def progress_callback(message: str):
-                    """进度回调函数"""
+                    """进度回调函数 - 解析消息更新进度条"""
                     # 更新训练日志
                     training_log = _state.get('dfm_training_log', [])
                     training_log.append(message)
                     _state.set('dfm_training_log', training_log)
+
+                    # DDFM模式下解析进度信息并更新进度条
+                    if progress_bar is not None:
+                        # 解析新格式: [DDFM|progress%] message
+                        progress_match = re.search(r'\[DDFM\|(\d+)%\]', message)
+                        if progress_match:
+                            pct = int(progress_match.group(1))
+                            # 提取实际消息内容（去除前缀）
+                            display_msg = re.sub(r'\[DDFM\|\d+%\]\s*', '', message)
+                            progress_bar.progress(pct, text=display_msg)
+                        elif progress_status is not None:
+                            # 其他消息只更新状态文本
+                            progress_status.text(message)
 
                 # 设置训练状态
                 _state.set('dfm_training_status', '正在训练...')

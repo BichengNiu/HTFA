@@ -3,11 +3,12 @@
 DFM模型操作模块
 
 合并训练和评估功能，提供统一的模型操作接口
+支持经典DFM（EM算法）和深度学习DFM（DDFM自编码器）
 """
 
 import pandas as pd
 import numpy as np
-from typing import Optional, Callable
+from typing import Optional, Callable, Tuple
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.core.models import DFMModelResult, EvaluationMetrics
 from dashboard.models.DFM.train.core.factor_model import DFMModel
@@ -120,6 +121,167 @@ def train_dfm_with_forecast(
 
     except Exception as e:
         logger.error(f"[ModelOps] 预测生成失败: {e}")
+        raise RuntimeError(f"目标预测生成失败: {e}") from e
+
+    return model_result
+
+
+def train_ddfm_with_forecast(
+    predictor_data: pd.DataFrame,
+    target_data: pd.Series,
+    encoder_structure: Tuple[int, ...],
+    training_start: str,
+    train_end: str,
+    validation_start: str,
+    validation_end: str,
+    observation_end: Optional[str] = None,
+    decoder_structure: Optional[Tuple[int, ...]] = None,
+    use_bias: bool = True,
+    factor_order: int = 2,
+    lags_input: int = 0,
+    batch_norm: bool = True,
+    activation: str = 'relu',
+    learning_rate: float = 0.005,
+    optimizer: str = 'Adam',
+    decay_learning_rate: bool = True,
+    epochs: int = 100,
+    batch_size: int = 100,
+    max_iter: int = 200,
+    tolerance: float = 0.0005,
+    display_interval: int = 10,
+    seed: int = 3,
+    progress_callback: Optional[Callable[[str], None]] = None
+) -> DFMModelResult:
+    """
+    DDFM训练和预测函数（深度学习算法）
+
+    使用神经网络自编码器提取因子，通过MCMC迭代训练
+
+    Args:
+        predictor_data: 预测变量数据 (DataFrame, columns=变量名, index=日期)
+        target_data: 目标变量数据 (Series, index=日期)
+        encoder_structure: 编码器层结构，最后一个数为因子数
+        training_start: 训练集开始日期
+        train_end: 训练集结束日期
+        validation_start: 验证集开始日期
+        validation_end: 验证集结束日期
+        observation_end: 观察期结束日期（可选）
+        decoder_structure: 解码器层结构(None=对称单层线性)
+        use_bias: 解码器最后一层是否使用偏置
+        factor_order: 因子AR阶数(1或2)
+        lags_input: 输入滞后期数
+        batch_norm: 是否使用批量归一化
+        activation: 激活函数
+        learning_rate: 学习率
+        optimizer: 优化器
+        decay_learning_rate: 是否使用学习率衰减
+        epochs: 每次MCMC迭代的epoch数
+        batch_size: 批量大小
+        max_iter: MCMC最大迭代次数
+        tolerance: MCMC收敛阈值
+        display_interval: 显示间隔
+        seed: 随机种子
+        progress_callback: 进度回调函数
+
+    Returns:
+        DFMModelResult: 包含模型参数、因子、预测值的完整结果
+
+    Raises:
+        ImportError: 如果TensorFlow未安装
+        ValueError: 如果数据格式不正确或参数无效
+        RuntimeError: 如果模型训练失败
+    """
+    # 参数验证
+    if not encoder_structure or len(encoder_structure) == 0:
+        raise ValueError("encoder_structure不能为空")
+    for i, neurons in enumerate(encoder_structure):
+        if not isinstance(neurons, int) or neurons <= 0:
+            raise ValueError(
+                f"encoder_structure第{i+1}层必须为正整数，当前值: {neurons}"
+            )
+    if factor_order not in [1, 2]:
+        raise ValueError(f"factor_order必须为1或2，当前值: {factor_order}")
+    if batch_size <= 0:
+        raise ValueError(f"batch_size必须>0，当前值: {batch_size}")
+    if epochs <= 0:
+        raise ValueError(f"epochs必须>0，当前值: {epochs}")
+    if max_iter <= 0:
+        raise ValueError(f"max_iter必须>0，当前值: {max_iter}")
+    if learning_rate <= 0:
+        raise ValueError(f"learning_rate必须>0，当前值: {learning_rate}")
+
+    # 延迟导入DDFMModel（避免TensorFlow依赖问题）
+    from dashboard.models.DFM.train.core.ddfm_model import DDFMModel
+
+    # 因子数由编码器最后一层决定
+    n_factors = encoder_structure[-1]
+
+    if progress_callback:
+        progress_callback(f"[DDFM] 初始化深度动态因子模型 (因子数={n_factors})")
+
+    # 创建内部回调包装器，传递progress值到外部回调
+    def ddfm_progress_callback(message: str, progress: float):
+        if progress_callback:
+            # 将progress值嵌入消息中，格式: [DDFM|progress%] message
+            progress_pct = int(progress * 100)
+            progress_callback(f"[DDFM|{progress_pct}%] {message}")
+
+    # 1. 创建DDFM模型
+    ddfm = DDFMModel(
+        encoder_structure=encoder_structure,
+        decoder_structure=decoder_structure,
+        use_bias=use_bias,
+        factor_order=factor_order,
+        lags_input=lags_input,
+        batch_norm=batch_norm,
+        activation=activation,
+        learning_rate=learning_rate,
+        optimizer=optimizer,
+        decay_learning_rate=decay_learning_rate,
+        epochs=epochs,
+        batch_size=batch_size,
+        max_iter=max_iter,
+        tolerance=tolerance,
+        display_interval=display_interval,
+        seed=seed,
+        progress_callback=ddfm_progress_callback
+    )
+
+    # 2. 训练模型
+    try:
+        model_result = ddfm.fit(
+            data=predictor_data,
+            training_start=training_start,
+            train_end=train_end
+        )
+
+    except ImportError as e:
+        logger.error(f"[DDFM] TensorFlow导入失败: {e}")
+        raise ImportError(
+            "DDFM需要TensorFlow。请安装: pip install tensorflow"
+        ) from e
+    except Exception as e:
+        logger.error(f"[DDFM] 模型训练失败: {e}")
+        raise RuntimeError(f"DDFM模型训练失败: {e}") from e
+
+    # 3. 生成目标变量预测
+    try:
+        if progress_callback:
+            progress_callback("[DDFM] 生成目标变量预测...")
+
+        model_result = generate_target_forecast(
+            model_result=model_result,
+            target_data=target_data,
+            training_start=training_start,
+            train_end=train_end,
+            validation_start=validation_start,
+            validation_end=validation_end,
+            observation_end=observation_end,
+            progress_callback=progress_callback
+        )
+
+    except Exception as e:
+        logger.error(f"[DDFM] 预测生成失败: {e}")
         raise RuntimeError(f"目标预测生成失败: {e}") from e
 
     return model_result
@@ -291,4 +453,4 @@ def _evaluate_performance(
     )
 
 
-__all__ = ['train_dfm_with_forecast', 'evaluate_model_performance']
+__all__ = ['train_dfm_with_forecast', 'train_ddfm_with_forecast', 'evaluate_model_performance']
