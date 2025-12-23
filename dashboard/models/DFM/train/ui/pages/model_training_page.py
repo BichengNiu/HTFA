@@ -340,18 +340,20 @@ def render_dfm_model_training_page(st_instance):
         is_ddfm_mode = (current_algorithm == 'deep_learning')
 
         if is_ddfm_mode:
-            # DDFM模式：禁用验证期开始控件，根据数据频率自动计算上一期
+            # DDFM模式：validation_start/end映射到观察期
+            # 用户设置的observation_start就是DDFM的观察期开始
+            # 显示为禁用状态，值等于observation_start
             observation_start_temp = _state.get('dfm_observation_start_date', date_defaults['validation_end'])
-            auto_validation_start = get_previous_period_date(observation_start_temp, target_freq_code, periods=1)
 
             validation_start_value = st_instance.date_input(
-                "验证期开始（DDFM自动设置）",
-                value=auto_validation_start,
+                "观察期开始（DDFM模式）",
+                value=observation_start_temp,
                 key='dfm_validation_start_date_input',
                 disabled=True,
-                help=f"DDFM模式下，训练期将延伸到观察期上一{freq_label}，验证期参数仅用于预测评估"
+                help=f"DDFM模式下，此日期等于观察期开始日期"
             )
-            _state.set('dfm_validation_start_date', auto_validation_start)
+            # DDFM的validation_start直接使用observation_start
+            _state.set('dfm_validation_start_date', observation_start_temp)
         else:
             # 经典DFM模式：正常可编辑
             validation_start_value = st_instance.date_input(
@@ -371,8 +373,16 @@ def render_dfm_model_training_page(st_instance):
         )
         _state.set('dfm_observation_start_date', observation_start_value)
 
-    # 自动计算验证期结束日期（基于数据频率）
-    validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
+    # 自动计算验证期结束日期（根据算法不同）
+    if current_algorithm == 'deep_learning':
+        # DDFM模式：validation_end = 数据结束日期（观察期结束）
+        if not has_data or not isinstance(data_df.index, pd.DatetimeIndex):
+            raise ValueError("DDFM模式需要有效的数据，请先上传预处理后的数据文件")
+        validation_end_value = data_df.index.max().date()
+    else:
+        # 经典DFM模式：validation_end = observation_start的前一期
+        validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
+
     _state.set('dfm_validation_end_date', validation_end_value)
     # 仅在经典DFM模式下显示验证期结束提示
     if current_algorithm != 'deep_learning':
@@ -1417,31 +1427,29 @@ def render_dfm_model_training_page(st_instance):
                 training_log.append(f"[RESULT] 因子数: {k_factors_display}")
 
                 if metrics_obj:
-                    # 根据算法类型选择正确的指标字段和术语
-                    # DDFM: 使用obs指标，标签为"观察期"
-                    # 经典DFM: 使用oos指标，标签为"验证期"
                     is_ddfm = (algorithm_value == 'deep_learning')
-                    if is_ddfm:
-                        rmse_value = metrics_obj.obs_rmse
-                        win_rate_value = metrics_obj.obs_win_rate
-                        period_label = "观察期"
-                    else:
-                        rmse_value = metrics_obj.oos_rmse
-                        win_rate_value = metrics_obj.oos_win_rate
-                        period_label = "验证期"
 
-                    # 检查RMSE是否有效
-                    if rmse_value is not None and not (np.isnan(rmse_value) or np.isinf(rmse_value)):
-                        training_log.append(f"[METRICS] {period_label}RMSE: {rmse_value:.4f}")
-                    else:
-                        training_log.append(f"[METRICS] {period_label}RMSE: N/A")
+                    # 经典DFM：显示验证期指标（用于变量选择）
+                    if not is_ddfm:
+                        oos_rmse = metrics_obj.oos_rmse
+                        oos_win_rate = metrics_obj.oos_win_rate
+                        if oos_rmse is not None and not (np.isnan(oos_rmse) or np.isinf(oos_rmse)):
+                            training_log.append(f"[METRICS] 验证期RMSE: {oos_rmse:.4f}")
+                        if oos_win_rate is not None and not (np.isnan(oos_win_rate) or np.isinf(oos_win_rate)):
+                            training_log.append(f"[METRICS] 验证期Win Rate: {oos_win_rate:.2f}%")
 
-                    # 检查Win Rate是否有效
-                    if win_rate_value is not None and not (np.isnan(win_rate_value) or np.isinf(win_rate_value)):
-                        win_rate_str = f"{win_rate_value:.2f}%"
+                    # 观察期指标（两种模型都显示）
+                    obs_rmse = metrics_obj.obs_rmse
+                    obs_win_rate = metrics_obj.obs_win_rate
+                    if obs_rmse is not None and not (np.isnan(obs_rmse) or np.isinf(obs_rmse)):
+                        training_log.append(f"[METRICS] 观察期RMSE: {obs_rmse:.4f}")
                     else:
-                        win_rate_str = "N/A (数据不足)"
-                    training_log.append(f"[METRICS] {period_label}Win Rate: {win_rate_str}")
+                        training_log.append(f"[METRICS] 观察期RMSE: N/A")
+
+                    if obs_win_rate is not None and not (np.isnan(obs_win_rate) or np.isinf(obs_win_rate)):
+                        training_log.append(f"[METRICS] 观察期Win Rate: {obs_win_rate:.2f}%")
+                    else:
+                        training_log.append(f"[METRICS] 观察期Win Rate: N/A (数据不足)")
 
                 _state.set('dfm_training_log', training_log)
 

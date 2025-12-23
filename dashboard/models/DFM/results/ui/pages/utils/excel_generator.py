@@ -212,7 +212,7 @@ class R2ExcelGenerator:
 
 def generate_r2_excel(industry_r2: pd.Series, factor_industry_r2: dict) -> Optional[bytes]:
     """
-    生成R²分析数据的Excel文件（向后兼容函数）
+    生成R²分析数据的Excel文件
 
     Args:
         industry_r2: 整体R²数据(按行业)

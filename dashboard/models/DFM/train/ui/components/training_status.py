@@ -455,8 +455,7 @@ class TrainingStatusComponent(DFMComponent):
         """
         # 获取训练数据
         prepared_data = training_config['training_data']
-        # 存储数据到train_model模块，使用多个键名以确保兼容性
-        st.session_state['train_model.prepared_data'] = prepared_data
+        # 存储数据到train_model模块
         st.session_state['train_model.dfm_prepared_data_df'] = prepared_data
         logger.info("已将训练数据存储到train_model模块")
 

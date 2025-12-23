@@ -6,7 +6,7 @@ Metrics Panel Components
 import streamlit as st
 import pandas as pd
 import numpy as np
-from typing import Optional
+from typing import Any, Optional
 from dashboard.models.DFM.results.ui.pages.domain import DFMMetadataAccessor, ModelMetrics
 
 
@@ -18,7 +18,7 @@ class MetricsPanel:
     """
 
     @staticmethod
-    def format_metric_value(val: any, is_percent: bool = False, precision: int = 2) -> str:
+    def format_metric_value(val: Any, is_percent: bool = False, precision: int = 2) -> str:
         """
         格式化指标值
 
@@ -89,8 +89,9 @@ class MetricsPanel:
         # 第2行：训练期指标
         MetricsPanel.render_period_metrics("训练期", accessor.training_metrics)
 
-        # 第3行：验证期指标
-        MetricsPanel.render_period_metrics("验证期", accessor.validation_metrics)
+        # 第3行：验证期指标（DDFM模型时隐藏，因为验证期指标为inf）
+        if accessor.has_valid_validation_metrics:
+            MetricsPanel.render_period_metrics("验证期", accessor.validation_metrics)
 
         # 第4行：观察期指标（条件显示）
         if accessor.has_observation_metrics:

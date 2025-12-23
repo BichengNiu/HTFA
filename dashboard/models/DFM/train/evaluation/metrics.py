@@ -275,25 +275,12 @@ def align_next_month_weekly_data(
     Returns:
         pd.DataFrame: 对齐后数据，列['month', 'week_date', 'nowcast', 'next_month_target']
     """
-    # 确保索引是DatetimeIndex
-    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
-        nowcast_series.index = pd.to_datetime(nowcast_series.index)
-    if not isinstance(target_series.index, pd.DatetimeIndex):
-        target_series.index = pd.to_datetime(target_series.index)
-
-    # 参考老代码，使用DataFrame方式处理（避免Grouper错误）
-    # 1. 转换为DataFrame并添加月份列
-    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
-    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
-
-    target_df = target_series.to_frame('Target').copy()
-    target_df['TargetMonth'] = target_df.index.to_period('M')
-    # 确保每月只有一个target值
-    target_df = target_df.groupby('TargetMonth').last()
+    # 使用公共函数准备数据
+    nowcast_df, target_df = _prepare_monthly_dataframes(nowcast_series, target_series)
 
     weekly_data = []
 
-    # 2. 按月遍历nowcast数据
+    # 按月遍历nowcast数据
     for period, group in nowcast_df.groupby('NowcastMonth'):
         # 获取下个月的period
         next_period = period + 1
@@ -315,9 +302,7 @@ def align_next_month_weekly_data(
         logger.warning("[align_next_month_weekly] 未找到有效的周度-下月配对数据")
         return pd.DataFrame(columns=['month', 'week_date', 'nowcast', 'next_month_target'])
 
-    df = pd.DataFrame(weekly_data)
-
-    return df
+    return pd.DataFrame(weekly_data)
 
 
 def align_next_month_last_friday(
@@ -333,25 +318,12 @@ def align_next_month_last_friday(
     Returns:
         pd.DataFrame: 对齐后数据，列['month', 'last_friday_date', 'nowcast', 'current_target', 'next_target']
     """
-    # 确保索引是DatetimeIndex
-    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
-        nowcast_series.index = pd.to_datetime(nowcast_series.index)
-    if not isinstance(target_series.index, pd.DatetimeIndex):
-        target_series.index = pd.to_datetime(target_series.index)
-
-    # 参考老代码，使用DataFrame方式处理（避免Grouper错误）
-    # 1. 转换为DataFrame并添加月份列
-    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
-    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
-
-    target_df = target_series.to_frame('Target').copy()
-    target_df['TargetMonth'] = target_df.index.to_period('M')
-    # 确保每月只有一个target值
-    target_df = target_df.groupby('TargetMonth').last()
+    # 使用公共函数准备数据
+    nowcast_df, target_df = _prepare_monthly_dataframes(nowcast_series, target_series)
 
     monthly_friday_data = []
 
-    # 2. 按月遍历nowcast数据
+    # 按月遍历nowcast数据
     for period, group in nowcast_df.groupby('NowcastMonth'):
         # 找到该月的所有周五 (weekday=4)
         fridays = group[group.index.weekday == 4]
@@ -462,19 +434,8 @@ def align_current_month_weekly_data(
     Returns:
         pd.DataFrame: 对齐后数据，列['month', 'week_date', 'nowcast', 'current_month_target']
     """
-    # 确保索引是DatetimeIndex
-    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
-        nowcast_series.index = pd.to_datetime(nowcast_series.index)
-    if not isinstance(target_series.index, pd.DatetimeIndex):
-        target_series.index = pd.to_datetime(target_series.index)
-
-    # 转换为DataFrame并添加月份列
-    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
-    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
-
-    target_df = target_series.to_frame('Target').copy()
-    target_df['TargetMonth'] = target_df.index.to_period('M')
-    target_df = target_df.groupby('TargetMonth').last()
+    # 使用公共函数准备数据
+    nowcast_df, target_df = _prepare_monthly_dataframes(nowcast_series, target_series)
 
     weekly_data = []
 
@@ -513,18 +474,8 @@ def align_current_month_last_friday(
     Returns:
         pd.DataFrame: 对齐后数据，列['month', 'last_friday_date', 'nowcast', 'prev_target', 'current_target']
     """
-    # 确保索引是DatetimeIndex
-    if not isinstance(nowcast_series.index, pd.DatetimeIndex):
-        nowcast_series.index = pd.to_datetime(nowcast_series.index)
-    if not isinstance(target_series.index, pd.DatetimeIndex):
-        target_series.index = pd.to_datetime(target_series.index)
-
-    nowcast_df = nowcast_series.to_frame('Nowcast').copy()
-    nowcast_df['NowcastMonth'] = nowcast_df.index.to_period('M')
-
-    target_df = target_series.to_frame('Target').copy()
-    target_df['TargetMonth'] = target_df.index.to_period('M')
-    target_df = target_df.groupby('TargetMonth').last()
+    # 使用公共函数准备数据
+    nowcast_df, target_df = _prepare_monthly_dataframes(nowcast_series, target_series)
 
     monthly_friday_data = []
 
@@ -696,7 +647,8 @@ def _prepare_monthly_dataframes(
 
     target_df = target_series.to_frame('Target').copy()
     target_df['TargetMonth'] = target_df.index.to_period('M')
-    target_df = target_df.groupby('TargetMonth').last()
+    # 确保每月只有一个target值（先dropna避免取到NaN行）
+    target_df = target_df.dropna(subset=['Target']).groupby('TargetMonth').last()
 
     return nowcast_df, target_df
 

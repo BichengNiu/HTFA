@@ -483,51 +483,70 @@ def render_dfm_tab(st):
         except Exception as e:
             logger.warning(f"添加训练期文字标注失败: {e}")
 
-        # 添加验证期黄色背景标记
-        try:
-            validation_start = metadata.get('validation_start_date')
-            validation_end = metadata.get('validation_end_date')
+        # 判断是否为DDFM模型（验证期指标为inf）
+        is_ddfm = not accessor.has_valid_validation_metrics
 
-            if validation_start and validation_end and validation_start != 'N/A' and validation_end != 'N/A':
-                val_start_dt = pd.to_datetime(validation_start)
-                val_end_dt = pd.to_datetime(validation_end)
+        # 添加验证期黄色背景标记（DDFM模型跳过，因为验证期指标为inf）
+        if not is_ddfm:
+            try:
+                validation_start = metadata.get('validation_start_date')
+                validation_end = metadata.get('validation_end_date')
 
-                # 添加黄色半透明背景区域
-                fig.add_vrect(
-                    x0=val_start_dt,
-                    x1=val_end_dt,
-                    fillcolor="yellow",
-                    opacity=0.2,
-                    layer="below",
-                    line_width=0
-                )
+                if validation_start and validation_end and validation_start != 'N/A' and validation_end != 'N/A':
+                    val_start_dt = pd.to_datetime(validation_start)
+                    val_end_dt = pd.to_datetime(validation_end)
 
-                # 添加红色加粗文字标注（居中）
-                val_mid_dt = val_start_dt + (val_end_dt - val_start_dt) / 2
-                fig.add_annotation(
-                    x=val_mid_dt,
-                    y=1.05,
-                    yref="paper",
-                    text="<b>验证期</b>",
-                    showarrow=False,
-                    font=dict(size=12, color="red"),
-                    xanchor="center"
-                )
-                logger.info(f"已添加验证期标记: {val_start_dt} 到 {val_end_dt}")
-        except Exception as e:
-            logger.warning(f"添加验证期标记失败: {e}")
+                    # 添加黄色半透明背景区域
+                    fig.add_vrect(
+                        x0=val_start_dt,
+                        x1=val_end_dt,
+                        fillcolor="yellow",
+                        opacity=0.2,
+                        layer="below",
+                        line_width=0
+                    )
+
+                    # 添加红色加粗文字标注（居中）
+                    val_mid_dt = val_start_dt + (val_end_dt - val_start_dt) / 2
+                    fig.add_annotation(
+                        x=val_mid_dt,
+                        y=1.05,
+                        yref="paper",
+                        text="<b>验证期</b>",
+                        showarrow=False,
+                        font=dict(size=12, color="red"),
+                        xanchor="center"
+                    )
+                    logger.info(f"已添加验证期标记: {val_start_dt} 到 {val_end_dt}")
+            except Exception as e:
+                logger.warning(f"添加验证期标记失败: {e}")
 
         # 添加观察期背景色标记
         try:
             observation_period_start = metadata.get('observation_period_start')
+            observation_period_end = None  # 初始化变量
+
+            # DDFM模型特殊处理：validation_start/end实际上是观察期
+            if is_ddfm and observation_period_start is None:
+                # DDFM模型下，使用validation日期作为观察期
+                observation_period_start = metadata.get('validation_start_date')
+                observation_period_end = metadata.get('validation_end_date')
+                logger.info(f"DDFM模式：使用validation日期作为观察期 {observation_period_start} 到 {observation_period_end}")
 
             if observation_period_start and observation_period_start != 'N/A':
                 observation_start_dt = pd.to_datetime(observation_period_start)
 
-                # 获取图表数据的结束日期
-                if not comparison_df.empty and comparison_df.index.max() > observation_start_dt:
+                # 确定观察期结束日期
+                if is_ddfm and observation_period_end:
+                    # DDFM模式：使用validation_end
+                    data_end_dt = pd.to_datetime(observation_period_end)
+                elif not comparison_df.empty and comparison_df.index.max() > observation_start_dt:
+                    # 经典模式：使用数据结束日期
                     data_end_dt = comparison_df.index.max()
+                else:
+                    data_end_dt = None
 
+                if data_end_dt is not None:
                     # 添加浅绿色半透明背景区域标识观察期
                     fig.add_vrect(
                         x0=observation_start_dt,

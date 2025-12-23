@@ -5,6 +5,7 @@ DFM元数据访问器 - 封装重复的元数据访问模式
 
 from dataclasses import dataclass
 from typing import Optional, Any, Dict
+import math
 import pandas as pd
 import logging
 
@@ -75,13 +76,15 @@ class DFMMetadataAccessor:
         )
 
     def _get_k_factors(self) -> Any:
-        """从metadata中获取k_factors，支持新旧两种存储格式"""
-        # 新格式：best_params.k_factors
-        best_params = self._metadata.get('best_params', {})
-        if isinstance(best_params, dict) and 'k_factors' in best_params:
-            return best_params['k_factors']
-        # 旧格式：直接存储
-        return self._metadata.get('k_factors', 'N/A')
+        """从metadata中获取k_factors"""
+        best_params = self._metadata.get('best_params')
+        if best_params is None:
+            raise KeyError("元数据中缺少'best_params'字段")
+        if not isinstance(best_params, dict):
+            raise TypeError(f"'best_params'应为dict类型，实际为{type(best_params)}")
+        if 'k_factors' not in best_params:
+            raise KeyError("'best_params'中缺少'k_factors'字段")
+        return best_params['k_factors']
 
     @property
     def training_metrics(self) -> ModelMetrics:
@@ -111,13 +114,8 @@ class DFMMetadataAccessor:
         )
 
     def _get_metric(self, base_key: str) -> Optional[float]:
-        """获取指标值，支持新旧两种字段名格式"""
-        # 新格式（无_original后缀）
-        val = self._metadata.get(base_key)
-        if val is not None:
-            return val
-        # 旧格式（带_original后缀）
-        return self._metadata.get(f'{base_key}_original')
+        """获取指标值，字段不存在时返回None"""
+        return self._metadata.get(base_key)
 
     @property
     def has_observation_metrics(self) -> bool:
@@ -128,6 +126,24 @@ class DFMMetadataAccessor:
             metrics.mae is not None,
             metrics.hit_rate is not None
         ])
+
+    @property
+    def has_valid_validation_metrics(self) -> bool:
+        """
+        检查验证期指标是否有效（非inf且非NaN）
+
+        DDFM模型的验证期指标为inf，应该隐藏不显示
+        """
+        metrics = self.validation_metrics
+
+        def is_valid_number(val: Optional[float]) -> bool:
+            """检查数值是否有效（非None、非inf、非NaN）"""
+            if val is None:
+                return False
+            return not (math.isinf(val) or math.isnan(val))
+
+        # 只要RMSE或MAE有一个有效，就认为验证期指标有效
+        return is_valid_number(metrics.rmse) or is_valid_number(metrics.mae)
 
     @property
     def complete_aligned_table(self) -> Optional[pd.DataFrame]:
@@ -169,7 +185,7 @@ class DFMMetadataAccessor:
 
     def get(self, key: str, default: Any = None) -> Any:
         """
-        通用获取方法（向后兼容）
+        通用元数据获取方法
 
         Args:
             key: 元数据键
@@ -202,7 +218,7 @@ class DFMMetadataAccessor:
 
         try:
             return str(date_val)
-        except:
+        except Exception:
             return 'N/A'
 
     @staticmethod

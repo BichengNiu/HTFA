@@ -20,22 +20,22 @@ class EvaluationMetrics:
 
     术语说明：
     - is (in-sample): 训练期指标
-    - oos (out-of-sample): 观察期指标（训练期之后的数据）
-    - obs (observation): 扩展观察期指标（观察期之后的额外数据）
+    - oos (out-of-sample): 验证期指标（仅经典DFM，用于变量选择）
+    - obs (observation): 观察期指标（最优模型的样本外预测，两种DFM都有）
     """
     is_rmse: float = np.inf       # 训练期RMSE
-    oos_rmse: float = np.inf      # 观察期RMSE
+    oos_rmse: float = np.inf      # 验证期RMSE（仅经典DFM）
     is_mae: float = np.inf        # 训练期MAE
-    oos_mae: float = np.inf       # 观察期MAE
+    oos_mae: float = np.inf       # 验证期MAE（仅经典DFM）
 
     # Win Rate（2025-12-19新增）
     is_win_rate: float = np.nan   # 训练期胜率（0-100）
-    oos_win_rate: float = np.nan  # 观察期胜率（0-100）
+    oos_win_rate: float = np.nan  # 验证期胜率（仅经典DFM）
 
-    # 扩展观察期指标
-    obs_rmse: float = np.inf      # 扩展观察期RMSE
-    obs_mae: float = np.inf       # 扩展观察期MAE
-    obs_win_rate: float = np.nan  # 扩展观察期胜率（0-100）
+    # 观察期指标（两种DFM都有）
+    obs_rmse: float = np.inf      # 观察期RMSE
+    obs_mae: float = np.inf       # 观察期MAE
+    obs_win_rate: float = np.nan  # 观察期胜率（0-100）
 
     def to_tuple(self) -> Tuple[float, float, float, float, float, float, bool, float, float]:
         """转换为9元组用于evaluator兼容性
