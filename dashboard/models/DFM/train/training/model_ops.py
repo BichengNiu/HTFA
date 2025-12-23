@@ -329,9 +329,16 @@ def evaluate_model_performance(
     metrics = EvaluationMetrics()
 
     try:
-        # 1. 分割训练期数据
-        train_data = target_data.loc[:train_end]
-        val_data = target_data.loc[validation_start:validation_end]
+        # 1. 分割训练期数据（使用布尔索引，兼容升序和降序索引）
+        train_end_dt = pd.to_datetime(train_end)
+        val_start_dt = pd.to_datetime(validation_start)
+        val_end_dt = pd.to_datetime(validation_end)
+
+        train_data = target_data[target_data.index <= train_end_dt]
+        val_data = target_data[
+            (target_data.index >= val_start_dt) &
+            (target_data.index <= val_end_dt)
+        ]
 
         # 2. 训练期评估（两种模型相同）
         if model_result.forecast_is is not None and len(train_data) > 0:
@@ -369,12 +376,14 @@ def evaluate_model_performance(
 
             # 4. 观察期评估（验证期之后）
             if observation_end is not None and model_result.forecast_obs is not None:
-                val_end_date = pd.to_datetime(validation_end)
                 obs_end_date = pd.to_datetime(observation_end)
 
-                if obs_end_date > val_end_date:
-                    obs_start_date = val_end_date + pd.DateOffset(weeks=1)
-                    obs_data = target_data.loc[obs_start_date:obs_end_date]
+                if obs_end_date > val_end_dt:
+                    obs_start_date = val_end_dt + pd.DateOffset(weeks=1)
+                    obs_data = target_data[
+                        (target_data.index >= obs_start_date) &
+                        (target_data.index <= obs_end_date)
+                    ]
 
                     if len(obs_data) > 0:
                         _evaluate_performance(

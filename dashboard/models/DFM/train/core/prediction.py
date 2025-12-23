@@ -56,7 +56,11 @@ def generate_target_forecast(
         # 步骤1: 计算目标变量的训练期统计量（用于标准化和反标准化）
         training_start_date = pd.to_datetime(training_start)
         train_end_date = pd.to_datetime(train_end)
-        target_train = target_data.loc[training_start_date:train_end_date]
+        # 使用布尔索引（与索引顺序无关，兼容升序和降序索引）
+        target_train = target_data[
+            (target_data.index >= training_start_date) &
+            (target_data.index <= train_end_date)
+        ]
 
         target_mean = target_train.mean()
         target_std = target_train.std()
@@ -123,7 +127,10 @@ def generate_target_forecast(
         logger.debug("预测值已反标准化到原始尺度")
 
         # 步骤8: 分割训练期预测
-        train_data_filtered = target_data.loc[training_start_date:train_end_date]
+        train_data_filtered = target_data[
+            (target_data.index >= training_start_date) &
+            (target_data.index <= train_end_date)
+        ]
         train_end_idx = len(train_data_filtered) - 1
 
         # 训练期预测
@@ -133,7 +140,10 @@ def generate_target_forecast(
         val_start_date = pd.to_datetime(validation_start)
         val_end_date = pd.to_datetime(validation_end)
 
-        val_data_filtered = target_data[val_start_date:val_end_date]
+        val_data_filtered = target_data[
+            (target_data.index >= val_start_date) &
+            (target_data.index <= val_end_date)
+        ]
         if len(val_data_filtered) > 0:
             val_start_idx = target_data.index.get_loc(val_data_filtered.index[0])
             val_end_idx = target_data.index.get_loc(val_data_filtered.index[-1])
@@ -161,7 +171,10 @@ def generate_target_forecast(
 
                 if obs_end_date > val_end_date:
                     obs_start_date = val_end_date + pd.DateOffset(weeks=1)
-                    obs_data_filtered = target_data[obs_start_date:obs_end_date]
+                    obs_data_filtered = target_data[
+                        (target_data.index >= obs_start_date) &
+                        (target_data.index <= obs_end_date)
+                    ]
 
                     if len(obs_data_filtered) > 0:
                         obs_start_idx = target_data.index.get_loc(obs_data_filtered.index[0])

@@ -328,6 +328,7 @@ class DFMTrainer:
                 validation_start=self.config.validation_start,
                 validation_end=self.config.validation_end,
                 observation_end=observation_end,
+                alignment_mode=self.config.target_alignment_mode,
                 is_ddfm=is_ddfm
             )
 
