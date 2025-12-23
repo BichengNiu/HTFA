@@ -166,7 +166,7 @@ def _evaluate_variable_selection_model(
             calculate_aligned_win_rate
         )
 
-        # 样本内评估（训练期）
+        # 训练期评估
         is_rmse = np.inf
         is_win_rate = np.nan
         if model_result.forecast_is is not None and len(model_result.forecast_is) > 0:
@@ -179,7 +179,7 @@ def _evaluate_variable_selection_model(
             is_rmse = calculate_aligned_rmse(train_nowcast, target_data, alignment_mode)
             is_win_rate = calculate_aligned_win_rate(train_nowcast, target_data, alignment_mode)
 
-        # 样本外评估（验证期）
+        # 观察期评估
         oos_rmse = np.inf
         oos_win_rate = np.nan
         if model_result.forecast_oos is not None and len(model_result.forecast_oos) > 0:

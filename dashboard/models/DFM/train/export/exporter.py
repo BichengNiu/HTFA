@@ -1171,8 +1171,8 @@ class TrainingResultExporter:
         """
         构建Sheet 2: 分行业评估指标汇总表
 
-        列: 行业名称 | 样本内RMSE | 样本外RMSE | 样本内MAE | 样本外MAE |
-            样本内命中率 | 样本外命中率 | 因子数 | 变量数
+        列: 行业名称 | 训练期RMSE | 验证期RMSE | 训练期MAE | 验证期MAE |
+            训练期命中率 | 验证期命中率 | 因子数 | 变量数
 
         Args:
             first_stage_results: 第一阶段训练结果字典
@@ -1205,12 +1205,12 @@ class TrainingResultExporter:
 
                 metrics_list.append({
                     '行业名称': industry,
-                    '样本内RMSE': round(result.metrics.is_rmse, 4),
-                    '样本外RMSE': round(result.metrics.oos_rmse, 4),
-                    '样本内MAE': round(result.metrics.is_mae, 4),
-                    '样本外MAE': round(result.metrics.oos_mae, 4),
-                    '样本内胜率': is_wr_display,
-                    '样本外胜率': oos_wr_display,
+                    '训练期RMSE': round(result.metrics.is_rmse, 4),
+                    '验证期RMSE': round(result.metrics.oos_rmse, 4),
+                    '训练期MAE': round(result.metrics.is_mae, 4),
+                    '验证期MAE': round(result.metrics.oos_mae, 4),
+                    '训练期胜率': is_wr_display,
+                    '验证期胜率': oos_wr_display,
                     '因子数': k_factors,
                     '变量数': n_variables
                 })

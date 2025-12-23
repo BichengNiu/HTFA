@@ -256,19 +256,19 @@ def generate_training_summary(
                     oos_wr_list.append(ind_result.metrics.oos_win_rate)
 
             if is_rmse_list:
-                lines.append(f"    样本内RMSE (平均): {np.mean(is_rmse_list):.4f}")
-                lines.append(f"    样本外RMSE (平均): {np.mean(oos_rmse_list):.4f}")
-                lines.append(f"    样本内胜率 (平均): {np.nanmean(is_wr_list):.2f}%")
-                lines.append(f"    样本外胜率 (平均): {np.nanmean(oos_wr_list):.2f}%")
+                lines.append(f"    训练期RMSE (平均): {np.mean(is_rmse_list):.4f}")
+                lines.append(f"    验证期RMSE (平均): {np.mean(oos_rmse_list):.4f}")
+                lines.append(f"    训练期胜率 (平均): {np.nanmean(is_wr_list):.2f}%")
+                lines.append(f"    验证期胜率 (平均): {np.nanmean(oos_wr_list):.2f}%")
 
         lines.append("")
         lines.append("  第二阶段（总量）指标:")
         if result.second_stage_result and result.second_stage_result.metrics:
             metrics = result.second_stage_result.metrics
-            lines.append(f"    样本内RMSE: {metrics.is_rmse:.4f}")
-            lines.append(f"    样本外RMSE: {metrics.oos_rmse:.4f}")
-            lines.append(f"    样本内MAE: {metrics.is_mae:.4f}")
-            lines.append(f"    样本外MAE: {metrics.oos_mae:.4f}")
+            lines.append(f"    训练期RMSE: {metrics.is_rmse:.4f}")
+            lines.append(f"    验证期RMSE: {metrics.oos_rmse:.4f}")
+            lines.append(f"    训练期MAE: {metrics.is_mae:.4f}")
+            lines.append(f"    验证期MAE: {metrics.oos_mae:.4f}")
 
             # Win Rate处理（可能为nan）
             is_wr = metrics.is_win_rate
@@ -276,8 +276,8 @@ def generate_training_summary(
             is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
             oos_wr_str = f"{oos_wr:.2f}%" if not np.isnan(oos_wr) and not np.isinf(oos_wr) else "N/A"
 
-            lines.append(f"    样本内胜率: {is_wr_str}")
-            lines.append(f"    样本外胜率: {oos_wr_str}")
+            lines.append(f"    训练期胜率: {is_wr_str}")
+            lines.append(f"    验证期胜率: {oos_wr_str}")
 
             # 观察期指标（如果存在）
             if metrics.obs_rmse != np.inf:
@@ -287,30 +287,61 @@ def generate_training_summary(
                 lines.append(f"    观察期MAE: {metrics.obs_mae:.4f}")
                 lines.append(f"    观察期胜率: {obs_wr_str}")
     else:
-        # 一次估计法指标
+        # 一次估计法指标（区分DDFM和经典DFM）
+        is_ddfm = getattr(config, 'algorithm', 'classical') == 'deep_learning'
+        oos_label = "观察期" if is_ddfm else "验证期"
+
         if result.metrics:
             metrics = result.metrics
-            lines.append(f"  样本内RMSE: {metrics.is_rmse:.4f}")
-            lines.append(f"  样本外RMSE: {metrics.oos_rmse:.4f}")
-            lines.append(f"  样本内MAE: {metrics.is_mae:.4f}")
-            lines.append(f"  样本外MAE: {metrics.oos_mae:.4f}")
+            lines.append(f"  训练期RMSE: {metrics.is_rmse:.4f}")
 
-            # Win Rate处理
-            is_wr = metrics.is_win_rate
-            oos_wr = metrics.oos_win_rate
-            is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
-            oos_wr_str = f"{oos_wr:.2f}%" if not np.isnan(oos_wr) and not np.isinf(oos_wr) else "N/A"
+            # DDFM使用obs指标，经典DFM使用oos指标
+            if is_ddfm:
+                # DDFM：输出obs指标作为"观察期"
+                if metrics.obs_rmse != np.inf:
+                    lines.append(f"  {oos_label}RMSE: {metrics.obs_rmse:.4f}")
+                    lines.append(f"  训练期MAE: {metrics.is_mae:.4f}")
+                    lines.append(f"  {oos_label}MAE: {metrics.obs_mae:.4f}")
 
-            lines.append(f"  样本内胜率: {is_wr_str}")
-            lines.append(f"  样本外胜率: {oos_wr_str}")
+                    is_wr = metrics.is_win_rate
+                    obs_wr = metrics.obs_win_rate
+                    is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
+                    obs_wr_str = f"{obs_wr:.2f}%" if not np.isnan(obs_wr) and not np.isinf(obs_wr) else "N/A"
 
-            # 观察期指标
-            if metrics.obs_rmse != np.inf:
-                obs_wr = metrics.obs_win_rate
-                obs_wr_str = f"{obs_wr:.2f}%" if not np.isnan(obs_wr) and not np.isinf(obs_wr) else "N/A"
-                lines.append(f"  观察期RMSE: {metrics.obs_rmse:.4f}")
-                lines.append(f"  观察期MAE: {metrics.obs_mae:.4f}")
-                lines.append(f"  观察期胜率: {obs_wr_str}")
+                    lines.append(f"  训练期胜率: {is_wr_str}")
+                    lines.append(f"  {oos_label}胜率: {obs_wr_str}")
+                else:
+                    lines.append(f"  {oos_label}RMSE: N/A")
+                    lines.append(f"  训练期MAE: {metrics.is_mae:.4f}")
+                    lines.append(f"  {oos_label}MAE: N/A")
+
+                    is_wr = metrics.is_win_rate
+                    is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
+
+                    lines.append(f"  训练期胜率: {is_wr_str}")
+                    lines.append(f"  {oos_label}胜率: N/A")
+            else:
+                # 经典DFM：输出oos指标作为"验证期"
+                lines.append(f"  {oos_label}RMSE: {metrics.oos_rmse:.4f}")
+                lines.append(f"  训练期MAE: {metrics.is_mae:.4f}")
+                lines.append(f"  {oos_label}MAE: {metrics.oos_mae:.4f}")
+
+                # Win Rate处理
+                is_wr = metrics.is_win_rate
+                oos_wr = metrics.oos_win_rate
+                is_wr_str = f"{is_wr:.2f}%" if not np.isnan(is_wr) and not np.isinf(is_wr) else "N/A"
+                oos_wr_str = f"{oos_wr:.2f}%" if not np.isnan(oos_wr) and not np.isinf(oos_wr) else "N/A"
+
+                lines.append(f"  训练期胜率: {is_wr_str}")
+                lines.append(f"  {oos_label}胜率: {oos_wr_str}")
+
+                # 观察期指标（经典DFM才有）
+                if metrics.obs_rmse != np.inf:
+                    obs_wr = metrics.obs_win_rate
+                    obs_wr_str = f"{obs_wr:.2f}%" if not np.isnan(obs_wr) and not np.isinf(obs_wr) else "N/A"
+                    lines.append(f"  观察期RMSE: {metrics.obs_rmse:.4f}")
+                    lines.append(f"  观察期MAE: {metrics.obs_mae:.4f}")
+                    lines.append(f"  观察期胜率: {obs_wr_str}")
 
     lines.append("")
 

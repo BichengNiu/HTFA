@@ -1361,8 +1361,10 @@ def render_dfm_model_training_page(st_instance):
                         'metrics': {
                             'is_rmse': final_result.metrics.is_rmse if final_result.metrics else None,
                             'oos_rmse': final_result.metrics.oos_rmse if final_result.metrics else None,
+                            'obs_rmse': final_result.metrics.obs_rmse if final_result.metrics else None,
                             'is_win_rate': final_result.metrics.is_win_rate if final_result.metrics else None,
-                            'oos_win_rate': final_result.metrics.oos_win_rate if final_result.metrics else None
+                            'oos_win_rate': final_result.metrics.oos_win_rate if final_result.metrics else None,
+                            'obs_win_rate': final_result.metrics.obs_win_rate if final_result.metrics else None
                         },
                         'training_time': result.total_training_time,
                         'first_stage_count': len(result.first_stage_results),
@@ -1378,13 +1380,16 @@ def render_dfm_model_training_page(st_instance):
                     # 一次估计法结果
                     result_summary = {
                         'estimation_method': 'single_stage',
+                        'algorithm': algorithm_value,  # 保存算法类型
                         'selected_variables': result.selected_variables,
                         'k_factors': result.k_factors,
                         'metrics': {
                             'is_rmse': result.metrics.is_rmse if result.metrics else None,
                             'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
+                            'obs_rmse': result.metrics.obs_rmse if result.metrics else None,
                             'is_win_rate': result.metrics.is_win_rate if result.metrics else None,
-                            'oos_win_rate': result.metrics.oos_win_rate if result.metrics else None
+                            'oos_win_rate': result.metrics.oos_win_rate if result.metrics else None,
+                            'obs_win_rate': result.metrics.obs_win_rate if result.metrics else None
                         },
                         'training_time': result.training_time
                     }
@@ -1412,20 +1417,31 @@ def render_dfm_model_training_page(st_instance):
                 training_log.append(f"[RESULT] 因子数: {k_factors_display}")
 
                 if metrics_obj:
-                    # 检查RMSE是否有效
-                    rmse_value = metrics_obj.oos_rmse
-                    if rmse_value is not None and not (np.isnan(rmse_value) or np.isinf(rmse_value)):
-                        training_log.append(f"[METRICS] 样本外RMSE: {rmse_value:.4f}")
+                    # 根据算法类型选择正确的指标字段和术语
+                    # DDFM: 使用obs指标，标签为"观察期"
+                    # 经典DFM: 使用oos指标，标签为"验证期"
+                    is_ddfm = (algorithm_value == 'deep_learning')
+                    if is_ddfm:
+                        rmse_value = metrics_obj.obs_rmse
+                        win_rate_value = metrics_obj.obs_win_rate
+                        period_label = "观察期"
                     else:
-                        training_log.append(f"[METRICS] 样本外RMSE: N/A")
+                        rmse_value = metrics_obj.oos_rmse
+                        win_rate_value = metrics_obj.oos_win_rate
+                        period_label = "验证期"
+
+                    # 检查RMSE是否有效
+                    if rmse_value is not None and not (np.isnan(rmse_value) or np.isinf(rmse_value)):
+                        training_log.append(f"[METRICS] {period_label}RMSE: {rmse_value:.4f}")
+                    else:
+                        training_log.append(f"[METRICS] {period_label}RMSE: N/A")
 
                     # 检查Win Rate是否有效
-                    win_rate_value = metrics_obj.oos_win_rate
                     if win_rate_value is not None and not (np.isnan(win_rate_value) or np.isinf(win_rate_value)):
                         win_rate_str = f"{win_rate_value:.2f}%"
                     else:
                         win_rate_str = "N/A (数据不足)"
-                    training_log.append(f"[METRICS] 样本外Win Rate: {win_rate_str}")
+                    training_log.append(f"[METRICS] {period_label}Win Rate: {win_rate_str}")
 
                 _state.set('dfm_training_log', training_log)
 

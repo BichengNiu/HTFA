@@ -55,12 +55,12 @@ def calculate_combined_score_with_winrate(
     计算组合得分（RMSE为主，Win Rate为辅）
 
     Args:
-        oos_rmse: 样本外RMSE（主指标）
-        oos_win_rate: 样本外胜率（0-100，辅助指标）
+        oos_rmse: 观察期RMSE（主指标）
+        oos_win_rate: 观察期胜率（0-100，辅助指标）
 
     Returns:
         Tuple[float, float, float]: (win_rate, -rmse, rmse)
-            - 第1元素：样本外胜率（用于显示和比较）
+            - 第1元素：观察期胜率（用于显示和比较）
             - 第2元素：负RMSE（主排序键）
             - 第3元素：原始RMSE（用于容忍度计算）
     """

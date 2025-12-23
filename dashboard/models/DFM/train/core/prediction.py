@@ -23,28 +23,31 @@ def generate_target_forecast(
     validation_start: str,
     validation_end: str,
     observation_end: Optional[str] = None,
+    is_ddfm: bool = False,
     progress_callback: Optional[callable] = None
 ) -> DFMModelResult:
     """
-    生成目标变量的预测值（完全匹配老代码逻辑）
+    生成目标变量的预测值
 
-    老代码DFM方法：
-    1. 因子是中心化的（mean≈0, std≠1）
-    2. 目标变量使用原始尺度进行无截距回归
-    3. 回归结果均值≈0，需要重新添加目标的均值和尺度
-    4. "反标准化"实际是缩放和平移：y_final = y_raw * std + mean
+    术语说明：
+    - 经典DFM: is=训练期, oos=验证期, obs=观察期
+    - DDFM: is=训练期, obs=观察期（无验证期，validation参数映射到obs）
 
     Args:
         model_result: DFM模型结果
         target_data: 目标变量数据（原始尺度）
-        training_start: 训练开始日期（必填）
-        train_end: 训练结束日期（必填）
-        validation_start: 验证开始日期（必填）
-        validation_end: 验证结束日期（必填）
+        training_start: 训练开始日期
+        train_end: 训练结束日期
+        validation_start: 经典DFM验证期开始 / DDFM观察期开始
+        validation_end: 经典DFM验证期结束 / DDFM观察期结束
+        observation_end: 经典DFM观察期结束（DDFM不使用）
+        is_ddfm: 是否为DDFM模式
         progress_callback: 进度回调函数
 
     Returns:
-        更新了forecast_is和forecast_oos的DFMModelResult
+        更新了预测字段的DFMModelResult
+        - 经典DFM: forecast_is, forecast_oos, forecast_obs
+        - DDFM: forecast_is, forecast_obs (forecast_oos=None)
     """
     try:
         # 提取因子（时间 x 因子数）- 因子是中心化的（mean≈0）
@@ -119,14 +122,14 @@ def generate_target_forecast(
 
         logger.debug("预测值已反标准化到原始尺度")
 
-        # 步骤8: 分割样本内和样本外
+        # 步骤8: 分割训练期预测
         train_data_filtered = target_data.loc[training_start_date:train_end_date]
         train_end_idx = len(train_data_filtered) - 1
 
-        # 样本内预测
+        # 训练期预测
         forecast_is = forecast_full[:train_end_idx + 1]
 
-        # 样本外预测
+        # 步骤9: 验证期/观察期预测（根据模型类型不同处理）
         val_start_date = pd.to_datetime(validation_start)
         val_end_date = pd.to_datetime(validation_end)
 
@@ -136,45 +139,53 @@ def generate_target_forecast(
             val_end_idx = target_data.index.get_loc(val_data_filtered.index[-1])
 
             if val_start_idx < len(forecast_full) and val_end_idx < len(forecast_full):
-                forecast_oos = forecast_full[val_start_idx:val_end_idx + 1]
+                val_forecast = forecast_full[val_start_idx:val_end_idx + 1]
             else:
-                forecast_oos = None
+                val_forecast = None
         else:
-            forecast_oos = None
+            val_forecast = None
 
-        # 步骤9: 观察期预测
-        if observation_end is not None:
-            obs_end_date = pd.to_datetime(observation_end)
-            val_end_date = pd.to_datetime(validation_end)
+        if is_ddfm:
+            # DDFM模式：validation参数实际是观察期，存储到forecast_obs
+            model_result.forecast_oos = None  # DDFM没有验证期
+            model_result.forecast_obs = val_forecast
+            if val_forecast is not None:
+                logger.debug(f"[DDFM] 观察期预测已生成: {len(val_forecast)} 个数据点")
+        else:
+            # 经典DFM模式：validation是验证期，存储到forecast_oos
+            model_result.forecast_oos = val_forecast if val_forecast is not None and len(val_forecast) > 0 else None
 
-            if obs_end_date > val_end_date:
-                obs_start_date = val_end_date + pd.DateOffset(weeks=1)
-                obs_data_filtered = target_data[obs_start_date:obs_end_date]
+            # 步骤10: 经典DFM的观察期预测（验证期之后）
+            if observation_end is not None:
+                obs_end_date = pd.to_datetime(observation_end)
 
-                if len(obs_data_filtered) > 0:
-                    obs_start_idx = target_data.index.get_loc(obs_data_filtered.index[0])
-                    obs_end_idx = target_data.index.get_loc(obs_data_filtered.index[-1])
+                if obs_end_date > val_end_date:
+                    obs_start_date = val_end_date + pd.DateOffset(weeks=1)
+                    obs_data_filtered = target_data[obs_start_date:obs_end_date]
 
-                    if obs_start_idx < len(forecast_full) and obs_end_idx < len(forecast_full):
-                        forecast_obs = forecast_full[obs_start_idx:obs_end_idx + 1]
-                        model_result.forecast_obs = forecast_obs
-                        logger.debug(f"观察期预测已生成: {len(forecast_obs)} 个数据点")
+                    if len(obs_data_filtered) > 0:
+                        obs_start_idx = target_data.index.get_loc(obs_data_filtered.index[0])
+                        obs_end_idx = target_data.index.get_loc(obs_data_filtered.index[-1])
+
+                        if obs_start_idx < len(forecast_full) and obs_end_idx < len(forecast_full):
+                            forecast_obs = forecast_full[obs_start_idx:obs_end_idx + 1]
+                            model_result.forecast_obs = forecast_obs
+                            logger.debug(f"观察期预测已生成: {len(forecast_obs)} 个数据点")
+                        else:
+                            logger.warning("观察期索引超出预测范围")
+                            model_result.forecast_obs = None
                     else:
-                        logger.warning("观察期索引超出预测范围")
+                        logger.warning("观察期没有有效数据点")
                         model_result.forecast_obs = None
                 else:
-                    logger.warning("观察期没有有效数据点")
+                    logger.info("observation_end <= validation_end，跳过观察期")
                     model_result.forecast_obs = None
             else:
-                logger.info("observation_end <= validation_end，跳过观察期")
+                logger.debug("未提供observation_end，跳过观察期预测")
                 model_result.forecast_obs = None
-        else:
-            logger.debug("未提供observation_end，跳过观察期预测")
-            model_result.forecast_obs = None
 
-        # 更新model_result
+        # 更新model_result（训练期预测在上面已处理，这里只更新is）
         model_result.forecast_is = forecast_is
-        model_result.forecast_oos = forecast_oos if forecast_oos is not None and len(forecast_oos) > 0 else None
 
     except Exception as e:
         logger.error(f"生成目标变量预测时出错: {e}")

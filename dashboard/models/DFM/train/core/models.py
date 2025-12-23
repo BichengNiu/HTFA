@@ -16,20 +16,26 @@ from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT
 
 @dataclass
 class EvaluationMetrics:
-    """评估指标"""
-    is_rmse: float = np.inf
-    oos_rmse: float = np.inf
-    is_mae: float = np.inf
-    oos_mae: float = np.inf
+    """评估指标
+
+    术语说明：
+    - is (in-sample): 训练期指标
+    - oos (out-of-sample): 观察期指标（训练期之后的数据）
+    - obs (observation): 扩展观察期指标（观察期之后的额外数据）
+    """
+    is_rmse: float = np.inf       # 训练期RMSE
+    oos_rmse: float = np.inf      # 观察期RMSE
+    is_mae: float = np.inf        # 训练期MAE
+    oos_mae: float = np.inf       # 观察期MAE
 
     # Win Rate（2025-12-19新增）
-    is_win_rate: float = np.nan   # 样本内胜率（0-100）
-    oos_win_rate: float = np.nan  # 样本外胜率（0-100）
+    is_win_rate: float = np.nan   # 训练期胜率（0-100）
+    oos_win_rate: float = np.nan  # 观察期胜率（0-100）
 
-    # 观察期指标
-    obs_rmse: float = np.inf
-    obs_mae: float = np.inf
-    obs_win_rate: float = np.nan  # 观察期胜率（0-100）
+    # 扩展观察期指标
+    obs_rmse: float = np.inf      # 扩展观察期RMSE
+    obs_mae: float = np.inf       # 扩展观察期MAE
+    obs_win_rate: float = np.nan  # 扩展观察期胜率（0-100）
 
     def to_tuple(self) -> Tuple[float, float, float, float, float, float, bool, float, float]:
         """转换为9元组用于evaluator兼容性
@@ -89,9 +95,9 @@ class DFMModelResult:
     kalman_gains_history: Optional[List[np.ndarray]] = None  # 卡尔曼增益历史（用于新闻分解）
 
     # 预测结果
-    forecast_is: np.ndarray = None  # 样本内预测
-    forecast_oos: np.ndarray = None  # 样本外预测
-    forecast_obs: np.ndarray = None  # 观察期预测
+    forecast_is: np.ndarray = None  # 训练期预测
+    forecast_oos: np.ndarray = None  # 观察期预测
+    forecast_obs: np.ndarray = None  # 扩展观察期预测
 
     # 训练信息
     converged: bool = False
@@ -306,10 +312,10 @@ class TwoStageTrainingResult:
                 '行业': industry,
                 '因子数': self.industry_k_factors_used.get(industry, 0),
                 '变量数': len(result.selected_variables),
-                '样本内RMSE': result.metrics.is_rmse if result.metrics else np.nan,
-                '样本外RMSE': result.metrics.oos_rmse if result.metrics else np.nan,
-                '样本内胜率': is_wr,
-                '样本外胜率': oos_wr,
+                '训练期RMSE': result.metrics.is_rmse if result.metrics else np.nan,
+                '观察期RMSE': result.metrics.oos_rmse if result.metrics else np.nan,
+                '训练期胜率': is_wr,
+                '观察期胜率': oos_wr,
                 '训练时间(秒)': result.training_time
             })
 

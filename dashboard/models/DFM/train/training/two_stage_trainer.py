@@ -668,7 +668,7 @@ class TwoStageTrainer:
                 logger.warning(f"行业 {industry} 没有模型结果，跳过")
                 continue
 
-            # 提取完整预测序列（样本内 + 样本外）
+            # 提取完整预测序列（训练期 + 观察期）
             forecast_is = result.model_result.forecast_is
             forecast_oos = result.model_result.forecast_oos
 

@@ -31,6 +31,9 @@ class DDFMModel:
     训练采用MCMC迭代方法。
     """
 
+    # 类常量：批量推理的内存保护阈值
+    MAX_BATCH_SIZE = 5000
+
     def __init__(
         self,
         encoder_structure: Tuple[int, ...] = (16, 4),
@@ -87,12 +90,14 @@ class DDFMModel:
             self.keras = keras
             self.tf = tf
 
-            # CPU多核优化
+            # CPU多核优化（优化：调整intra/inter线程配置）
             if optimize_cpu:
                 n_cpus = num_threads or os.cpu_count() or 4
+                # intra_op: 单个操作内的并行度
+                # inter_op: 不同操作之间的并行度（设置为intra的一半，避免过度竞争）
                 tf.config.threading.set_intra_op_parallelism_threads(n_cpus)
-                tf.config.threading.set_inter_op_parallelism_threads(n_cpus)
-                logger.info(f"TensorFlow CPU优化: 使用 {n_cpus} 个线程")
+                tf.config.threading.set_inter_op_parallelism_threads(max(2, n_cpus // 2))
+                logger.info(f"TensorFlow CPU优化: intra={n_cpus}, inter={max(2, n_cpus // 2)}")
 
         except ImportError:
             raise ImportError(
@@ -135,7 +140,6 @@ class DDFMModel:
         self.mean_z = None
         self.sigma_z = None
         self.factors = None
-        self.factors_filtered = None
         self.eps = None
         self.loss_now = None
         self.state_space_dict = {}
@@ -229,7 +233,7 @@ class DDFMModel:
 
         # 使用项目的KalmanFilter进行滤波
         self._report_progress("执行卡尔曼滤波...", 0.95)
-        self._run_kalman_filter(data, training_start, train_end)
+        self._run_kalman_filter(data)
 
         self._report_progress("DDFM训练完成", 1.0)
         return self.results_
@@ -358,6 +362,9 @@ class DDFMModel:
         self.autoencoder.compile(optimizer=self.optimizer, loss=mse_missing)
         self._build_inputs(self.data_mod)
 
+        # 缓存初始状态（优化：用于条件性预处理）
+        has_lags = self.lags_input > 0
+
         prediction_iter = self.autoencoder.predict(self.data_tmp.values, verbose=0)
         self.data_mod_only_miss.values[self.lags_input:][self.bool_miss] = prediction_iter[self.bool_miss]
 
@@ -378,7 +385,12 @@ class DDFMModel:
             )
             self.data_mod.values[:self.lags_input + 1] = self.data_mod_only_miss.values[:self.lags_input + 1]
 
-            self._build_inputs(self.data_mod)
+            # 条件性预处理优化：仅在有滞后变量时才需要完整重建
+            if has_lags:
+                self._build_inputs(self.data_mod)  # 保留原逻辑，确保正确性
+            else:
+                # 无滞后：直接更新data_tmp的值，避免完整_build_inputs重建
+                self.data_tmp.values[:] = self.data_mod.values[self.lags_input:]
 
             # 验证协方差矩阵正定性
             if not np.all(std_eps > 0):
@@ -388,38 +400,65 @@ class DDFMModel:
                     f"问题变量索引: {invalid_indices.tolist()}"
                 )
 
-            # 生成MC样本
+            # 生成MC样本（协方差矩阵 = 方差的对角阵 = 标准差²的对角阵）
             eps_draws = self.rng.multivariate_normal(
-                mu_eps, np.diag(std_eps),
+                mu_eps, np.diag(std_eps**2),
                 (self.epochs, self.data_tmp.shape[0])
             )
 
-            x_sim_den = np.zeros((
-                eps_draws.shape[0], eps_draws.shape[1],
-                eps_draws.shape[2] * (self.lags_input + 1)
-            ))
+            # 向量化构建MC样本（优化：替代原for循环的数据准备部分）
+            n_vars = eps_draws.shape[2]  # 原始变量数
+            x_sim_den = np.broadcast_to(
+                self.data_tmp.values[np.newaxis, :, :],
+                (self.epochs, self.data_tmp.shape[0], self.data_tmp.shape[1])
+            ).copy()  # 使用copy()创建可写副本，因为broadcast_to返回只读视图
+            x_sim_den[:, :, :n_vars] -= eps_draws  # 广播减法
 
+            # 训练循环保持串行（保留SGMCMC动态）
             for i in range(self.epochs):
-                x_sim_den[i, :, :] = self.data_tmp.values.copy()
-                x_sim_den[i, :, :eps_draws[i, :, :].shape[1]] = (
-                    x_sim_den[i, :, :eps_draws[i, :, :].shape[1]] - eps_draws[i, :, :]
-                )
                 self.autoencoder.fit(
                     x_sim_den[i, :, :], self.z_actual,
                     epochs=1, batch_size=self.batch_size, verbose=0
                 )
 
-            # 更新因子（确保转换为numpy数组）
-            self.factors = np.array([
-                self.encoder(x_sim_den[i, :, :]).numpy()
-                for i in range(x_sim_den.shape[0])
-            ])
+            # 批量推理更新因子（优化：替代原列表推导）
+            batch_shape = x_sim_den.shape  # (epochs, T, input_dim)
+            batch_size_total = batch_shape[0] * batch_shape[1]
 
-            # 检查收敛（确保转换为numpy数组）
-            prediction_iter = np.mean(np.array([
-                self.decoder(self.factors[i, :, :]).numpy()
-                for i in range(self.factors.shape[0])
-            ]), axis=0)
+            if batch_size_total <= self.MAX_BATCH_SIZE:
+                # 小批量：直接处理
+                x_batch = np.ascontiguousarray(x_sim_den.reshape(-1, batch_shape[-1]))
+                factors_batch = self.encoder(x_batch, training=False).numpy()
+                self.factors = factors_batch.reshape(batch_shape[0], batch_shape[1], -1)
+            else:
+                # 大批量：分块处理避免OOM
+                factors_list = []
+                chunk_size = max(1, self.MAX_BATCH_SIZE // batch_shape[1])
+                for chunk_start in range(0, batch_shape[0], chunk_size):
+                    chunk_end = min(chunk_start + chunk_size, batch_shape[0])
+                    chunk = x_sim_den[chunk_start:chunk_end]
+                    chunk_flat = np.ascontiguousarray(chunk.reshape(-1, batch_shape[-1]))
+                    factors_chunk = self.encoder(chunk_flat, training=False).numpy()
+                    factors_list.append(factors_chunk.reshape(chunk_end - chunk_start, batch_shape[1], -1))
+                self.factors = np.concatenate(factors_list, axis=0)
+
+            # 批量推理检查收敛（优化：替代原列表推导）
+            factors_shape = self.factors.shape  # (epochs, T, n_factors)
+            if factors_shape[0] * factors_shape[1] <= self.MAX_BATCH_SIZE:
+                factors_batch = np.ascontiguousarray(self.factors.reshape(-1, factors_shape[-1]))
+                predictions_batch = self.decoder(factors_batch, training=False).numpy()
+                predictions_all = predictions_batch.reshape(factors_shape[0], factors_shape[1], -1)
+            else:
+                predictions_list = []
+                chunk_size = max(1, self.MAX_BATCH_SIZE // factors_shape[1])
+                for chunk_start in range(0, factors_shape[0], chunk_size):
+                    chunk_end = min(chunk_start + chunk_size, factors_shape[0])
+                    chunk = self.factors[chunk_start:chunk_end]
+                    chunk_flat = np.ascontiguousarray(chunk.reshape(-1, factors_shape[-1]))
+                    pred_chunk = self.decoder(chunk_flat, training=False).numpy()
+                    predictions_list.append(pred_chunk.reshape(chunk_end - chunk_start, factors_shape[1], -1))
+                predictions_all = np.concatenate(predictions_list, axis=0)
+            prediction_iter = np.mean(predictions_all, axis=0)
 
             if iter_count > 1 and prediction_prev_iter is not None:
                 delta, self.loss_now = convergence_checker(
@@ -448,7 +487,7 @@ class DDFMModel:
         if not_converged:
             self._report_progress(f"未在{self.max_iter}次迭代内收敛，继续处理...", 0.90)
 
-        # 获取最后一层神经元（确保转换为numpy数组）
+        # 获取最后一层神经元（优化：两阶段批量推理）
         if self.decoder_structure is None:
             self.last_neurons = self.factors
         else:
@@ -456,10 +495,28 @@ class DDFMModel:
                 self.decoder.input,
                 self.decoder.get_layer(self.decoder.layers[-2].name).output
             )
-            self.last_neurons = np.array([
-                decoder_for_last(self.encoder(x_sim_den[i, :, :]).numpy()).numpy()
-                for i in range(x_sim_den.shape[0])
-            ])
+            # 批量推理替代原列表推导（带内存保护）
+            batch_shape = x_sim_den.shape
+            batch_size_total = batch_shape[0] * batch_shape[1]
+
+            if batch_size_total <= self.MAX_BATCH_SIZE:
+                # 小批量：直接处理
+                x_batch = np.ascontiguousarray(x_sim_den.reshape(-1, batch_shape[-1]))
+                encoded_batch = self.encoder(x_batch, training=False).numpy()
+                last_neurons_batch = decoder_for_last(encoded_batch, training=False).numpy()
+                self.last_neurons = last_neurons_batch.reshape(batch_shape[0], batch_shape[1], -1)
+            else:
+                # 大批量：分块处理避免OOM
+                last_neurons_list = []
+                chunk_size = max(1, self.MAX_BATCH_SIZE // batch_shape[1])
+                for chunk_start in range(0, batch_shape[0], chunk_size):
+                    chunk_end = min(chunk_start + chunk_size, batch_shape[0])
+                    chunk = x_sim_den[chunk_start:chunk_end]
+                    chunk_flat = np.ascontiguousarray(chunk.reshape(-1, batch_shape[-1]))
+                    encoded_chunk = self.encoder(chunk_flat, training=False).numpy()
+                    neurons_chunk = decoder_for_last(encoded_chunk, training=False).numpy()
+                    last_neurons_list.append(neurons_chunk.reshape(chunk_end - chunk_start, batch_shape[1], -1))
+                self.last_neurons = np.concatenate(last_neurons_list, axis=0)
 
     def _build_state_space(self) -> None:
         """从自编码器构建状态空间模型"""
@@ -496,12 +553,7 @@ class DDFMModel:
             "R": R
         }
 
-    def _run_kalman_filter(
-        self,
-        full_data: pd.DataFrame,
-        training_start: str,
-        train_end: str
-    ) -> None:
+    def _run_kalman_filter(self, full_data: pd.DataFrame) -> None:
         """使用项目的KalmanFilter进行滤波"""
         from dashboard.models.DFM.train.core.kalman import KalmanFilter
 
@@ -516,14 +568,12 @@ class DDFMModel:
         # 标准化全量数据
         full_normalized = (full_data - self.mean_z) / self.sigma_z
 
-        # 处理缺失值
+        # 保留NaN，让KalmanFilter通过有效观测索引自动处理
+        # KalmanFilter.filter()在kalman.py:115使用ix = np.where(~np.isnan(Z[t, :]))[0]识别有效观测
         Z = full_normalized.values.copy()
         nan_count = np.isnan(Z).sum()
         if nan_count > 0:
-            raise ValueError(
-                f"预测期数据包含{nan_count}个缺失值，DDFM无法处理预测期缺失数据。"
-                "请确保预测变量在预测期内有完整观测值。"
-            )
+            logger.info(f"数据包含{nan_count}个缺失值，将通过卡尔曼滤波自动处理")
 
         # 创建控制矩阵B（零矩阵）
         n_states = A.shape[0]

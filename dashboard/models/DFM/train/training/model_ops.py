@@ -44,16 +44,16 @@ def train_dfm_with_forecast(
     完成以下流程：
     1. 创建并配置DFM模型
     2. 在训练集上拟合模型 (EM算法)
-    3. 生成目标变量的样本内和样本外预测
+    3. 生成目标变量的训练期和观察期预测
 
     Args:
         predictor_data: 预测变量数据 (DataFrame, columns=变量名, index=日期)
         target_data: 目标变量数据 (Series, index=日期)
         k_factors: 因子个数
-        training_start: 训练集开始日期（必填）
-        train_end: 训练集结束日期（必填）
-        validation_start: 验证集开始日期（必填）
-        validation_end: 验证集结束日期（必填）
+        training_start: 训练期开始日期（必填）
+        train_end: 训练期结束日期（必填）
+        validation_start: 观察期开始日期（必填）
+        validation_end: 观察期结束日期（必填）
         max_iter: EM算法最大迭代次数
         max_lags: 因子自回归最大滞后阶数
         tolerance: EM算法收敛容差
@@ -163,9 +163,9 @@ def train_ddfm_with_forecast(
         encoder_structure: 编码器层结构，最后一个数为因子数
         training_start: 训练集开始日期
         train_end: 训练集结束日期
-        validation_start: 验证集开始日期
-        validation_end: 验证集结束日期
-        observation_end: 观察期结束日期（可选）
+        validation_start: 观察期开始日期
+        validation_end: 观察期结束日期
+        observation_end: 扩展观察期结束日期（可选）
         decoder_structure: 解码器层结构(None=对称单层线性)
         use_bias: 解码器最后一层是否使用偏置
         factor_order: 因子AR阶数(1或2)
@@ -276,7 +276,8 @@ def train_ddfm_with_forecast(
             train_end=train_end,
             validation_start=validation_start,
             validation_end=validation_end,
-            observation_end=observation_end,
+            observation_end=None,  # DDFM不使用观察期后的扩展数据
+            is_ddfm=True,  # DDFM模式：validation映射到obs
             progress_callback=progress_callback
         )
 
@@ -296,45 +297,42 @@ def evaluate_model_performance(
     validation_start: str,
     validation_end: str,
     observation_end: Optional[str] = None,
-    alignment_mode: str = 'next_month'
+    alignment_mode: str = 'next_month',
+    is_ddfm: bool = False
 ) -> EvaluationMetrics:
     """
     统一的模型性能评估函数
 
-    计算样本内(IS)和样本外(OOS)的评估指标：
+    术语说明：
+    - 经典DFM: is=训练期, oos=验证期, obs=观察期
+    - DDFM: is=训练期, obs=观察期（无验证期）
+
+    计算评估指标：
     - RMSE (均方根误差)
-    - Hit Rate (方向命中率)
-    - Correlation (相关系数)
+    - MAE (平均绝对误差)
+    - Win Rate (方向命中率)
 
     Args:
         model_result: DFM模型结果，包含预测值
         target_data: 目标变量的真实值 (Series with DatetimeIndex)
-        train_end: 训练集结束日期（必填）
-        validation_start: 验证集开始日期（必填）
-        validation_end: 验证集结束日期（必填）
+        train_end: 训练期结束日期
+        validation_start: 经典DFM验证期开始 / DDFM观察期开始
+        validation_end: 经典DFM验证期结束 / DDFM观察期结束
+        observation_end: 经典DFM观察期结束（DDFM不使用）
         alignment_mode: 目标配对模式 ('current_month' 或 'next_month')
+        is_ddfm: 是否为DDFM模式
 
     Returns:
         EvaluationMetrics: 包含所有评估指标的对象
-
-    Examples:
-        >>> metrics = evaluate_model_performance(
-        ...     model_result=dfm_result,
-        ...     target_data=target_series,
-        ...     train_end='2023-12-31',
-        ...     validation_start='2024-01-01',
-        ...     validation_end='2024-06-30'
-        ... )
-        >>> print(f"OOS RMSE: {metrics.oos_rmse:.4f}")
     """
     metrics = EvaluationMetrics()
 
     try:
-        # 1. 分割样本内和样本外数据
+        # 1. 分割训练期数据
         train_data = target_data.loc[:train_end]
         val_data = target_data.loc[validation_start:validation_end]
 
-        # 2. 样本内评估
+        # 2. 训练期评估（两种模型相同）
         if model_result.forecast_is is not None and len(train_data) > 0:
             _evaluate_performance(
                 metrics=metrics,
@@ -344,34 +342,48 @@ def evaluate_model_performance(
                 alignment_mode=alignment_mode
             )
 
-        # 3. 样本外评估
-        if model_result.forecast_oos is not None and len(val_data) > 0:
-            _evaluate_performance(
-                metrics=metrics,
-                forecast=model_result.forecast_oos,
-                actual=val_data,
-                period_type="oos",
-                alignment_mode=alignment_mode
-            )
+        if is_ddfm:
+            # DDFM模式：validation参数是观察期，使用forecast_obs
+            if model_result.forecast_obs is not None and len(val_data) > 0:
+                _evaluate_performance(
+                    metrics=metrics,
+                    forecast=model_result.forecast_obs,
+                    actual=val_data,
+                    period_type="obs",
+                    alignment_mode=alignment_mode
+                )
+                logger.info(f"[DDFM] 观察期评估完成: {len(val_data)} 个数据点")
+            # DDFM没有验证期，oos指标保持默认值（inf/nan）
+        else:
+            # 经典DFM模式：validation是验证期
+            # 3. 验证期评估
+            if model_result.forecast_oos is not None and len(val_data) > 0:
+                _evaluate_performance(
+                    metrics=metrics,
+                    forecast=model_result.forecast_oos,
+                    actual=val_data,
+                    period_type="oos",
+                    alignment_mode=alignment_mode
+                )
 
-        # 4. 观察期评估
-        if observation_end is not None and model_result.forecast_obs is not None:
-            val_end_date = pd.to_datetime(validation_end)
-            obs_end_date = pd.to_datetime(observation_end)
+            # 4. 观察期评估（验证期之后）
+            if observation_end is not None and model_result.forecast_obs is not None:
+                val_end_date = pd.to_datetime(validation_end)
+                obs_end_date = pd.to_datetime(observation_end)
 
-            if obs_end_date > val_end_date:
-                obs_start_date = val_end_date + pd.DateOffset(weeks=1)
-                obs_data = target_data.loc[obs_start_date:obs_end_date]
+                if obs_end_date > val_end_date:
+                    obs_start_date = val_end_date + pd.DateOffset(weeks=1)
+                    obs_data = target_data.loc[obs_start_date:obs_end_date]
 
-                if len(obs_data) > 0:
-                    _evaluate_performance(
-                        metrics=metrics,
-                        forecast=model_result.forecast_obs,
-                        actual=obs_data,
-                        period_type="obs",
-                        alignment_mode=alignment_mode
-                    )
-                    logger.info(f"观察期评估完成: {len(obs_data)} 个数据点")
+                    if len(obs_data) > 0:
+                        _evaluate_performance(
+                            metrics=metrics,
+                            forecast=model_result.forecast_obs,
+                            actual=obs_data,
+                            period_type="obs",
+                            alignment_mode=alignment_mode
+                        )
+                        logger.info(f"观察期评估完成: {len(obs_data)} 个数据点")
 
     except Exception as e:
         logger.error(f"[ModelOps] 评估过程出错: {e}")
@@ -389,7 +401,7 @@ def _evaluate_performance(
     alignment_mode: str = 'next_month'
 ) -> None:
     """
-    计算评估指标（统一的样本内/样本外评估逻辑）
+    计算评估指标（统一的训练期/观察期评估逻辑）
 
     根据alignment_mode选择配对评估方式：
     - next_month: m月nowcast与m+1月target配对（默认）
@@ -399,7 +411,7 @@ def _evaluate_performance(
         metrics: 要更新的EvaluationMetrics对象
         forecast: 预测值数组
         actual: 真实值Series
-        period_type: 时间段类型，'is'表示样本内，'oos'表示样本外
+        period_type: 时间段类型，'is'表示训练期，'oos'表示观察期，'obs'表示扩展观察期
         alignment_mode: 配对模式 ('current_month' 或 'next_month')
     """
     min_len = min(len(forecast), len(actual))
@@ -409,7 +421,13 @@ def _evaluate_performance(
     pred_series = pd.Series(forecast_aligned, index=actual_index)
     actual_series = actual
 
-    log_prefix = "IS" if period_type == "is" else "OOS"
+    # 日志前缀映射：训练期/观察期/扩展观察期
+    log_prefix_map = {
+        "is": "TRAIN",   # 训练期
+        "oos": "OBS",    # 观察期
+        "obs": "EXT_OBS" # 扩展观察期
+    }
+    log_prefix = log_prefix_map.get(period_type, period_type.upper())
 
     # 使用统一调度函数根据配对模式计算指标
     try:

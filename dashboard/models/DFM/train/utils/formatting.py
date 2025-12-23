@@ -19,7 +19,8 @@ def format_training_config(
     train_samples: int,
     validation_samples: int,
     initial_vars: int,
-    k_factors: int
+    k_factors: int,
+    is_ddfm: bool = False
 ) -> str:
     """
     格式化训练配置摘要
@@ -27,20 +28,22 @@ def format_training_config(
     Args:
         train_start: 训练期开始日期
         train_end: 训练期结束日期
-        validation_start: 验证期开始日期
-        validation_end: 验证期结束日期
+        validation_start: 验证期/观察期开始日期
+        validation_end: 验证期/观察期结束日期
         train_samples: 训练样本数
-        validation_samples: 验证样本数
+        validation_samples: 验证期/观察期样本数
         initial_vars: 初始变量数
         k_factors: 因子数
+        is_ddfm: 是否为DDFM模式
 
     Returns:
         str: 格式化的配置摘要字符串
     """
+    period_label = "观察期" if is_ddfm else "验证期"
     config_summary = f"""
 ========== 训练配置 ==========
 训练期: {train_start} ~ {train_end} (样本数: {train_samples})
-验证期: {validation_start} ~ {validation_end} (样本数: {validation_samples})
+{period_label}: {validation_start} ~ {validation_end} (样本数: {validation_samples})
 初始变量数: {initial_vars}
 因子数: {k_factors}
 ============================
@@ -65,7 +68,7 @@ def format_training_summary(result: TrainingResult) -> str:
 最终变量数: {len(result.selected_variables) - 1}
 因子数: {result.k_factors}
 训练期RMSE: {result.metrics.is_rmse:.4f}
-验证期RMSE: {result.metrics.oos_rmse:.4f}
+观察期RMSE: {result.metrics.oos_rmse:.4f}
 训练时间: {result.training_time:.2f}秒
 ============================
 """
