@@ -173,7 +173,6 @@ class DFMTrainer:
                     train_end=self.config.train_end,
                     validation_start=self.config.validation_start,
                     validation_end=self.config.validation_end,
-                    observation_end=observation_end,
                     decoder_structure=self.config.decoder_structure,
                     use_bias=self.config.use_bias,
                     factor_order=self.config.factor_order,

@@ -40,6 +40,9 @@ def generate_training_summary(
     # 判断是否为二次估计法
     is_two_stage = isinstance(result, TwoStageTrainingResult)
 
+    # 判断是否为DDFM（深度学习算法）
+    is_ddfm = getattr(config, 'algorithm', 'classical') == 'deep_learning'
+
     lines = []
     lines.append("=" * 80)
     lines.append("DFM 模型训练摘要")
@@ -230,10 +233,12 @@ def generate_training_summary(
 
     lines.append("")
 
-    # 训练/验证期设置
-    lines.append("[训练与验证期设置]")
+    # 训练期/观察期设置（根据算法类型调整术语）
+    period_label = "观察期" if is_ddfm else "验证期"
+    section_title = "训练与观察期设置" if is_ddfm else "训练与验证期设置"
+    lines.append(f"[{section_title}]")
     lines.append(f"  训练期: {config.training_start} 至 {config.train_end}")
-    lines.append(f"  验证期: {config.validation_start} 至 {config.validation_end}")
+    lines.append(f"  {period_label}: {config.validation_start} 至 {config.validation_end}")
     lines.append("")
 
     # 评估指标
@@ -288,7 +293,6 @@ def generate_training_summary(
                 lines.append(f"    观察期胜率: {obs_wr_str}")
     else:
         # 一次估计法指标（区分DDFM和经典DFM）
-        is_ddfm = getattr(config, 'algorithm', 'classical') == 'deep_learning'
         oos_label = "观察期" if is_ddfm else "验证期"
 
         if result.metrics:

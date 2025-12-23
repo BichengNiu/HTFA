@@ -134,7 +134,6 @@ def train_ddfm_with_forecast(
     train_end: str,
     validation_start: str,
     validation_end: str,
-    observation_end: Optional[str] = None,
     decoder_structure: Optional[Tuple[int, ...]] = None,
     use_bias: bool = True,
     factor_order: int = 2,
@@ -157,6 +156,9 @@ def train_ddfm_with_forecast(
 
     使用神经网络自编码器提取因子，通过MCMC迭代训练
 
+    DDFM只有训练期和观察期两个阶段，无验证期。
+    validation_start/validation_end参数实际对应DDFM的观察期。
+
     Args:
         predictor_data: 预测变量数据 (DataFrame, columns=变量名, index=日期)
         target_data: 目标变量数据 (Series, index=日期)
@@ -165,7 +167,6 @@ def train_ddfm_with_forecast(
         train_end: 训练集结束日期
         validation_start: 观察期开始日期
         validation_end: 观察期结束日期
-        observation_end: 扩展观察期结束日期（可选）
         decoder_structure: 解码器层结构(None=对称单层线性)
         use_bias: 解码器最后一层是否使用偏置
         factor_order: 因子AR阶数(1或2)
@@ -401,7 +402,7 @@ def _evaluate_performance(
     alignment_mode: str = 'next_month'
 ) -> None:
     """
-    计算评估指标（统一的训练期/观察期评估逻辑）
+    计算评估指标（统一的训练期/验证期/观察期评估逻辑）
 
     根据alignment_mode选择配对评估方式：
     - next_month: m月nowcast与m+1月target配对（默认）
@@ -411,7 +412,7 @@ def _evaluate_performance(
         metrics: 要更新的EvaluationMetrics对象
         forecast: 预测值数组
         actual: 真实值Series
-        period_type: 时间段类型，'is'表示训练期，'oos'表示观察期，'obs'表示扩展观察期
+        period_type: 时间段类型，'is'表示训练期，'oos'表示验证期，'obs'表示观察期
         alignment_mode: 配对模式 ('current_month' 或 'next_month')
     """
     min_len = min(len(forecast), len(actual))
@@ -421,11 +422,11 @@ def _evaluate_performance(
     pred_series = pd.Series(forecast_aligned, index=actual_index)
     actual_series = actual
 
-    # 日志前缀映射：训练期/观察期/扩展观察期
+    # 日志前缀映射：训练期/验证期/观察期
     log_prefix_map = {
         "is": "TRAIN",   # 训练期
-        "oos": "OBS",    # 观察期
-        "obs": "EXT_OBS" # 扩展观察期
+        "oos": "VALID",  # 验证期
+        "obs": "OBS"     # 观察期
     }
     log_prefix = log_prefix_map.get(period_type, period_type.upper())
 

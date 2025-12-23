@@ -529,7 +529,11 @@ class TrainingResultExporter:
 
     def _collect_nowcast_data(self, result, config) -> Optional[pd.Series]:
         """
-        收集并合并训练期、验证期和观察期的Nowcast数据
+        收集并合并训练期、验证期/观察期的Nowcast数据
+
+        术语说明：
+        - 经典DFM: forecast_is(训练期), forecast_oos(验证期), forecast_obs(观察期)
+        - DDFM: forecast_is(训练期), forecast_obs(观察期), forecast_oos=None
 
         Args:
             result: 训练结果
@@ -538,6 +542,9 @@ class TrainingResultExporter:
         Returns:
             合并后的Nowcast序列，如果失败则返回None
         """
+        # 判断是否为DDFM模式
+        is_ddfm = getattr(config, 'algorithm', 'classical') == 'deep_learning'
+
         forecast_is = None
         forecast_oos = None
         forecast_obs = None
@@ -556,10 +563,10 @@ class TrainingResultExporter:
                 logger.info(f"forecast_obs类型: {type(forecast_obs)}, 长度: {len(forecast_obs) if forecast_obs is not None else None}")
 
         is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
-        oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
 
         nowcast_series_list = []
 
+        # 训练期数据
         if forecast_is is not None and is_index is not None and len(is_index) == len(forecast_is):
             is_series = pd.Series(forecast_is, index=is_index, name='Nowcast')
             nowcast_series_list.append(is_series)
@@ -567,22 +574,36 @@ class TrainingResultExporter:
         else:
             logger.warning("无法生成训练期Nowcast序列")
 
-        if forecast_oos is not None and oos_index is not None and len(oos_index) == len(forecast_oos):
-            oos_series = pd.Series(forecast_oos, index=oos_index, name='Nowcast')
-            nowcast_series_list.append(oos_series)
-            logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
-        else:
-            logger.warning("无法生成验证期Nowcast序列")
-
-        # 添加观察期数据
-        if forecast_obs is not None:
-            obs_index = self._get_observation_index(config)
-            if obs_index is not None and len(obs_index) == len(forecast_obs):
+        if is_ddfm:
+            # DDFM模式：validation_start~validation_end是观察期，使用forecast_obs
+            obs_index = self._get_date_index(config, 'validation_start', 'validation_end', '观察期')
+            if forecast_obs is not None and obs_index is not None and len(obs_index) == len(forecast_obs):
                 obs_series = pd.Series(forecast_obs, index=obs_index, name='Nowcast')
                 nowcast_series_list.append(obs_series)
-                logger.info(f"观察期数据: {len(obs_series)} 个点，时间范围 {obs_index.min()} 到 {obs_index.max()}")
+                logger.info(f"[DDFM] 观察期数据: {len(obs_series)} 个点，时间范围 {obs_index.min()} 到 {obs_index.max()}")
             else:
-                logger.warning("无法生成观察期Nowcast序列")
+                logger.warning("[DDFM] 无法生成观察期Nowcast序列")
+        else:
+            # 经典DFM模式：validation是验证期，之后是观察期
+            oos_index = self._get_date_index(config, 'validation_start', 'validation_end', '验证期')
+
+            # 验证期数据
+            if forecast_oos is not None and oos_index is not None and len(oos_index) == len(forecast_oos):
+                oos_series = pd.Series(forecast_oos, index=oos_index, name='Nowcast')
+                nowcast_series_list.append(oos_series)
+                logger.info(f"验证期数据: {len(oos_series)} 个点，时间范围 {oos_index.min()} 到 {oos_index.max()}")
+            else:
+                logger.warning("无法生成验证期Nowcast序列")
+
+            # 观察期数据（验证期之后）
+            if forecast_obs is not None:
+                obs_index = self._get_observation_index(config)
+                if obs_index is not None and len(obs_index) == len(forecast_obs):
+                    obs_series = pd.Series(forecast_obs, index=obs_index, name='Nowcast')
+                    nowcast_series_list.append(obs_series)
+                    logger.info(f"观察期数据: {len(obs_series)} 个点，时间范围 {obs_index.min()} 到 {obs_index.max()}")
+                else:
+                    logger.warning("无法生成观察期Nowcast序列")
 
         if len(nowcast_series_list) == 0:
             logger.warning("无法获取Nowcast数据")
