@@ -164,10 +164,19 @@ def get_transition_params(f_t: np.ndarray, eps_t: np.ndarray, factor_order: int,
     mu_0 = np.mean(x_t, axis=1)
     Sigma_0 = np.cov(x_t)
 
+    # 放大初始协方差，允许更大的初始不确定性
+    # 修复：原先基于训练期计算的Sigma_0可能过小，
+    # 导致观察期数据偏离时滤波器响应过激
+    Sigma_0 = Sigma_0 * 2.0
+
     # 特质项与因子不相关，特质项之间协方差为对角阵
+    # 注意：先做结构约束，再添加正定性保护
     Sigma_0[:A_f.shape[1], A_f.shape[1]:] = 0
     Sigma_0[A_f.shape[1]:, :A_f.shape[1]] = 0
     Sigma_0[A_f.shape[1]:, A_f.shape[1]:] = np.diag(np.diag(Sigma_0[A_f.shape[1]:, A_f.shape[1]:]))
+
+    # 确保正定性（最后执行，避免被结构约束覆盖）
+    Sigma_0 = Sigma_0 + np.eye(Sigma_0.shape[0]) * 0.01
 
     return A, W, mu_0, Sigma_0, x_t
 

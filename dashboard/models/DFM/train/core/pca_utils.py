@@ -107,10 +107,18 @@ def select_num_factors(
     # 步骤2: 填充NaN
     data_for_pca = data_standardized.fillna(0)
 
-    # 步骤3: 执行PCA分析（所有方法都需要PCA结果用于UI显示）
+    # 步骤3: 执行PCA分析（仅在训练期数据上拟合，避免数据泄露）
     logger.info(f"执行PCA分析 (method={method})...")
     pca = PCA()
-    pca.fit(data_for_pca)
+
+    if train_end is not None:
+        # 仅在训练期数据上拟合PCA，避免验证期/观察期数据泄露
+        data_for_pca_train = data_standardized.loc[:train_end].fillna(0)
+        pca.fit(data_for_pca_train)
+        logger.info(f"PCA仅在训练期数据上拟合 ({len(data_for_pca_train)} 样本)")
+    else:
+        # 没有train_end时，使用全数据（已在上方警告）
+        pca.fit(data_for_pca)
 
     explained_variance = pca.explained_variance_ratio_
     cumsum_variance = np.cumsum(explained_variance)

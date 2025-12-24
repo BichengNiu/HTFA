@@ -365,10 +365,11 @@ class DFMTrainer:
 
                     result.export_files = file_paths
 
+                    total_count = len(file_paths)
                     success_count = len([p for p in file_paths.values() if p])
 
                     if progress_callback:
-                        progress_callback(f"结果文件导出完成 (成功 {success_count}/2 个)")
+                        progress_callback(f"结果文件导出完成 (成功 {success_count}/{total_count} 个)")
 
                 except Exception as e:
                     logger.warning(f"文件导出失败: {e}", exc_info=True)

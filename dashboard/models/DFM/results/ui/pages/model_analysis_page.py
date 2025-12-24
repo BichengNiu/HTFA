@@ -618,34 +618,38 @@ def render_dfm_tab(st):
         st.error("无法显示Nowcast对比图：元数据中缺少complete_aligned_table数据")
         st.info("请使用最新版本的训练模块重新训练模型以生成完整数据")
 
-    # 原 with st.expander("详细分析结果", expanded=False):
-    st.markdown("**PCA结果分析**")
-    pca_results = metadata.get('pca_results_df')
-    # 从metadata中提取k_factors
-    best_params = metadata.get('best_params', {})
-    k_factors = best_params.get('k_factors', 0) if isinstance(best_params, dict) else 0
-    k = k_factors if isinstance(k_factors, (int, np.integer)) else 0
-    if k <= 0 and pca_results is not None and isinstance(pca_results, pd.DataFrame):
-        k = len(pca_results.index)
-        logger.info(f"从PCA数据推断因子数量: {k}")
-    
-    if pca_results is not None and isinstance(pca_results, pd.DataFrame) and not pca_results.empty:
-        pca_df_display = pca_results.head(k if k > 0 else len(pca_results.index)).copy()
-        if '主成分 (PC)' in pca_df_display.columns:
-            pca_df_display = pca_df_display.drop(columns=['主成分 (PC)'])
-        pca_df_display.insert(0, '主成分 (PC)', [f"PC{i+1}" for i in range(len(pca_df_display.index))])
-        if not isinstance(pca_df_display.index, pd.RangeIndex):
-            pca_df_display = pca_df_display.reset_index()
-            if 'index' in pca_df_display.columns:
-                pca_df_display = pca_df_display.rename(columns={'index': 'Original Index'})
-        pca_df_display = pca_df_display.rename(columns={
-            '解释方差 (%)': '解释方差(%)',
-            '累计解释方差 (%)': '累计解释方差(%)',
-            '特征值 (Eigenvalue)': '特征值(Eigenvalue)'
-        })
-        st.dataframe(pca_df_display, width='stretch')
-    else:
-        st.write("未找到 PCA 结果。")
+    # PCA结果分析（仅对非DDFM模型显示，DDFM使用神经网络自编码器而非PCA）
+    if not is_ddfm:
+        st.markdown("**PCA结果分析**")
+        pca_results = metadata.get('pca_results_df')
+
+        # 从metadata中提取k_factors（严格验证，不使用回退逻辑）
+        best_params = metadata.get('best_params')
+        if best_params is None or not isinstance(best_params, dict):
+            st.error("元数据缺少best_params字段，无法显示PCA结果")
+        elif 'k_factors' not in best_params:
+            st.error("元数据best_params中缺少k_factors字段，无法显示PCA结果")
+        else:
+            k_factors = best_params['k_factors']
+            if not isinstance(k_factors, (int, np.integer)) or k_factors <= 0:
+                st.error(f"k_factors值无效: {k_factors}，必须为正整数")
+            elif pca_results is not None and isinstance(pca_results, pd.DataFrame) and not pca_results.empty:
+                pca_df_display = pca_results.head(k_factors).copy()
+                if '主成分 (PC)' in pca_df_display.columns:
+                    pca_df_display = pca_df_display.drop(columns=['主成分 (PC)'])
+                pca_df_display.insert(0, '主成分 (PC)', [f"PC{i+1}" for i in range(len(pca_df_display.index))])
+                if not isinstance(pca_df_display.index, pd.RangeIndex):
+                    pca_df_display = pca_df_display.reset_index()
+                    if 'index' in pca_df_display.columns:
+                        pca_df_display = pca_df_display.rename(columns={'index': 'Original Index'})
+                pca_df_display = pca_df_display.rename(columns={
+                    '解释方差 (%)': '解释方差(%)',
+                    '累计解释方差 (%)': '累计解释方差(%)',
+                    '特征值 (Eigenvalue)': '特征值(Eigenvalue)'
+                })
+                st.dataframe(pca_df_display, width='stretch')
+            else:
+                st.write("未找到 PCA 结果。")
     
     st.markdown("--- ")
     st.markdown("**R² 分析**")

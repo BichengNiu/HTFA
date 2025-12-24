@@ -1303,16 +1303,11 @@ def render_dfm_model_training_page(st_instance):
                 logger.info(f"训练配置: 因子选择={training_config.factor_selection_method}, "
                            f"最大迭代={training_config.max_iterations}, AR阶数={training_config.max_lags}")
 
-                # 创建进度条组件（DDFM模式下显示）
-                is_ddfm_mode = (algorithm_value == 'deep_learning')
-                if is_ddfm_mode:
-                    progress_container = st_instance.container()
-                    with progress_container:
-                        progress_bar = st_instance.progress(0, text="准备训练...")
-                        progress_status = st_instance.empty()
-                else:
-                    progress_bar = None
-                    progress_status = None
+                # 创建进度条组件（所有模式都显示）
+                progress_container = st_instance.container()
+                with progress_container:
+                    progress_bar = st_instance.progress(0, text="准备训练...")
+                    progress_status = st_instance.empty()
 
                 # 创建进度回调函数
                 def progress_callback(message: str):
@@ -1322,14 +1317,14 @@ def render_dfm_model_training_page(st_instance):
                     training_log.append(message)
                     _state.set('dfm_training_log', training_log)
 
-                    # DDFM模式下解析进度信息并更新进度条
+                    # 解析进度信息并更新进度条（支持EM和DDFM格式）
                     if progress_bar is not None:
-                        # 解析新格式: [DDFM|progress%] message
-                        progress_match = re.search(r'\[DDFM\|(\d+)%\]', message)
+                        # 解析格式: [EM|progress%] 或 [DDFM|progress%]
+                        progress_match = re.search(r'\[(EM|DDFM)\|(\d+)%\]', message)
                         if progress_match:
-                            pct = int(progress_match.group(1))
+                            pct = int(progress_match.group(2))
                             # 提取实际消息内容（去除前缀）
-                            display_msg = re.sub(r'\[DDFM\|\d+%\]\s*', '', message)
+                            display_msg = re.sub(r'\[(EM|DDFM)\|\d+%\]\s*', '', message)
                             progress_bar.progress(pct, text=display_msg)
                         elif progress_status is not None:
                             # 其他消息只更新状态文本

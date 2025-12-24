@@ -603,8 +603,15 @@ class DDFMModel:
             f_t, eps_t, factor_order=self.factor_order, bool_no_miss=self.bool_no_miss
         )
 
-        # 观测噪声协方差（设为很小的值）
-        R = np.eye(eps_t.shape[1]) * 1e-15
+        # 观测噪声协方差（使用特质项方差作为合理估计）
+        # 修复：原先R=1e-15导致卡尔曼滤波完全相信观测值，
+        # 在观察期数据分布偏移时会产生剧烈跳跃
+        eps_var = np.nanvar(eps_t, axis=0)
+        # 添加下界保护，防止数值不稳定（处理NaN或零方差）
+        eps_var = np.nan_to_num(eps_var, nan=0.01)
+        eps_var = np.maximum(eps_var, 0.01)
+        R = np.diag(eps_var)
+        logger.debug(f"R矩阵对角线范围: [{np.min(eps_var):.4f}, {np.max(eps_var):.4f}]")
 
         # 保存状态空间参数
         self.state_space_dict["transition"] = {

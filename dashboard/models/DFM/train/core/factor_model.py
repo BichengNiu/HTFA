@@ -7,7 +7,7 @@
 
 import numpy as np
 import pandas as pd
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Callable
 from sklearn.decomposition import PCA
 from dashboard.models.DFM.train.core.kalman import KalmanFilter, kalman_filter
 from dashboard.models.DFM.train.core.estimator import (
@@ -64,7 +64,8 @@ class DFMModel:
         self,
         data: pd.DataFrame,
         training_start: str,
-        train_end: str
+        train_end: str,
+        progress_callback: Optional[Callable[[str], None]] = None
     ) -> DFMModelResult:
         """拟合DFM模型
 
@@ -72,6 +73,7 @@ class DFMModel:
             data: 观测数据 (时间 × 变量)
             training_start: 训练期开始日期（必填）
             train_end: 训练期结束日期（必填）
+            progress_callback: 进度回调函数，用于报告训练进度
 
         Returns:
             DFMModelResult: 拟合结果
@@ -127,10 +129,18 @@ class DFMModel:
         Z_for_pca = Z_standardized_full[:len(Z_train)]
         obs_centered_for_pca = obs_centered.iloc[:len(Z_train)]
 
+        # 报告PCA初始化开始
+        if progress_callback:
+            progress_callback("[EM|5%] 开始PCA初始化...")
+
         # PCA初始化：得到因子、载荷和V矩阵（用于R矩阵计算）
         initial_factors, initial_loadings, V = self._initialize_factors_pca(
             Z_for_pca, obs_centered_for_pca, means, stds
         )
+
+        # 报告PCA初始化完成
+        if progress_callback:
+            progress_callback("[EM|10%] PCA初始化完成")
 
         self.results_ = self._em_algorithm(
             obs_centered,  # 使用中心化数据进行EM算法
@@ -139,7 +149,8 @@ class DFMModel:
             V,  # V矩阵用于R矩阵计算
             stds,
             data.index,
-            Z_train.index
+            Z_train.index,
+            progress_callback
         )
 
         return self.results_
@@ -258,7 +269,8 @@ class DFMModel:
         V: np.ndarray,
         stds: np.ndarray,
         index: pd.DatetimeIndex,
-        train_index: pd.DatetimeIndex
+        train_index: pd.DatetimeIndex,
+        progress_callback: Optional[Callable[[str], None]] = None
     ) -> DFMModelResult:
         """EM算法估计DFM参数（匹配老代码）
 
@@ -270,6 +282,7 @@ class DFMModel:
             stds: 标准差向量（用于计算R矩阵）
             index: 完整数据时间索引
             train_index: 训练期时间索引
+            progress_callback: 进度回调函数
 
         Returns:
             DFMModelResult: 估计结果
@@ -355,6 +368,11 @@ class DFMModel:
         U = np.random.randn(n_time, n_states)  # (n_time, n_states)格式,匹配train_model
 
         for iteration in range(self.max_iter):
+            # 报告EM迭代进度：10% - 90%，共80%分配给max_iter次迭代
+            progress_pct = 10 + int(((iteration + 1) / self.max_iter) * 80)
+            if progress_callback:
+                progress_callback(f"[EM|{progress_pct}%] EM迭代 {iteration + 1}/{self.max_iter}")
+
             logger.debug(f"EM迭代 {iteration + 1}/{self.max_iter}")
 
             H = np.zeros((n_obs, n_states))

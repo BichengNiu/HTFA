@@ -432,7 +432,11 @@ class TrainingResultExporter:
         return read_data_file(file_path, parse_dates=False, check_exists=False)
 
     def _extract_factor_loadings(self, result, config=None) -> pd.DataFrame:
-        """提取因子载荷矩阵（H矩阵）"""
+        """提取因子载荷矩阵（H矩阵）
+
+        对于factor_order=2的模型（如DDFM），H矩阵包含滞后因子的零列，
+        实际只有前k_factors列有效，因此只提取前k_factors列。
+        """
         try:
             if not result.model_result:
                 return pd.DataFrame()
@@ -442,27 +446,45 @@ class TrainingResultExporter:
             if H is None:
                 return pd.DataFrame()
 
-            if isinstance(H, np.ndarray):
-                factor_names = [f'Factor_{i+1}' for i in range(H.shape[1])]
+            # H必须是np.ndarray类型（根据DFMModelResult定义）
+            if not isinstance(H, np.ndarray):
+                raise TypeError(f"H矩阵类型错误: 期望np.ndarray，实际{type(H).__name__}")
 
-                # 从selected_variables中排除目标变量，因为H只包含预测变量
-                var_names = result.selected_variables
-                if config and hasattr(config, 'target_variable'):
-                    var_names = [v for v in var_names if v != config.target_variable]
+            # 验证k_factors存在且有效（不使用回退逻辑）
+            if not hasattr(result, 'k_factors') or result.k_factors is None:
+                raise ValueError("result对象缺少k_factors属性，无法确定因子数量")
+            if result.k_factors <= 0:
+                raise ValueError(f"k_factors值无效: {result.k_factors}，必须为正整数")
 
-                # 严格检查变量名列表长度与H的行数是否匹配
-                if len(var_names) != H.shape[0]:
-                    raise ValueError(
-                        f"变量名数量({len(var_names)})与H矩阵行数({H.shape[0]})不匹配。"
-                        f"selected_variables: {result.selected_variables}, "
-                        f"target_variable: {config.target_variable if config else 'N/A'}"
-                    )
+            k_factors = result.k_factors
 
-                return pd.DataFrame(H, columns=factor_names, index=var_names)
-            elif isinstance(H, pd.DataFrame):
-                return H.copy()
+            # 验证k_factors与H矩阵列数的关系
+            # 正常情况：k_factors <= H.shape[1]（factor_order=1时相等，factor_order=2时H有滞后列）
+            # 异常情况：k_factors > H.shape[1]，说明数据不一致
+            if k_factors > H.shape[1]:
+                raise ValueError(
+                    f"k_factors({k_factors})大于H矩阵列数({H.shape[1]})，数据不一致"
+                )
 
-            return pd.DataFrame()
+            # 只取前k_factors列（排除factor_order=2时的滞后项零列）
+            H_trimmed = H[:, :k_factors]
+
+            factor_names = [f'Factor_{i+1}' for i in range(k_factors)]
+
+            # 从selected_variables中排除目标变量，因为H只包含预测变量
+            var_names = result.selected_variables
+            if config and hasattr(config, 'target_variable'):
+                var_names = [v for v in var_names if v != config.target_variable]
+
+            # 严格检查变量名列表长度与H的行数是否匹配
+            if len(var_names) != H_trimmed.shape[0]:
+                raise ValueError(
+                    f"变量名数量({len(var_names)})与H矩阵行数({H_trimmed.shape[0]})不匹配。"
+                    f"selected_variables: {result.selected_variables}, "
+                    f"target_variable: {config.target_variable if config else 'N/A'}"
+                )
+
+            return pd.DataFrame(H_trimmed, columns=factor_names, index=var_names)
 
         except Exception as e:
             logger.error(f"提取因子载荷失败: {e}")

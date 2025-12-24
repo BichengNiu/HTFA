@@ -99,7 +99,8 @@ def train_dfm_with_forecast(
         model_result = dfm.fit(
             data=predictor_data,
             training_start=training_start,
-            train_end=train_end
+            train_end=train_end,
+            progress_callback=progress_callback
         )
 
     except Exception as e:
