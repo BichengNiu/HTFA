@@ -6,6 +6,7 @@
 """
 
 import os
+import random
 import numpy as np
 import pandas as pd
 from typing import Tuple, Optional, Callable
@@ -21,6 +22,41 @@ from dashboard.models.DFM.train.utils.ddfm_utils import (
 from dashboard.models.DFM.train.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def set_global_seed(seed: int) -> None:
+    """
+    设置全局随机种子确保可复现性
+
+    Args:
+        seed: 随机种子值
+
+    Raises:
+        ImportError: 如果TensorFlow未安装
+        RuntimeError: 如果TensorFlow版本不支持确定性操作
+    """
+    # 1. 设置Python hash种子
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
+    # 2. 设置Python内置random
+    random.seed(seed)
+
+    # 3. 设置NumPy全局种子
+    np.random.seed(seed)
+
+    # 4. 设置TensorFlow确定性操作环境变量
+    os.environ['TF_DETERMINISTIC_OPS'] = '1'
+    os.environ['TF_CUDNN_DETERMINISTIC'] = '1'
+    os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # 禁用oneDNN避免浮点舍入差异
+
+    # 5. 设置TensorFlow随机种子（DDFM强制依赖TensorFlow，不捕获ImportError）
+    import tensorflow as tf
+    tf.random.set_seed(seed)
+
+    # 6. 启用TensorFlow确定性操作模式（不检查hasattr，不支持则报错）
+    tf.config.experimental.enable_op_determinism()
+
+    logger.info(f"全局随机种子已设置: {seed} (TF确定性模式启用)")
 
 
 class DDFMModel:
@@ -82,6 +118,9 @@ class DDFMModel:
         """
         # 保存progress_callback
         self.progress_callback = progress_callback
+
+        # 设置全局随机种子（必须在TensorFlow导入前调用）
+        set_global_seed(seed)
 
         # TensorFlow延迟导入
         try:
@@ -158,6 +197,40 @@ class DDFMModel:
         if self.progress_callback:
             self.progress_callback(message, progress)
         logger.info(message)
+
+    def _batch_inference(self, model, data: np.ndarray, output_shape: Tuple[int, ...]) -> np.ndarray:
+        """
+        批量推理（带内存保护）
+
+        Args:
+            model: Keras模型（encoder或decoder）
+            data: 输入数据，形状为 (batch_dim, time_dim, feature_dim)
+            output_shape: 期望输出形状 (batch_dim, time_dim, output_dim)
+
+        Returns:
+            推理结果，形状为 output_shape
+        """
+        batch_shape = data.shape
+        batch_size_total = batch_shape[0] * batch_shape[1]
+
+        if batch_size_total <= self.MAX_BATCH_SIZE:
+            # 小批量：直接处理
+            x_batch = np.ascontiguousarray(data.reshape(-1, batch_shape[-1]))
+            result_batch = model(x_batch, training=False).numpy()
+            return result_batch.reshape(output_shape)
+        else:
+            # 大批量：分块处理避免OOM
+            result_list = []
+            chunk_size = max(1, self.MAX_BATCH_SIZE // batch_shape[1])
+            for chunk_start in range(0, batch_shape[0], chunk_size):
+                chunk_end = min(chunk_start + chunk_size, batch_shape[0])
+                chunk = data[chunk_start:chunk_end]
+                chunk_flat = np.ascontiguousarray(chunk.reshape(-1, batch_shape[-1]))
+                result_chunk = model(chunk_flat, training=False).numpy()
+                result_list.append(result_chunk.reshape(
+                    chunk_end - chunk_start, batch_shape[1], -1
+                ))
+            return np.concatenate(result_list, axis=0)
 
     def fit(
         self,
@@ -250,7 +323,16 @@ class DDFMModel:
         self.data_tmp = self.data_tmp[self.lags_input:]
 
         if interpolate and self.data_tmp.isna().sum().sum() > 0:
-            self.data_tmp.interpolate(method='spline', limit_direction='both', inplace=True, order=3)
+            # 使用线性插值替代spline，避免极端外推值
+            self.data_tmp.interpolate(method='linear', limit_direction='both', inplace=True)
+            # 前向填充和后向填充处理边缘NaN（确保神经网络输入无NaN）
+            self.data_tmp.ffill(inplace=True)
+            self.data_tmp.bfill(inplace=True)
+            # 最后的保护：如果仍有NaN（全NaN列），用列均值填充
+            if self.data_tmp.isna().sum().sum() > 0:
+                self.data_tmp.fillna(self.data_tmp.mean(), inplace=True)
+                # 如果列均值也是NaN（全NaN列），用0填充
+                self.data_tmp.fillna(0, inplace=True)
 
     def _build_model(self, n_variables: int) -> None:
         """构建Keras自编码器模型"""
@@ -354,6 +436,7 @@ class DDFMModel:
             inpt_pre_train, oupt_pre_train,
             epochs=self.epochs * mult_epoch_pre,
             batch_size=self.batch_size,
+            shuffle=False,  # 禁用shuffle确保确定性
             verbose=0
         )
 
@@ -392,17 +475,33 @@ class DDFMModel:
                 # 无滞后：直接更新data_tmp的值，避免完整_build_inputs重建
                 self.data_tmp.values[:] = self.data_mod.values[self.lags_input:]
 
-            # 验证协方差矩阵正定性
-            if not np.all(std_eps > 0):
-                invalid_indices = np.where(std_eps <= 0)[0]
+            # 验证协方差矩阵正定性（检查NaN和非正值）
+            nan_mask = np.isnan(std_eps)
+            invalid_mask = (std_eps <= 0) & ~nan_mask
+            if np.any(nan_mask) or np.any(invalid_mask):
+                nan_indices = np.where(nan_mask)[0].tolist()
+                invalid_indices = np.where(invalid_mask)[0].tolist()
                 raise ValueError(
-                    f"特质项标准差包含非正值，无法构建协方差矩阵。"
-                    f"问题变量索引: {invalid_indices.tolist()}"
+                    f"特质项标准差包含无效值，无法构建协方差矩阵。"
+                    f"NaN变量索引: {nan_indices}, 非正值变量索引: {invalid_indices}"
                 )
 
+            # 诊断日志：输出MCMC采样前的参数统计
+            logger.debug(f"[MCMC] 迭代{iter_count}: mu_eps范围=[{np.min(mu_eps):.2e}, {np.max(mu_eps):.2e}], "
+                        f"std_eps范围=[{np.min(std_eps):.2e}, {np.max(std_eps):.2e}]")
+
             # 生成MC样本（协方差矩阵 = 方差的对角阵 = 标准差²的对角阵）
+            # 添加正则化抖动项，防止协方差矩阵奇异
+            cov_matrix = np.diag(std_eps**2 + 1e-6)
+            # 检查条件数（用于调试）
+            cond_num = np.max(std_eps**2) / (np.min(std_eps**2) + 1e-10)
+            if cond_num > 1e10:
+                logger.warning(f"协方差矩阵条件数过大: {cond_num:.2e}")
+            else:
+                logger.debug(f"[MCMC] 协方差条件数={cond_num:.2e}")
+
             eps_draws = self.rng.multivariate_normal(
-                mu_eps, np.diag(std_eps**2),
+                mu_eps, cov_matrix,
                 (self.epochs, self.data_tmp.shape[0])
             )
 
@@ -418,46 +517,21 @@ class DDFMModel:
             for i in range(self.epochs):
                 self.autoencoder.fit(
                     x_sim_den[i, :, :], self.z_actual,
-                    epochs=1, batch_size=self.batch_size, verbose=0
+                    epochs=1, batch_size=self.batch_size,
+                    shuffle=False,  # 禁用shuffle确保确定性
+                    verbose=0
                 )
 
-            # 批量推理更新因子（优化：替代原列表推导）
+            # 批量推理更新因子（使用抽取的_batch_inference方法）
             batch_shape = x_sim_den.shape  # (epochs, T, input_dim)
-            batch_size_total = batch_shape[0] * batch_shape[1]
+            factors_output_shape = (batch_shape[0], batch_shape[1], self.n_factors)
+            self.factors = self._batch_inference(self.encoder, x_sim_den, factors_output_shape)
 
-            if batch_size_total <= self.MAX_BATCH_SIZE:
-                # 小批量：直接处理
-                x_batch = np.ascontiguousarray(x_sim_den.reshape(-1, batch_shape[-1]))
-                factors_batch = self.encoder(x_batch, training=False).numpy()
-                self.factors = factors_batch.reshape(batch_shape[0], batch_shape[1], -1)
-            else:
-                # 大批量：分块处理避免OOM
-                factors_list = []
-                chunk_size = max(1, self.MAX_BATCH_SIZE // batch_shape[1])
-                for chunk_start in range(0, batch_shape[0], chunk_size):
-                    chunk_end = min(chunk_start + chunk_size, batch_shape[0])
-                    chunk = x_sim_den[chunk_start:chunk_end]
-                    chunk_flat = np.ascontiguousarray(chunk.reshape(-1, batch_shape[-1]))
-                    factors_chunk = self.encoder(chunk_flat, training=False).numpy()
-                    factors_list.append(factors_chunk.reshape(chunk_end - chunk_start, batch_shape[1], -1))
-                self.factors = np.concatenate(factors_list, axis=0)
-
-            # 批量推理检查收敛（优化：替代原列表推导）
+            # 批量推理检查收敛
             factors_shape = self.factors.shape  # (epochs, T, n_factors)
-            if factors_shape[0] * factors_shape[1] <= self.MAX_BATCH_SIZE:
-                factors_batch = np.ascontiguousarray(self.factors.reshape(-1, factors_shape[-1]))
-                predictions_batch = self.decoder(factors_batch, training=False).numpy()
-                predictions_all = predictions_batch.reshape(factors_shape[0], factors_shape[1], -1)
-            else:
-                predictions_list = []
-                chunk_size = max(1, self.MAX_BATCH_SIZE // factors_shape[1])
-                for chunk_start in range(0, factors_shape[0], chunk_size):
-                    chunk_end = min(chunk_start + chunk_size, factors_shape[0])
-                    chunk = self.factors[chunk_start:chunk_end]
-                    chunk_flat = np.ascontiguousarray(chunk.reshape(-1, factors_shape[-1]))
-                    pred_chunk = self.decoder(chunk_flat, training=False).numpy()
-                    predictions_list.append(pred_chunk.reshape(chunk_end - chunk_start, factors_shape[1], -1))
-                predictions_all = np.concatenate(predictions_list, axis=0)
+            n_vars = x_sim_den.shape[2] if len(x_sim_den.shape) > 2 else self.z_actual.shape[1]
+            predictions_output_shape = (factors_shape[0], factors_shape[1], n_vars)
+            predictions_all = self._batch_inference(self.decoder, self.factors, predictions_output_shape)
             prediction_iter = np.mean(predictions_all, axis=0)
 
             if iter_count > 1 and prediction_prev_iter is not None:
@@ -471,6 +545,9 @@ class DDFMModel:
                 if iter_count % self.display_interval == 0:
                     msg = f'MCMC迭代 {iter_count}/{self.max_iter}: loss={self.loss_now:.6f}, delta={delta:.6f}'
                     self._report_progress(msg, progress)
+                    # 诊断日志：输出φ和data_mod统计
+                    logger.debug(f"[MCMC] φ对角元素范围: [{np.min(np.diag(phi)):.4f}, {np.max(np.diag(phi)):.4f}]")
+                    logger.debug(f"[MCMC] data_mod范围: [{np.nanmin(self.data_mod.values):.2e}, {np.nanmax(self.data_mod.values):.2e}]")
 
                 if delta < self.tolerance:
                     not_converged = False
@@ -487,36 +564,24 @@ class DDFMModel:
         if not_converged:
             self._report_progress(f"未在{self.max_iter}次迭代内收敛，继续处理...", 0.90)
 
-        # 获取最后一层神经元（优化：两阶段批量推理）
+        # 获取最后一层神经元
         if self.decoder_structure is None:
             self.last_neurons = self.factors
         else:
+            # 创建组合模型：encoder -> decoder倒数第二层
             decoder_for_last = self.keras.Model(
                 self.decoder.input,
                 self.decoder.get_layer(self.decoder.layers[-2].name).output
             )
-            # 批量推理替代原列表推导（带内存保护）
+            combined_model = self.keras.Model(
+                self.encoder.input,
+                decoder_for_last(self.encoder(self.encoder.input))
+            )
+            # 使用统一的批量推理方法
             batch_shape = x_sim_den.shape
-            batch_size_total = batch_shape[0] * batch_shape[1]
-
-            if batch_size_total <= self.MAX_BATCH_SIZE:
-                # 小批量：直接处理
-                x_batch = np.ascontiguousarray(x_sim_den.reshape(-1, batch_shape[-1]))
-                encoded_batch = self.encoder(x_batch, training=False).numpy()
-                last_neurons_batch = decoder_for_last(encoded_batch, training=False).numpy()
-                self.last_neurons = last_neurons_batch.reshape(batch_shape[0], batch_shape[1], -1)
-            else:
-                # 大批量：分块处理避免OOM
-                last_neurons_list = []
-                chunk_size = max(1, self.MAX_BATCH_SIZE // batch_shape[1])
-                for chunk_start in range(0, batch_shape[0], chunk_size):
-                    chunk_end = min(chunk_start + chunk_size, batch_shape[0])
-                    chunk = x_sim_den[chunk_start:chunk_end]
-                    chunk_flat = np.ascontiguousarray(chunk.reshape(-1, batch_shape[-1]))
-                    encoded_chunk = self.encoder(chunk_flat, training=False).numpy()
-                    neurons_chunk = decoder_for_last(encoded_chunk, training=False).numpy()
-                    last_neurons_list.append(neurons_chunk.reshape(chunk_end - chunk_start, batch_shape[1], -1))
-                self.last_neurons = np.concatenate(last_neurons_list, axis=0)
+            output_dim = decoder_for_last.output_shape[-1]
+            output_shape = (batch_shape[0], batch_shape[1], output_dim)
+            self.last_neurons = self._batch_inference(combined_model, x_sim_den, output_shape)
 
     def _build_state_space(self) -> None:
         """从自编码器构建状态空间模型"""

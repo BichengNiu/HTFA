@@ -7,9 +7,11 @@ DDFM工具函数模块
 
 from typing import Tuple
 import numpy as np
+from dashboard.models.DFM.train.utils.logger import get_logger
 
 # 常量定义
 _FACTOR_ORDER_ERROR = "仅支持AR(1)或AR(2)因子动态"
+logger = get_logger(__name__)
 
 
 def mse_missing(y_actual, y_predicted):
@@ -42,17 +44,32 @@ def convergence_checker(y_prev: np.ndarray, y_now: np.ndarray, y_actual: np.ndar
 
     Returns:
         (相对变化量, 当前损失)
+
+    Raises:
+        ValueError: 当y_actual全是NaN时
     """
     from sklearn.metrics import mean_squared_error as mse
 
-    loss_minus = mse(y_prev[~np.isnan(y_actual)], y_actual[~np.isnan(y_actual)])
-    loss = mse(y_now[~np.isnan(y_actual)], y_actual[~np.isnan(y_actual)])
+    # 获取非NaN掩码（同时检查y_actual和预测值）
+    valid_mask = ~np.isnan(y_actual) & ~np.isnan(y_prev) & ~np.isnan(y_now)
+    if not np.any(valid_mask):
+        raise ValueError("没有有效数据点可用于计算收敛性（所有值都是NaN）")
 
-    # 防止除零错误
-    if loss_minus == 0:
-        raise ValueError("前一次迭代损失为0，无法计算相对变化量")
+    loss_minus = mse(y_prev[valid_mask], y_actual[valid_mask])
+    loss = mse(y_now[valid_mask], y_actual[valid_mask])
 
-    return np.abs(loss - loss_minus) / loss_minus, loss
+    # 双重判断：相对阈值 + 绝对阈值（修复：防止delta爆炸）
+    if loss_minus < 1e-8:
+        # 损失极小时，使用绝对变化量
+        delta = np.abs(loss - loss_minus)
+    else:
+        # 正常情况，使用相对变化量
+        delta = np.abs(loss - loss_minus) / loss_minus
+
+    # 防止delta爆炸（loss_minus很小时）
+    delta = np.minimum(delta, 1000.0)  # 裁剪到合理范围
+
+    return delta, loss
 
 
 def convert_decoder_to_numpy(decoder, has_bias: bool, factor_order: int,
@@ -155,7 +172,7 @@ def get_transition_params(f_t: np.ndarray, eps_t: np.ndarray, factor_order: int,
     return A, W, mu_0, Sigma_0, x_t
 
 
-def get_idio(eps: np.ndarray, idx_no_missings: np.ndarray, min_obs: int = 5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def get_idio(eps: np.ndarray, idx_no_missings: np.ndarray, min_obs: int = 20) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     估计特质项的AR(1)参数（支持混合频率数据）
 
@@ -175,9 +192,20 @@ def get_idio(eps: np.ndarray, idx_no_missings: np.ndarray, min_obs: int = 5) -> 
     mu_eps = np.zeros(eps.shape[1])
     std_eps = np.zeros(eps.shape[1])
 
+    # 诊断日志：输出eps范围
+    logger.debug(f"[get_idio] eps范围: [{np.nanmin(eps):.2e}, {np.nanmax(eps):.2e}]")
+
     for j in range(eps.shape[1]):
         # 找出该变量的非空观测位置
         non_miss_indices = np.where(idx_no_missings[:, j])[0]
+
+        # 检查eps是否全为NaN（关键修复：防止NaN传播）
+        eps_col = eps[:, j]
+        if np.all(np.isnan(eps_col)):
+            mu_eps[j] = 0.0
+            std_eps[j] = 1.0
+            phi[j, j] = 0.0
+            continue
 
         if len(non_miss_indices) < 2:
             # 观测太少，使用默认值
@@ -206,25 +234,37 @@ def get_idio(eps: np.ndarray, idx_no_missings: np.ndarray, min_obs: int = 5) -> 
             eps_t = eps[non_miss_indices[1:], j]
             eps_t_1 = eps[non_miss_indices[:-1], j]
 
+        # 过滤NaN值对（关键修复：防止NaN污染统计量）
+        valid_pairs = ~(np.isnan(eps_t) | np.isnan(eps_t_1))
+        eps_t = eps_t[valid_pairs]
+        eps_t_1 = eps_t_1[valid_pairs]
+
         n_pairs = len(eps_t)
 
         if n_pairs >= min_obs:
             mu_eps[j] = np.mean(eps_t)
             std_eps[j] = np.std(eps_t)
 
-            if std_eps[j] > 1e-10:  # 数值稳定性检查
-                cov1_eps = np.cov(eps_t, eps_t_1)[0][1]
-                phi_raw = cov1_eps / (std_eps[j] ** 2)
-                # 限制phi在平稳范围内
-                phi[j, j] = np.clip(phi_raw, -0.99, 0.99)
-            else:
-                phi[j, j] = 0.0
+            # 强制std_eps下界（关键修复：防止数值不稳定）
+            std_eps[j] = np.maximum(std_eps[j], 1e-4)
+
+            # 添加分母稳定性保护
+            cov1_eps = np.cov(eps_t, eps_t_1)[0][1]
+            variance = std_eps[j] ** 2
+            phi_raw = cov1_eps / (variance + 1e-8)
+            # 放宽裁剪范围，避免边界振荡（从[-0.99,0.99]改为[-0.90,0.90]）
+            phi[j, j] = np.clip(phi_raw, -0.90, 0.90)
+            # 诊断日志：每10个变量输出一次
+            if j % 10 == 0:
+                logger.debug(f"[get_idio] 变量{j}: n_pairs={n_pairs}, std_eps={std_eps[j]:.2e}, phi={phi[j,j]:.4f}")
         else:
             # 观测不足，使用默认值
             valid_eps = eps[idx_no_missings[:, j], j]
             if len(valid_eps) > 0:
                 mu_eps[j] = np.mean(valid_eps)
                 std_eps[j] = np.std(valid_eps) if len(valid_eps) > 1 else 1.0
+                # 强制std_eps下界（与n_pairs >= min_obs分支保持一致）
+                std_eps[j] = np.maximum(std_eps[j], 1e-4)
             else:
                 mu_eps[j] = 0.0
                 std_eps[j] = 1.0
