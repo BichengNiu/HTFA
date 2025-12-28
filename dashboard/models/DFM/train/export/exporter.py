@@ -208,17 +208,13 @@ class TrainingResultExporter:
         metadata['factor_loadings_df'] = self._extract_factor_loadings(result, config)
 
         # 目标变量的因子载荷（用于新闻分解分析）
-        if result.model_result and hasattr(result.model_result, 'target_factor_loading'):
-            target_loading = result.model_result.target_factor_loading
-            if target_loading is not None:
-                metadata['target_factor_loading'] = target_loading
-                logger.info(f"保存目标变量因子载荷: 形状={target_loading.shape}")
-            else:
-                metadata['target_factor_loading'] = None
-                logger.warning("目标变量因子载荷为None")
-        else:
-            metadata['target_factor_loading'] = None
-            logger.warning("模型结果中未找到目标变量因子载荷")
+        if not result.model_result or not hasattr(result.model_result, 'target_factor_loading'):
+            raise ValueError("模型结果缺少target_factor_loading属性")
+        target_loading = result.model_result.target_factor_loading
+        if target_loading is None:
+            raise ValueError("目标变量因子载荷为None，无法导出元数据")
+        metadata['target_factor_loading'] = target_loading
+        logger.info(f"保存目标变量因子载荷: 形状={target_loading.shape}")
 
         # 因子序列DataFrame (需要转置：因子应该是列，时间是行)
         if result.model_result and hasattr(result.model_result, 'factors'):
@@ -275,6 +271,22 @@ class TrainingResultExporter:
             "内部错误：kalman_gains_history为None（应在滤波阶段验证）"
         metadata['kalman_gains_history'] = kalman_gains
         logger.info(f"保存卡尔曼增益历史: {len(kalman_gains)} 个时间步")
+
+        # 保存先验因子状态（用于新闻分解的expected_value计算）
+        # 此字段为新闻分析必需，与kalman_gains_history一样使用严格验证
+        assert result.model_result and hasattr(result.model_result, 'factor_states_predicted'), \
+            "内部错误：model_result缺少factor_states_predicted属性"
+        factor_states_pred = result.model_result.factor_states_predicted
+        assert factor_states_pred is not None, \
+            "内部错误：factor_states_predicted为None（应在训练阶段生成）"
+        assert isinstance(factor_states_pred, np.ndarray), \
+            f"内部错误：factor_states_predicted类型错误，应为ndarray，实际为{type(factor_states_pred)}"
+        assert len(factor_states_pred.shape) == 2, \
+            f"内部错误：factor_states_predicted应为2维数组，实际为{len(factor_states_pred.shape)}维"
+        assert factor_states_pred.shape[1] == result.k_factors, \
+            f"内部错误：factor_states_predicted因子数({factor_states_pred.shape[1]})与k_factors({result.k_factors})不一致"
+        metadata['factor_states_predicted'] = factor_states_pred
+        logger.info(f"保存先验因子状态: 形状={factor_states_pred.shape}")
 
         # PCA结果DataFrame
         if result.pca_analysis:

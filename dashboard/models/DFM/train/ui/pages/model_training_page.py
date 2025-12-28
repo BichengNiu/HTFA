@@ -281,8 +281,7 @@ def render_dfm_model_training_page(st_instance):
             if _state.get('dfm_validation_start_date') is None:
                 _state.set('dfm_validation_start_date', date_defaults['validation_start'])
             if _state.get('dfm_observation_start_date') is None:
-                default_obs_start_timestamp = pd.Timestamp(date_defaults['validation_end']) + pd.Timedelta(weeks=1)
-                _state.set('dfm_observation_start_date', default_obs_start_timestamp.date())
+                _state.set('dfm_observation_start_date', UIConfig.DEFAULT_OBSERVATION_START)
 
     # ===== 训练算法选择 =====
     st_instance.subheader("训练算法")
@@ -335,27 +334,23 @@ def render_dfm_model_training_page(st_instance):
         )
         _state.set('dfm_training_start_date', training_start_value)
 
+    # 判断是否为DDFM模式
+    is_ddfm_mode = (current_algorithm == 'deep_learning')
+
     with col_time2:
-        # 判断是否为DDFM模式
-        is_ddfm_mode = (current_algorithm == 'deep_learning')
-
         if is_ddfm_mode:
-            # DDFM模式：validation_start/end映射到观察期
-            # 用户设置的observation_start就是DDFM的观察期开始
-            # 显示为禁用状态，值等于observation_start
-            observation_start_temp = _state.get('dfm_observation_start_date', date_defaults['validation_end'])
-
-            validation_start_value = st_instance.date_input(
-                "观察期开始（DDFM模式）",
-                value=observation_start_temp,
-                key='dfm_validation_start_date_input',
-                disabled=True,
-                help=f"DDFM模式下，此日期等于观察期开始日期"
+            # DDFM模式：没有验证期，显示观察期开始
+            observation_start_value = st_instance.date_input(
+                "观察期开始",
+                value=_state.get('dfm_observation_start_date', UIConfig.DEFAULT_OBSERVATION_START),
+                key='dfm_observation_start_date_input',
+                help="观察期开始日期，训练期将延伸到该日期的前一期"
             )
-            # DDFM的validation_start直接使用observation_start
-            _state.set('dfm_validation_start_date', observation_start_temp)
+            _state.set('dfm_observation_start_date', observation_start_value)
+            # DDFM内部用validation_start/end存储观察期范围
+            _state.set('dfm_validation_start_date', observation_start_value)
         else:
-            # 经典DFM模式：正常可编辑
+            # 经典DFM模式：显示验证期开始
             validation_start_value = st_instance.date_input(
                 "验证期开始",
                 value=_state.get('dfm_validation_start_date', date_defaults['validation_start']),
@@ -365,28 +360,32 @@ def render_dfm_model_training_page(st_instance):
             _state.set('dfm_validation_start_date', validation_start_value)
 
     with col_time3:
-        observation_start_value = st_instance.date_input(
-            "观察期开始",
-            value=_state.get('dfm_observation_start_date', date_defaults['validation_end']),
-            key='dfm_observation_start_date_input',
-            help=f"观察期开始日期，验证期结束日期自动设置为该日期的上一{freq_label}"
-        )
-        _state.set('dfm_observation_start_date', observation_start_value)
-
-    # 自动计算验证期结束日期（根据算法不同）
-    if current_algorithm == 'deep_learning':
-        # DDFM模式：validation_end = 数据结束日期（观察期结束）
-        if not has_data or not isinstance(data_df.index, pd.DatetimeIndex):
-            raise ValueError("DDFM模式需要有效的数据，请先上传预处理后的数据文件")
-        validation_end_value = data_df.index.max().date()
-    else:
-        # 经典DFM模式：validation_end = observation_start的前一期
-        validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
-
-    _state.set('dfm_validation_end_date', validation_end_value)
-    # 仅在经典DFM模式下显示验证期结束提示
-    if current_algorithm != 'deep_learning':
-        st_instance.caption(f"验证期结束: {validation_end_value.strftime('%Y-%m-%d')}")
+        if is_ddfm_mode:
+            # DDFM模式：显示观察期结束（数据最后日期，只读）
+            if not has_data or not isinstance(data_df.index, pd.DatetimeIndex):
+                raise ValueError("DDFM模式需要有效的数据，请先上传预处理后的数据文件")
+            observation_end_value = data_df.index.max().date()
+            st_instance.date_input(
+                "观察期结束",
+                value=observation_end_value,
+                key='dfm_observation_end_date_display',
+                disabled=True,
+                help="观察期结束日期（数据最后日期）"
+            )
+            _state.set('dfm_validation_end_date', observation_end_value)
+        else:
+            # 经典DFM模式：显示观察期开始
+            observation_start_value = st_instance.date_input(
+                "观察期开始",
+                value=_state.get('dfm_observation_start_date', UIConfig.DEFAULT_OBSERVATION_START),
+                key='dfm_observation_start_date_input',
+                help=f"观察期开始日期，验证期结束日期自动设置为该日期的上一{freq_label}"
+            )
+            _state.set('dfm_observation_start_date', observation_start_value)
+            # 经典DFM：validation_end = observation_start的前一期
+            validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
+            _state.set('dfm_validation_end_date', validation_end_value)
+            st_instance.caption(f"验证期结束: {validation_end_value.strftime('%Y-%m-%d')}")
 
     # ===== 卡片2: 模型核心配置 =====
     st_instance.subheader("模型核心配置")

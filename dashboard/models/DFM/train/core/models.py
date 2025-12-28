@@ -93,6 +93,7 @@ class DFMModelResult:
     factors: np.ndarray = None  # 因子时间序列（滤波）
     factors_smooth: np.ndarray = None  # 平滑因子
     kalman_gains_history: Optional[List[np.ndarray]] = None  # 卡尔曼增益历史（用于新闻分解）
+    factor_states_predicted: Optional[np.ndarray] = None  # 先验因子状态 (n_time, n_factors)，用于新闻分解的expected_value计算
 
     # 预测结果
     forecast_is: np.ndarray = None  # 训练期预测

@@ -15,7 +15,7 @@ class UIConfig:
     # 日期默认值
     DEFAULT_TRAINING_START = date(2020, 1, 1)
     DEFAULT_VALIDATION_START = date(2025, 7, 1)
-    DEFAULT_OBSERVATION_START = date(2025, 12, 31)  # 观察期开始日期（原validation_end）
+    DEFAULT_OBSERVATION_START = date(2025, 7, 1)  # 观察期开始日期（DDFM模式使用）
 
     # 估计方法选项
     ESTIMATION_METHODS = {

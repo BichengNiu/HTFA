@@ -91,10 +91,21 @@ def execute_news_analysis(
         impact_analyzer = ImpactAnalyzer(nowcast_extractor)
         news_calculator = NewsImpactCalculator(impact_analyzer)
 
+        # 阶段2.5: 创建先验预测器
+        print("[API] 阶段2.5: 创建先验预测器")
+        from .core.prior_predictor import ObservationPriorPredictor
+        prior_predictor = ObservationPriorPredictor(
+            factor_states_predicted=saved_nowcast_data.factor_states_predicted,
+            factor_loadings=saved_nowcast_data.factor_loadings,
+            variable_index_map=saved_nowcast_data.variable_index_map,
+            time_index=saved_nowcast_data.nowcast_series.index
+        )
+        print("[API] 先验预测器创建成功")
+
         # 阶段3: 提取真实数据发布（仅当月）
         print("[API] 阶段3: 提取真实数据发布")
         target_date = pd.to_datetime(target_month)
-        data_releases = _extract_real_data_releases(saved_nowcast_data, target_month)
+        data_releases = _extract_real_data_releases(saved_nowcast_data, target_month, prior_predictor)
 
         # 阶段4: 执行影响分析
         print("[API] 阶段4: 执行影响分析")
@@ -187,7 +198,8 @@ def _create_workspace_directory(base_dir: Optional[str]) -> str:
 
 def _extract_real_data_releases(
     saved_nowcast_data: SavedNowcastData,
-    target_month_str: str
+    target_month_str: str,
+    prior_predictor
 ) -> List[DataRelease]:
     """
     从真实历史数据中提取目标月份的数据发布事件
@@ -195,49 +207,47 @@ def _extract_real_data_releases(
     Args:
         saved_nowcast_data: 保存的nowcast数据（包含prepared_data）
         target_month_str: 目标月份字符串（格式: YYYY-MM）
+        prior_predictor: 先验预测器，用于计算expected_value
 
     Returns:
         目标月份内的数据发布列表
     """
     releases = []
 
+    # 验证必需数据
+    if saved_nowcast_data.prepared_data is None:
+        raise ValidationError("prepared_data不可用，无法提取数据发布")
+
+    if saved_nowcast_data.variable_index_map is None:
+        raise ValidationError("variable_index_map不可用")
+
+    prepared_data = saved_nowcast_data.prepared_data
+    variable_index_map = saved_nowcast_data.variable_index_map
+
+    # 获取可用变量列表（排除目标变量）
+    target_var = saved_nowcast_data.target_variable
+    available_variables = [var for var in variable_index_map.keys() if var != target_var]
+
+    if not available_variables:
+        raise ValidationError("没有可用的非目标变量")
+
+    # 计算目标月份的日期范围
+    target_date = pd.to_datetime(target_month_str)
+    month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
+
+    # 计算月末
+    if target_date.month == 12:
+        month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
+    else:
+        month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
+
+    # 筛选目标月份范围内的日期
+    selected_dates = prepared_data.index[(prepared_data.index >= month_start) & (prepared_data.index <= month_end)]
+
+    if len(selected_dates) == 0:
+        raise ValidationError(f"目标月份 {target_month_str} 没有找到任何数据")
+
     try:
-        # 检查prepared_data是否可用
-        if saved_nowcast_data.prepared_data is None:
-            print("[API] 警告: prepared_data不可用，无法提取真实数据发布")
-            return []
-
-        prepared_data = saved_nowcast_data.prepared_data
-        variable_index_map = saved_nowcast_data.variable_index_map
-
-        if variable_index_map is None:
-            print("[API] 警告: variable_index_map不可用")
-            return []
-
-        # 获取可用变量列表（排除目标变量）
-        target_var = saved_nowcast_data.target_variable
-        available_variables = [var for var in variable_index_map.keys() if var != target_var]
-
-        if not available_variables:
-            print("[API] 警告: 没有可用的非目标变量")
-            return []
-
-        # 计算目标月份的日期范围
-        target_date = pd.to_datetime(target_month_str)
-        month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
-
-        # 计算月末
-        if target_date.month == 12:
-            month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
-        else:
-            month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
-
-        # 筛选目标月份范围内的日期
-        selected_dates = prepared_data.index[(prepared_data.index >= month_start) & (prepared_data.index <= month_end)]
-
-        if len(selected_dates) == 0:
-            print(f"[API] 警告: 目标月份 {target_month_str} 没有找到任何数据")
-            return []
 
         print(f"[API] 目标月份: {target_month_str} (范围: {month_start.strftime('%Y-%m-%d')} 到 {month_end.strftime('%Y-%m-%d')})")
         print(f"[API] 提取数据发布: {len(selected_dates)}个时间点 x {len(available_variables)}个变量")
@@ -263,19 +273,8 @@ def _extract_real_data_releases(
                     skipped_missing += 1
                     continue
 
-                # 使用前一期的观测值作为"期望值"（简化处理）
-                # 更严格的做法是使用卡尔曼滤波的一步前向预测
-                # 从整个prepared_data的时间索引中查找前一期（不限于当月）
-                all_dates = prepared_data.index
-                date_position = all_dates.get_loc(release_date)
-
-                if date_position > 0:
-                    prev_date = all_dates[date_position - 1]
-                    expected_value = prepared_data.loc[prev_date, var_name]
-                    if pd.isna(expected_value):
-                        expected_value = observed_value  # 如果前一期缺失，使用当期值
-                else:
-                    expected_value = observed_value  # 数据集第一期没有前值，使用当期值
+                # 使用卡尔曼滤波的先验预测作为expected_value
+                expected_value = prior_predictor.get_prior_prediction(var_name, release_date)
 
                 # 获取变量索引
                 variable_index = variable_index_map.get(var_name)
@@ -299,11 +298,10 @@ def _extract_real_data_releases(
         print(f"[API] DEBUG: 跳过统计 - 缺失值={skipped_missing}, 不在列中={skipped_not_in_columns}")
         return releases
 
+    except (ValidationError, ComputationError):
+        raise
     except Exception as e:
-        print(f"[API] ERROR: 真实数据提取失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return []
+        raise ComputationError(f"真实数据提取失败: {str(e)}")
 
 
 def _generate_analysis_results(
@@ -514,5 +512,4 @@ def _create_visualizations(
         print(f"[API] 可视化创建失败: {str(e)}")
         import traceback
         traceback.print_exc()
-        # 可视化失败不应该影响整体分析
-        return {}
+        raise ComputationError(f"可视化创建失败: {str(e)}")

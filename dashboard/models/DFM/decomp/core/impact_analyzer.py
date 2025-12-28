@@ -10,10 +10,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime
 
 from ..utils.exceptions import ComputationError, ValidationError
-from ..utils.helpers import safe_matrix_division, ensure_numerical_stability
 from .nowcast_extractor import NowcastExtractor
 
 
@@ -35,7 +33,7 @@ class ImpactResult:
     impact_on_target: float
     contribution_percentage: float
     kalman_weight: float
-    confidence_interval: Optional[Tuple[float, float]] = None
+    confidence_interval: Tuple[float, float] = None
     calculation_details: Optional[Dict[str, Any]] = None
 
 
@@ -100,6 +98,11 @@ class ImpactAnalyzer:
             ValidationError: 数据验证失败时抛出
         """
         try:
+            # 调试日志：输入参数
+            print(f"[ImpactAnalyzer] === {release.variable_name} @ {release.timestamp} ===")
+            print(f"[ImpactAnalyzer] observed={release.observed_value:.4f}, expected={release.expected_value:.4f}")
+            print(f"[ImpactAnalyzer] innovation={release.observed_value - release.expected_value:.4f}")
+
             # 检查数据完整性
             if self.extractor.data.kalman_gains_history is None:
                 raise ComputationError(
@@ -132,6 +135,9 @@ class ImpactAnalyzer:
 
             # 7. 计算有效卡尔曼权重（用于报告）
             effective_kalman_weight = np.linalg.norm(K_col)  # 向量的范数
+
+            # 调试日志：计算结果
+            print(f"[ImpactAnalyzer] ||K_col||={effective_kalman_weight:.4f}, impact={impact_on_target:.4f}")
 
             # 8. 计算贡献百分比（相对于标准化的基准）
             contribution_percentage = self._calculate_contribution_percentage(impact_on_target)
@@ -420,24 +426,13 @@ class ImpactAnalyzer:
         Raises:
             ValidationError: 数据不可用时抛出
         """
-        # 优先使用target_factor_loading字段
-        if self.extractor.data.target_factor_loading is not None:
-            lambda_y = self.extractor.data.target_factor_loading
-            return lambda_y
+        if self.extractor.data.target_factor_loading is None:
+            raise ValidationError(
+                "目标变量因子载荷不可用。\n"
+                "请使用新版本训练模块重新训练模型以支持影响分解功能。"
+            )
 
-        # 降级方案：从H矩阵通过索引提取（向后兼容旧模型）
-        if self.extractor.data.factor_loadings is None:
-            raise ValidationError("因子载荷矩阵（H矩阵）不可用")
-
-        if self.extractor.data.target_variable_index is None:
-            raise ValidationError("目标变量索引不可用，且缺少target_factor_loading字段")
-
-        # H矩阵形状为 (n_variables, n_factors)
-        # 提取目标变量对应的行，得到载荷向量
-        target_index = self.extractor.data.target_variable_index
-        lambda_y = self.extractor.data.factor_loadings[target_index, :]  # (n_factors,)
-
-        return lambda_y
+        return self.extractor.data.target_factor_loading
 
     def _get_kalman_gain_at_time(self, timestamp: pd.Timestamp) -> np.ndarray:
         """
@@ -485,6 +480,23 @@ class ImpactAnalyzer:
         if K_t is None:
             raise ComputationError(f"未找到可用的卡尔曼增益矩阵（目标时间: {timestamp}）")
 
+        # K_t的原始形状是(n_states, n_obs)，其中n_states = n_factors * max_lags
+        # 影响分析只需要前n_factors行（当前因子的增益）
+        # 从target_factor_loading获取n_factors
+        if self.extractor.data.target_factor_loading is None:
+            raise ComputationError(
+                "目标变量因子载荷不可用，无法确定因子数量。\n"
+                "请使用新版本训练模块重新训练模型。"
+            )
+
+        n_factors = len(self.extractor.data.target_factor_loading)
+
+        if K_t.shape[0] > n_factors:
+            # 只取前n_factors行
+            original_rows = K_t.shape[0]
+            K_t = K_t[:n_factors, :]
+            print(f"[ImpactAnalyzer] K_t从({original_rows}, {K_t.shape[1]})截取为({n_factors}, {K_t.shape[1]})")
+
         return K_t
 
     def _get_variable_index(self, variable_name: str) -> int:
@@ -529,21 +541,17 @@ class ImpactAnalyzer:
         self,
         impact: float,
         measurement_error: Optional[float] = None
-    ) -> Optional[Tuple[float, float]]:
+    ) -> Tuple[float, float]:
         """计算置信区间"""
-        try:
-            # 简化的置信区间计算
-            # 实际应用中应该基于完整的协方差矩阵
-            if measurement_error is None:
-                measurement_error = 0.1  # 默认测量误差
+        # 简化的置信区间计算
+        # 实际应用中应该基于完整的协方差矩阵
+        if measurement_error is None:
+            measurement_error = 0.1  # 默认测量误差
 
-            standard_error = measurement_error * abs(impact) if impact != 0 else measurement_error
-            margin = 1.96 * standard_error  # 95% 置信区间
+        standard_error = measurement_error * abs(impact) if impact != 0 else measurement_error
+        margin = 1.96 * standard_error  # 95% 置信区间
 
-            return (impact - margin, impact + margin)
-
-        except Exception:
-            return None
+        return (impact - margin, impact + margin)
 
     def get_analysis_summary(self) -> Dict[str, Any]:
         """
@@ -552,17 +560,37 @@ class ImpactAnalyzer:
         Returns:
             分析器摘要字典
         """
+        data = self.extractor.data
+
+        # 获取K_t维度信息
+        kt_shape = None
+        latest_kt = None
+        if data.kalman_gains_history:
+            for K_t in data.kalman_gains_history:
+                if K_t is not None:
+                    kt_shape = K_t.shape
+                    latest_kt = K_t
+                    break
+
         summary = {
-            'kalman_gains_shape': self._kalman_gains.shape if self._kalman_gains is not None else None,
-            'variable_mapping_count': len(self._variable_mapping) if self._variable_mapping else 0,
+            'kalman_gains_available': data.kalman_gains_history is not None,
+            'kalman_gains_timesteps': len(data.kalman_gains_history) if data.kalman_gains_history else 0,
+            'kalman_gains_shape': kt_shape,
+            'variable_mapping_count': len(data.variable_index_map) if data.variable_index_map else 0,
             'cached_impacts_count': len(self._impact_cache) if self._impact_cache else 0,
         }
 
-        if self._kalman_gains is not None:
+        if kt_shape is not None:
+            # K_t形状为(n_factors, n_variables)
             summary.update({
-                'max_kalman_weight': float(np.max(np.abs(self._kalman_gains))),
-                'mean_kalman_weight': float(np.mean(np.abs(self._kalman_gains))),
-                'kalman_gains_condition_number': float(np.linalg.cond(self._kalman_gains)),
+                'n_factors': kt_shape[0],
+                'n_variables': kt_shape[1],
+            })
+
+        if latest_kt is not None:
+            summary.update({
+                'max_kalman_weight': float(np.max(np.abs(latest_kt))),
+                'mean_kalman_weight': float(np.mean(np.abs(latest_kt))),
             })
 
         return summary

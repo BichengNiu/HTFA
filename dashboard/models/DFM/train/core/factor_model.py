@@ -484,6 +484,12 @@ class DFMModel:
         logger.debug(f"[EM结束] 最终因子标准差: {factors_smoothed_final.std(axis=1)}")
         logger.debug(f"[EM结束] 最终载荷范围: [{Lambda.min():.2f}, {Lambda.max():.2f}]")
 
+        # 提取先验因子状态（用于新闻分解的expected_value计算）
+        # x_predicted形状: (n_time, n_states)，n_states = n_factors * max_lags
+        # 只取前n_factors列
+        factor_states_predicted = filter_result.x_predicted[:, :self.n_factors].copy()
+        logger.info(f"[EM结束] 提取先验因子状态: 形状={factor_states_predicted.shape}")
+
         # 返回统一的DFMModelResult
         return DFMModelResult(
             A=A,
@@ -493,6 +499,7 @@ class DFMModel:
             factors=factors_smoothed_final,  # (n_factors, n_time)
             factors_smooth=factors_smoothed_final,  # 同上
             kalman_gains_history=filter_result.kalman_gains_history,  # 保存卡尔曼增益历史
+            factor_states_predicted=factor_states_predicted,  # 先验因子状态 (n_time, n_factors)
             converged=converged,
             iterations=iteration + 1,
             log_likelihood=loglik_current

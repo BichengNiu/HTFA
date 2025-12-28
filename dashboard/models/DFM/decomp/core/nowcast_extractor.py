@@ -81,34 +81,23 @@ class NowcastExtractor:
 
     def get_kalman_gains_matrix(self) -> np.ndarray:
         """
-        获取卡尔曼增益矩阵（已废弃）
-
-        警告: 此方法已废弃，仅为向后兼容保留。
-        新的实现应直接访问 self.data.kalman_gains_history 获取完整的K_t历史。
+        获取最后一个可用的卡尔曼增益矩阵
 
         Returns:
-            最后一个可用的卡尔曼增益矩阵（如果有）或因子载荷矩阵H（向后兼容）
+            最后一个可用的卡尔曼增益矩阵
 
         Raises:
-            DataFormatError: 数据不可用时抛出
+            DataFormatError: 卡尔曼增益历史不可用时抛出
         """
-        print("[NowcastExtractor] 警告: get_kalman_gains_matrix()已废弃")
-
-        # 新版本：尝试返回最后一个可用的K_t
         if self.data.kalman_gains_history is not None and len(self.data.kalman_gains_history) > 0:
-            # 从后向前查找第一个非None的K_t
             for K_t in reversed(self.data.kalman_gains_history):
                 if K_t is not None:
-                    print(f"[NowcastExtractor] 返回最后可用的K_t矩阵: {K_t.shape}")
                     return K_t
 
-        # 向后兼容：如果没有K_t历史，返回H矩阵（旧行为，但这是错误的！）
-        if self.data.factor_loadings is not None:
-            print("[NowcastExtractor] 警告: 返回H矩阵（观测矩阵）用于向后兼容")
-            print("[NowcastExtractor] 注意: 这不是真正的卡尔曼增益！请重新训练模型。")
-            return self.data.factor_loadings
-
-        raise DataFormatError("卡尔曼增益历史和因子载荷矩阵都不可用")
+        raise DataFormatError(
+            "卡尔曼增益历史不可用。\n"
+            "请使用新版本训练模块重新训练模型以支持影响分解功能。"
+        )
 
     def extract_factor_loadings(self) -> np.ndarray:
         """
@@ -166,7 +155,7 @@ class NowcastExtractor:
                 'timestamp': target_date,
                 'nowcast_value': self._aligned_data['nowcast_series'].loc[target_date],
                 'factor_loadings': self.data.factor_loadings,
-                'kalman_gains': self.data.kalman_gains
+                'kalman_gains': self._get_latest_kalman_gain()
             }
 
             print(f"[NowcastExtractor] 提取 {target_date} 的模型状态")
@@ -346,8 +335,8 @@ class NowcastExtractor:
             'target_variable': self.data.target_variable,
             'data_period': self.data.data_period,
             'nowcast_data_points': len(self.data.nowcast_series) if self.data.nowcast_series is not None else 0,
-            'factor_count': self.data.kalman_gains.shape[1] if self.data.kalman_gains is not None else 0,
-            'variable_count': self.data.kalman_gains.shape[0] if self.data.kalman_gains is not None else 0,
+            'factor_count': self.data.factor_loadings.shape[1] if self.data.factor_loadings is not None else 0,
+            'variable_count': self.data.factor_loadings.shape[0] if self.data.factor_loadings is not None else 0,
         }
 
         if self.data.nowcast_series is not None:
@@ -362,3 +351,17 @@ class NowcastExtractor:
             summary['convergence_info'] = self.data.convergence_info
 
         return summary
+
+    def _get_latest_kalman_gain(self) -> Optional[np.ndarray]:
+        """
+        从kalman_gains_history获取最后一个有效的K_t矩阵
+
+        Returns:
+            最后一个非None的K_t矩阵，如果不可用则返回None
+        """
+        if self.data.kalman_gains_history is None:
+            return None
+        for K_t in reversed(self.data.kalman_gains_history):
+            if K_t is not None:
+                return K_t
+        return None

@@ -669,6 +669,12 @@ class DDFMModel:
         factors = kf_result.x_filtered[:, :self.n_factors].T
         kalman_gains_history = kf_result.kalman_gains_history
 
+        # 提取先验因子状态（用于新闻分解的expected_value计算）
+        # x_predicted形状: (n_time, n_states)，n_states根据factor_order变化
+        # 只取前n_factors列以匹配DFM标准格式
+        factor_states_predicted = kf_result.x_predicted[:, :self.n_factors].copy()
+        logger.info(f"[DDFM] 提取先验因子状态: 形状={factor_states_predicted.shape}")
+
         # 构建结果对象
         self.results_ = DFMModelResult(
             A=A,
@@ -678,6 +684,7 @@ class DDFMModel:
             factors=factors,
             factors_smooth=factors,
             kalman_gains_history=kalman_gains_history,
+            factor_states_predicted=factor_states_predicted,  # 先验因子状态 (n_time, n_factors)
             converged=self.loss_now is not None,
             iterations=self.max_iter,
             log_likelihood=-self.loss_now if self.loss_now else -np.inf
