@@ -130,24 +130,29 @@ class ImpactAnalyzer:
             # 步骤：K_col * innovation → (n_factors,) 因子状态变化
             delta_f = K_col * innovation  # (n_factors,) 因子状态的变化量
 
-            # 步骤：λ_y' × delta_f → 标量，映射到目标变量
-            impact_on_target = np.dot(lambda_y, delta_f)  # 标量
+            # 步骤：λ_y' × delta_f → 标量（标准化尺度）
+            impact_standardized = np.dot(lambda_y, delta_f)  # 标量，标准化尺度
 
-            # 7. 计算有效卡尔曼权重（用于报告）
+            # 7. 反标准化到原始尺度
+            target_std = self._get_target_std()
+            impact_on_target = impact_standardized * target_std  # 原始尺度
+
+            # 8. 计算有效卡尔曼权重（用于报告）
             effective_kalman_weight = np.linalg.norm(K_col)  # 向量的范数
 
             # 调试日志：计算结果
-            print(f"[ImpactAnalyzer] ||K_col||={effective_kalman_weight:.4f}, impact={impact_on_target:.4f}")
+            print(f"[ImpactAnalyzer] 影响计算: standardized={impact_standardized:.4f}, "
+                  f"std={target_std:.4f}, original={impact_on_target:.4f}")
 
-            # 8. 计算贡献百分比（相对于标准化的基准）
+            # 9. 计算贡献百分比（相对于标准化的基准）
             contribution_percentage = self._calculate_contribution_percentage(impact_on_target)
 
-            # 9. 计算置信区间
+            # 10. 计算置信区间
             confidence_interval = self._calculate_confidence_interval(
                 impact_on_target, release.measurement_error
             )
 
-            # 10. 构建详细的计算信息
+            # 11. 构建详细的计算信息
             calculation_details = {
                 'innovation': float(innovation),
                 'variable_index': int(variable_index),
@@ -552,6 +557,32 @@ class ImpactAnalyzer:
         margin = 1.96 * standard_error  # 95% 置信区间
 
         return (impact - margin, impact + margin)
+
+    def _get_target_std(self) -> float:
+        """
+        获取目标变量标准差（用于反标准化）
+
+        Returns:
+            目标变量训练期标准差
+
+        Raises:
+            ValidationError: 数据不可用或无效时抛出
+        """
+        target_std = self.extractor.data.target_std_original
+
+        if target_std is None:
+            raise ValidationError(
+                "目标变量标准差不可用。\n"
+                "请使用新版本训练模块重新训练模型以支持影响分解功能。"
+            )
+
+        if target_std <= 0:
+            raise ValidationError(
+                f"目标变量标准差={target_std}不是正数。\n"
+                "标准差必须大于0才能进行反标准化。"
+            )
+
+        return target_std
 
     def get_analysis_summary(self) -> Dict[str, Any]:
         """

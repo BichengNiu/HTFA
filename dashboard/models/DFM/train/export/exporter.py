@@ -164,6 +164,7 @@ class TrainingResultExporter:
                 'k_factors': int(result.k_factors),  # 转换为Python int，避免numpy类型问题
                 'variable_selection_method': config.variable_selection_method if config.enable_variable_selection else '全选',
                 'tuning_objective': 'RMSE' if config.enable_variable_selection else 'N/A',
+                'algorithm': config.algorithm,  # 算法类型: 'classical' 或 'deep_learning'
             },
 
             # 日期（不使用默认值，字段缺失时抛出AttributeError）

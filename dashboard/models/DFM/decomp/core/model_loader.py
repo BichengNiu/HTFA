@@ -38,6 +38,8 @@ class SavedNowcastData:
         self.prepared_data: Optional[pd.DataFrame] = None  # 新增：complete_aligned_table（包含所有历史观测数据）
         self.model_type: Optional[str] = None  # 新增：模型类型 'classical' 或 'deep_learning'
         self.factor_states_predicted: Optional[np.ndarray] = None  # 先验因子状态 (n_time, n_factors)，用于expected_value计算
+        self.target_mean_original: Optional[float] = None  # 新增：目标变量训练期均值（用于反标准化）
+        self.target_std_original: Optional[float] = None  # 新增：目标变量训练期标准差（用于反标准化）
 
 
 class ModelLoader:
@@ -123,17 +125,28 @@ class ModelLoader:
 
         Returns:
             模型类型: 'classical' 或 'deep_learning'
+
+        Raises:
+            ModelLoadError: 元数据不可用或缺少算法信息时抛出
         """
         if self._metadata is None:
-            return 'classical'  # 默认
+            raise ModelLoadError("元数据不可用，无法检测模型类型")
 
         # 优先从best_params检测
-        best_params = self._metadata.get('best_params', {})
-        if 'algorithm' in best_params:
-            return best_params['algorithm']
+        if 'best_params' in self._metadata:
+            best_params = self._metadata['best_params']
+            if 'algorithm' in best_params:
+                return best_params['algorithm']
 
         # 从顶层检测
-        return self._metadata.get('algorithm', 'classical')
+        if 'algorithm' not in self._metadata:
+            raise ModelLoadError(
+                "元数据中缺少算法信息。\n"
+                "无法确定模型类型（'classical' 或 'deep_learning'）。\n"
+                "请使用新版本训练模块重新训练模型。"
+            )
+
+        return self._metadata['algorithm']
 
     def extract_saved_nowcast(self) -> SavedNowcastData:
         """
@@ -188,13 +201,18 @@ class ModelLoader:
             # 11. 提取行业分类映射
             nowcast_data.var_industry_map = self._extract_industry_map()
 
-            # 12. 提取先验因子状态（可选字段）
+            # 12. 提取先验因子状态（必需字段）
             nowcast_data.factor_states_predicted = self._extract_factor_states_predicted()
 
-            # 13. 保存原始元数据
+            # 13. 提取目标变量标准化参数（用于影响分解反标准化）
+            target_mean, target_std = self._extract_target_standardization_params()
+            nowcast_data.target_mean_original = target_mean
+            nowcast_data.target_std_original = target_std
+
+            # 14. 保存原始元数据
             nowcast_data.metadata = self._metadata.copy()
 
-            # 14. 检测并设置模型类型
+            # 15. 检测并设置模型类型
             nowcast_data.model_type = self.detect_model_type()
             print(f"[ModelLoader] 模型类型: {nowcast_data.model_type}")
 
@@ -390,18 +408,23 @@ class ModelLoader:
         return parameters
 
     def _extract_data_period(self) -> Tuple[str, str]:
-        """提取数据时间范围"""
-        if self._nowcast_data and self._nowcast_data.nowcast_series is not None:
-            start_date = self._nowcast_data.nowcast_series.index.min()
-            end_date = self._nowcast_data.nowcast_series.index.max()
-            return str(start_date), str(end_date)
+        """提取数据时间范围
 
+        Raises:
+            DataFormatError: 时间范围信息缺失时抛出
+        """
         # 从元数据中获取
-        start_date = self._metadata.get('training_start_date')
-        end_date = self._metadata.get('validation_end_date')
+        if 'training_start_date' not in self._metadata:
+            raise DataFormatError("元数据中缺少training_start_date字段")
+
+        if 'validation_end_date' not in self._metadata:
+            raise DataFormatError("元数据中缺少validation_end_date字段")
+
+        start_date = self._metadata['training_start_date']
+        end_date = self._metadata['validation_end_date']
 
         if not start_date or not end_date:
-            raise DataFormatError("无法确定数据时间范围")
+            raise DataFormatError("数据时间范围为空")
 
         return start_date, end_date
 
@@ -477,7 +500,8 @@ class ModelLoader:
         variable_index_map = {var_name: idx for idx, var_name in enumerate(variable_list)}
 
         # 获取目标变量信息（仅用于日志）
-        target_variable = self._metadata.get('target_variable')
+        # 注意：target_variable已在_extract_target_variable中验证存在
+        target_variable = self._metadata['target_variable']
         if target_variable:
             print(f"[ModelLoader] 目标变量: {target_variable} (不在预测变量映射中)")
 
@@ -540,6 +564,55 @@ class ModelLoader:
         print(f"[ModelLoader] 提取先验因子状态: 形状={data.shape}")
         return data
 
+    def _extract_target_standardization_params(self) -> Tuple[float, float]:
+        """
+        提取目标变量标准化参数（用于影响分解反标准化）
+
+        Returns:
+            (target_mean, target_std) 元组
+
+        Raises:
+            DataFormatError: 数据缺失或格式错误时抛出
+        """
+        # 验证并提取 target_mean_original
+        if 'target_mean_original' not in self._metadata:
+            raise DataFormatError(
+                "元数据中缺少target_mean_original字段。\n"
+                "影响分解功能需要目标变量标准化参数。\n"
+                "请使用新版本训练模块重新训练模型以支持此功能。"
+            )
+
+        target_mean = self._metadata['target_mean_original']
+        if not isinstance(target_mean, (int, float)):
+            raise DataFormatError(
+                f"target_mean_original格式无效，应为数值类型，实际为{type(target_mean)}"
+            )
+
+        # 验证并提取 target_std_original
+        if 'target_std_original' not in self._metadata:
+            raise DataFormatError(
+                "元数据中缺少target_std_original字段。\n"
+                "影响分解功能需要目标变量标准化参数。\n"
+                "请使用新版本训练模块重新训练模型以支持此功能。"
+            )
+
+        target_std = self._metadata['target_std_original']
+        if not isinstance(target_std, (int, float)):
+            raise DataFormatError(
+                f"target_std_original格式无效，应为数值类型，实际为{type(target_std)}"
+            )
+
+        # 验证标准差为正数
+        if target_std <= 0:
+            raise DataFormatError(
+                f"target_std_original={target_std}不是正数。\n"
+                "标准差必须大于0才能进行反标准化。\n"
+                "请检查训练数据是否存在问题。"
+            )
+
+        print(f"[ModelLoader] 提取标准化参数: mean={target_mean:.4f}, std={target_std:.4f}")
+        return float(target_mean), float(target_std)
+
     def _validate_extracted_data(self, nowcast_data: SavedNowcastData) -> None:
         """验证提取的数据完整性"""
         # 验证必需字段（这些字段如果缺失，extraction方法已经抛出异常）
@@ -559,6 +632,15 @@ class ModelLoader:
             raise ValidationError("历史观测数据表不可用")
         if nowcast_data.factor_states_predicted is None:
             raise ValidationError("先验因子状态数据不可用")
+        if nowcast_data.target_mean_original is None:
+            raise ValidationError("目标变量均值不可用")
+        if nowcast_data.target_std_original is None:
+            raise ValidationError("目标变量标准差不可用")
+        if nowcast_data.target_std_original <= 0:
+            raise ValidationError(
+                f"目标变量标准差={nowcast_data.target_std_original}不是正数。"
+                "标准差必须大于0才能进行反标准化。"
+            )
 
         # 验证维度一致性
         # 获取因子数和变量数

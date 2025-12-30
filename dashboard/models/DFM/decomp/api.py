@@ -10,7 +10,7 @@ import os
 import tempfile
 import pandas as pd
 import numpy as np
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import traceback
 
@@ -22,6 +22,24 @@ from .visualization.waterfall_plotter import ImpactWaterfallPlotter
 from .utils.industry_aggregator import IndustryAggregator
 from .utils.data_flow_formatter import DataFlowFormatter
 from .utils.exceptions import DecompError, ModelLoadError, ComputationError, ValidationError
+
+
+def _get_month_date_range(target_date: pd.Timestamp) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    """
+    计算目标日期所在月份的起止日期
+
+    Args:
+        target_date: 目标日期
+
+    Returns:
+        (month_start, month_end) 元组
+    """
+    month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
+    if target_date.month == 12:
+        month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
+    else:
+        month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
+    return month_start, month_end
 
 
 def execute_news_analysis(
@@ -111,11 +129,20 @@ def execute_news_analysis(
         print("[API] 阶段4: 执行影响分析")
         contributions = news_calculator.calculate_news_contributions(data_releases, target_date)
 
+        # 阶段4.5: 归一化影响值到实际Nowcast变化
+        print("[API] 阶段4.5: 归一化影响值")
+        contributions, normalization_info = _normalize_impacts_to_actual_change(
+            contributions,
+            saved_nowcast_data.nowcast_series,
+            target_date
+        )
+
         # 阶段5: 生成分析结果（包括行业聚合和数据流）
         print("[API] 阶段5: 生成分析结果")
         analysis_results = _generate_analysis_results(
             news_calculator, contributions, target_date, workspace_dir,
-            saved_nowcast_data.var_industry_map, saved_nowcast_data.nowcast_series
+            saved_nowcast_data.var_industry_map, saved_nowcast_data.nowcast_series,
+            normalization_info
         )
 
         # 阶段6: 创建可视化（纽约联储风格）
@@ -145,6 +172,9 @@ def execute_news_analysis(
         }
 
         print(f"[API] 新闻分析执行成功: 总影响={analysis_results['summary']['total_impact']:.4f}")
+        print(f"[API] DEBUG 归一化验证: first_nowcast={analysis_results['summary'].get('first_nowcast')}, "
+              f"last_nowcast={analysis_results['summary'].get('last_nowcast')}, "
+              f"scale_factor={analysis_results['summary'].get('normalization_scale_factor')}")
         return result
 
     except Exception as e:
@@ -160,6 +190,102 @@ def execute_news_analysis(
             'summary': {},
             'data_flow': []
         }
+
+
+def _normalize_impacts_to_actual_change(
+    contributions: List,
+    nowcast_series: pd.Series,
+    target_date: pd.Timestamp
+) -> Tuple[List, Dict[str, Any]]:
+    """
+    将影响值归一化到实际的Nowcast变化
+
+    由于observed_value和expected_value量纲不一致导致的尺度偏差，
+    通过事后归一化确保：总影响 = 最新Nowcast - 第一次Nowcast
+
+    Args:
+        contributions: 原始贡献列表
+        nowcast_series: Nowcast时间序列
+        target_date: 目标分析日期
+
+    Returns:
+        (归一化后的贡献列表, 归一化信息字典)
+    """
+    from .core.news_impact_calculator import NewsContribution
+
+    # 计算目标月份的日期范围
+    month_start, month_end = _get_month_date_range(target_date)
+
+    # 筛选目标月份的nowcast值
+    month_nowcast = nowcast_series[(nowcast_series.index >= month_start) &
+                                    (nowcast_series.index <= month_end)]
+
+    if len(month_nowcast) < 2:
+        raise ComputationError(
+            f"目标月份 {target_date.strftime('%Y-%m')} 数据点不足（需要至少2个，实际{len(month_nowcast)}个），"
+            "无法计算归一化因子。请检查nowcast_series是否包含该月份的数据。"
+        )
+
+    # 获取第一次和最后一次nowcast值
+    first_nowcast = float(month_nowcast.iloc[0])
+    last_nowcast = float(month_nowcast.iloc[-1])
+    actual_change = last_nowcast - first_nowcast
+
+    # 计算原始累加影响
+    raw_total_impact = sum(c.impact_value for c in contributions)
+
+    # 计算归一化因子
+    if abs(raw_total_impact) < 1e-10:
+        raise ComputationError(
+            f"原始累加影响接近0（{raw_total_impact:.2e}），无法计算有意义的归一化因子。"
+            "这表明影响计算可能存在问题，请检查数据发布和卡尔曼增益。"
+        )
+
+    # 特殊情况：Nowcast无变化
+    if abs(actual_change) < 1e-10:
+        raise ComputationError(
+            f"目标月份Nowcast无变化（first={first_nowcast:.4f}, last={last_nowcast:.4f}），"
+            f"但原始影响累加为{raw_total_impact:.4f}。这是异常情况，请检查数据完整性。"
+        )
+
+    scale_factor = actual_change / raw_total_impact
+
+    # 归一化所有影响值
+    normalized_contributions = []
+    total_abs_normalized = sum(abs(c.impact_value * scale_factor) for c in contributions)
+
+    for contrib in contributions:
+        normalized_impact = contrib.impact_value * scale_factor
+
+        # 重新计算贡献百分比（total_abs_normalized必定>0，因为actual_change和raw_total_impact都非零）
+        new_pct = abs(normalized_impact) / total_abs_normalized * 100
+
+        normalized_contrib = NewsContribution(
+            variable_name=contrib.variable_name,
+            impact_value=normalized_impact,
+            contribution_pct=new_pct,
+            is_positive=normalized_impact > 0,
+            release_date=contrib.release_date,
+            observed_value=contrib.observed_value,
+            expected_value=contrib.expected_value,
+            kalman_weight=contrib.kalman_weight,
+            confidence_interval=contrib.confidence_interval
+        )
+        normalized_contributions.append(normalized_contrib)
+
+    normalization_info = {
+        'first_nowcast': first_nowcast,
+        'last_nowcast': last_nowcast,
+        'actual_change': actual_change,
+        'raw_total_impact': raw_total_impact,
+        'scale_factor': scale_factor
+    }
+
+    print(f"[API] 影响归一化: first={first_nowcast:.4f}, last={last_nowcast:.4f}, "
+          f"actual_change={actual_change:.4f}, raw_total={raw_total_impact:.4f}, "
+          f"scale_factor={scale_factor:.6f}")
+
+    return normalized_contributions, normalization_info
 
 
 def _validate_input_parameters(
@@ -233,13 +359,7 @@ def _extract_real_data_releases(
 
     # 计算目标月份的日期范围
     target_date = pd.to_datetime(target_month_str)
-    month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
-
-    # 计算月末
-    if target_date.month == 12:
-        month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
-    else:
-        month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
+    month_start, month_end = _get_month_date_range(target_date)
 
     # 筛选目标月份范围内的日期
     selected_dates = prepared_data.index[(prepared_data.index >= month_start) & (prepared_data.index <= month_end)]
@@ -276,8 +396,8 @@ def _extract_real_data_releases(
                 # 使用卡尔曼滤波的先验预测作为expected_value
                 expected_value = prior_predictor.get_prior_prediction(var_name, release_date)
 
-                # 获取变量索引
-                variable_index = variable_index_map.get(var_name)
+                # 获取变量索引（var_name必然存在于variable_index_map中）
+                variable_index = variable_index_map[var_name]
 
                 # 创建数据发布对象
                 release = DataRelease(
@@ -310,9 +430,16 @@ def _generate_analysis_results(
     target_date: pd.Timestamp,
     workspace_dir: str,
     var_industry_map: Optional[Dict[str, str]] = None,
-    nowcast_series: Optional[pd.Series] = None
+    nowcast_series: Optional[pd.Series] = None,
+    normalization_info: Dict[str, Any] = None
 ) -> Dict[str, Any]:
-    """生成分析结果（包括行业聚合和数据流）"""
+    """生成分析结果（包括行业聚合和数据流）
+
+    Args:
+        normalization_info: 归一化信息字典（必需）
+    """
+    if normalization_info is None:
+        raise ValidationError("normalization_info参数是必需的，不能为None")
     try:
         # 计算各种分析指标
         ranking_df = news_calculator.rank_variables_by_impact(contributions)
@@ -433,8 +560,11 @@ def _generate_analysis_results(
 
         # 生成摘要信息
         total_impact = sum(c.impact_value for c in contributions)
+        month_start, month_end = _get_month_date_range(target_date)
         summary = {
             'target_date': target_date.strftime('%Y-%m-%d'),
+            'analysis_start': month_start.strftime('%Y-%m-%d'),
+            'analysis_end': month_end.strftime('%Y-%m-%d'),
             'total_impact': float(total_impact),
             'total_releases': len(contributions),
             'positive_impact_sum': float(pn_split['positive_impact']),
@@ -442,7 +572,12 @@ def _generate_analysis_results(
             'top_contributors': ranking_df['variable_name'].head(5).tolist(),
             'key_drivers_count': key_drivers['driver_count'],
             'industry_breakdown': industry_breakdown,
-            'analysis_time': datetime.now().isoformat()
+            'analysis_time': datetime.now().isoformat(),
+            # 归一化信息（必需字段）
+            'first_nowcast': normalization_info['first_nowcast'],
+            'last_nowcast': normalization_info['last_nowcast'],
+            'actual_nowcast_change': normalization_info['actual_change'],
+            'normalization_scale_factor': normalization_info['scale_factor'],
         }
 
         print(f"[API] 分析结果生成完成: CSV文件={len(csv_paths)} 个, 行业数={len(industry_breakdown)}")
@@ -470,23 +605,12 @@ def _create_visualizations(
     try:
         from .core.news_impact_calculator import NewsContribution
 
-        # 转换为NewsContribution对象（如果需要）
+        # 验证contributions类型（不做兼容转换）
         if contributions and not isinstance(contributions[0], NewsContribution):
-            news_contributions = []
-            for contrib in contributions:
-                if hasattr(contrib, 'impact_value'):
-                    news_contrib = NewsContribution(
-                        variable_name=getattr(contrib, 'variable_name', 'Unknown'),
-                        impact_value=getattr(contrib, 'impact_value', 0.0),
-                        contribution_pct=getattr(contrib, 'contribution_pct', 0.0),
-                        is_positive=getattr(contrib, 'impact_value', 0.0) > 0,
-                        release_date=getattr(contrib, 'release_date', target_date),
-                        observed_value=getattr(contrib, 'observed_value', 0.0),
-                        expected_value=getattr(contrib, 'expected_value', 0.0),
-                        kalman_weight=0.1
-                    )
-                    news_contributions.append(news_contrib)
-            contributions = news_contributions
+            raise ValidationError(
+                f"contributions必须是NewsContribution对象列表，"
+                f"实际类型: {type(contributions[0]).__name__}"
+            )
 
         plot_paths = {}
 
@@ -508,6 +632,8 @@ def _create_visualizations(
         print(f"[API] 可视化创建完成: {len(plot_paths)} 个图表")
         return plot_paths
 
+    except (ValidationError, ComputationError):
+        raise
     except Exception as e:
         print(f"[API] 可视化创建失败: {str(e)}")
         import traceback

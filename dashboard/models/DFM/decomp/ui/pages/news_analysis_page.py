@@ -321,7 +321,6 @@ def _render_data_flow_table(st_module, result):
                     '变量名称': release['variable'],
                     '所属行业': release['industry'],
                     '观测值': f"{release['actual']:.4f}",
-                    '贡献值(%)': f"{release['contribution']:.2f}",
                     '影响值': f"{release['impact']:+.4f}",
                     '方向': '↑' if release['is_positive'] else '↓'
                 })
@@ -331,35 +330,16 @@ def _render_data_flow_table(st_module, result):
         else:
             st_module.caption("无发布数据")
 
-    # 添加计算说明
-    with st_module.expander("指标说明"):
-        st_module.markdown("""
-**贡献值（Contribution %）**：表示该数据发布对目标变量预测变动的相对贡献度。
-
-- 计算公式：`贡献值(%) = |该变量的影响值| / Σ|所有变量的影响值| × 100`
-- 所有变量的贡献值总和为100%
-- 贡献值越大，说明该变量对预测变动的解释力越强
-
-**影响值（Impact）**：表示该数据发布导致目标变量预测值的绝对变动量。
-
-- 计算公式：`影响值 = λ_y' × K_t[:, i] × (观测值 - 期望值)`
-  - `λ_y`：目标变量的因子载荷向量
-  - `K_t`：第t期卡尔曼增益矩阵
-  - `观测值 - 期望值`：新息（News）
-- 影响值为正表示该数据发布提升了预测值，为负表示降低了预测值
-- 所有变量的影响值总和等于预测值的总变动量
-
-**示例**：如果GDP增长率预测从5.0%变为5.2%，某变量的影响值为+0.15，贡献值为75%，说明：
-- 该变量使预测值提升了0.15个百分点
-- 在总变动0.2个百分点中，该变量解释了75%的变化
-        """)
-
 
 def _render_summary_cards(st_module, result):
     """渲染统计摘要卡片"""
     summary = result.get('summary', {})
 
     st_module.markdown("##### 关键指标")
+    start_date = summary.get('analysis_start', '')
+    end_date = summary.get('analysis_end', '')
+    if start_date and end_date:
+        st_module.info(f"以下指标基于 {start_date} 至 {end_date} 期间的数据计算")
 
     col1, col2, col3, col4 = st_module.columns(4)
 
@@ -394,6 +374,21 @@ def _render_summary_cards(st_module, result):
             help="降低nowcast值的数据发布总影响"
         )
 
+    # 指标说明
+    with st_module.expander("指标说明"):
+        st_module.markdown("""
+**影响值（Impact）**：表示该数据发布导致目标变量预测值的绝对变动量。
+
+- 计算公式：`影响值 = λ_y' × K_t[:, i] × (观测值 - 期望值)`
+  - `λ_y`：目标变量的因子载荷向量
+  - `K_t`：第t期卡尔曼增益矩阵
+  - `观测值 - 期望值`：新息（News）
+- 影响值为正表示该数据发布提升了预测值，为负表示降低了预测值
+- 所有变量的影响值总和等于预测值的总变动量
+
+**示例**：如果GDP增长率预测从5.0%变为5.2%，某变量的影响值为+0.15，说明该变量使预测值提升了0.15个百分点。
+        """)
+
     # 行业分解
     industry_breakdown = summary.get('industry_breakdown', {})
     if industry_breakdown:
@@ -406,8 +401,7 @@ def _render_summary_cards(st_module, result):
                 '总影响': stats['impact'],
                 '数据发布数': stats['count'],
                 '正向影响': stats['positive_impact'],
-                '负向影响': stats['negative_impact'],
-                '贡献度(%)': stats['contribution_pct']
+                '负向影响': stats['negative_impact']
             })
 
         industry_df = pd.DataFrame(industry_data)
