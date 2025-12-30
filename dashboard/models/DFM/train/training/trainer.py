@@ -360,7 +360,7 @@ class DFMTrainer:
                         result,
                         self.config,
                         output_dir=export_dir,
-                        prepared_data=data  # 传递完整观测数据用于新闻分析
+                        prepared_data=data  # 传递完整观测数据用于影响分解
                     )
 
                     result.export_files = file_paths

@@ -507,6 +507,12 @@ body {
 .platform-header {
     text-align: center !important;
     margin-bottom: 3rem !important;
+    /* 垂直居中 */
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    min-height: 70vh !important;
 }
 
 .platform-title {

@@ -53,7 +53,7 @@ GRANULAR_PERMISSION_MAP = {
                     "数据准备": "model_analysis.dfm.prep",
                     "模型训练": "model_analysis.dfm.train",
                     "模型分析": "model_analysis.dfm.analysis",
-                    "新闻分析": "model_analysis.dfm.news"
+                    "影响分解": "model_analysis.dfm.news"
                 }
             }
         }

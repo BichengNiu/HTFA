@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-DFM新闻分析API接口
+DFM影响分解API接口
 
 提供与前端UI兼容的execute_news_analysis函数，实现完整的
 数据发布影响分析流程。
@@ -51,7 +51,7 @@ def execute_news_analysis(
     base_workspace_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    执行新闻分析的主要入口函数
+    执行影响分解的主要入口函数
 
     核心功能：分析新数据发布对已有nowcast值的影响
 
@@ -83,7 +83,7 @@ def execute_news_analysis(
         - error_message: Optional[str]
     """
     try:
-        print(f"[API] 开始执行新闻分析: 目标月份={target_month}")
+        print(f"[API] 开始执行影响分解: 目标月份={target_month}")
 
         # 验证输入参数
         _validate_input_parameters(dfm_model_file_content, dfm_metadata_file_content, target_month)
@@ -171,14 +171,14 @@ def execute_news_analysis(
             'workspace_dir': workspace_dir
         }
 
-        print(f"[API] 新闻分析执行成功: 总影响={analysis_results['summary']['total_impact']:.4f}")
+        print(f"[API] 影响分解执行成功: 总影响={analysis_results['summary']['total_impact']:.4f}")
         print(f"[API] DEBUG 归一化验证: first_nowcast={analysis_results['summary'].get('first_nowcast')}, "
               f"last_nowcast={analysis_results['summary'].get('last_nowcast')}, "
               f"scale_factor={analysis_results['summary'].get('normalization_scale_factor')}")
         return result
 
     except Exception as e:
-        error_msg = f"新闻分析执行失败: {str(e)}"
+        error_msg = f"影响分解执行失败: {str(e)}"
         print(f"[API] ERROR: {error_msg}")
         print(f"[API] 详细错误: {traceback.format_exc()}")
 

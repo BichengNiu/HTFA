@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-DFM新闻分析页面 - 纽约联储风格
+DFM影响分解页面 - 纽约联储风格
 
 完全重构版本，采用上下布局：图在上，表在下
 """
@@ -12,7 +12,7 @@ import traceback
 from datetime import datetime
 from typing import Dict, Any
 
-# 导入新闻分析执行函数
+# 导入影响分解执行函数
 from dashboard.models.DFM.decomp import execute_news_analysis
 
 
@@ -42,7 +42,7 @@ def set_dfm_state(key, value):
 
 def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
     """
-    渲染纽约联储风格的新闻分析页面
+    渲染纽约联储风格的影响分解页面
 
     Args:
         st_module: Streamlit模块
@@ -109,7 +109,7 @@ def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
         selected_target_month = _render_parameter_section(st_module)
 
         # 执行按钮和结果渲染
-        if st_module.button("执行新闻分析", type="primary", width='stretch', key="execute_news_analysis_btn"):
+        if st_module.button("执行影响分解", type="primary", width='stretch', key="execute_news_analysis_btn"):
             result = _execute_analysis(st_module, model_file, metadata_file, selected_target_month)
             # 如果分析成功，直接渲染结果，不使用rerun
             if result and result.get('returncode') == 0:
@@ -156,8 +156,8 @@ def _render_parameter_section(st_module):
 
 
 def _execute_analysis(st_module, model_file, metadata_file, target_month):
-    """执行新闻分析，返回结果"""
-    with st_module.spinner("正在执行新闻分析，请稍候..."):
+    """执行影响分解，返回结果"""
+    with st_module.spinner("正在执行影响分解，请稍候..."):
         try:
             print(f"[UI DEBUG] 执行分析使用的目标月份: {target_month}")
 

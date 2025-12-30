@@ -340,7 +340,7 @@ def render_model_analysis_content(sub_module: Optional[str]) -> Dict[str, Any]:
                 ("数据准备", "model_analysis.dfm.prep", lambda: render_dfm_data_prep_page(st)),
                 ("模型训练", "model_analysis.dfm.train", lambda: render_dfm_model_training_page(st)),
                 ("模型分析", "model_analysis.dfm.analysis", lambda: render_dfm_model_analysis_page(st)),
-                ("新闻分析", "model_analysis.dfm.news", lambda: render_dfm_news_analysis_page(st))
+                ("影响分解", "model_analysis.dfm.news", lambda: render_dfm_news_analysis_page(st))
             ]
 
             # 过滤Tab

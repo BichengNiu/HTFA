@@ -41,7 +41,7 @@ class TrainingResultExporter:
             result: 训练结果
             config: 训练配置
             output_dir: 输出目录（None=创建临时目录）
-            prepared_data: 预处理后的完整观测数据矩阵（用于新闻分析）
+            prepared_data: 预处理后的完整观测数据矩阵（用于影响分解）
 
         Returns:
             文件路径字典 {
@@ -274,7 +274,7 @@ class TrainingResultExporter:
         logger.info(f"保存卡尔曼增益历史: {len(kalman_gains)} 个时间步")
 
         # 保存先验因子状态（用于新闻分解的expected_value计算）
-        # 此字段为新闻分析必需，与kalman_gains_history一样使用严格验证
+        # 此字段为影响分解必需，与kalman_gains_history一样使用严格验证
         assert result.model_result and hasattr(result.model_result, 'factor_states_predicted'), \
             "内部错误：model_result缺少factor_states_predicted属性"
         factor_states_pred = result.model_result.factor_states_predicted
@@ -308,13 +308,13 @@ class TrainingResultExporter:
             metadata['observation_period_end'] = observation_period_end
             logger.info(f"观察期时间段: {observation_period_start} 至 {observation_period_end}")
 
-        # 保存完整观测数据矩阵（用于新闻分析的数据发布提取）
+        # 保存完整观测数据矩阵（用于影响分解的数据发布提取）
         if prepared_data is not None:
             metadata['prepared_data'] = prepared_data
             logger.info(f"保存完整观测数据: 形状={prepared_data.shape}, 时间范围={prepared_data.index[0]}至{prepared_data.index[-1]}")
         else:
             metadata['prepared_data'] = None
-            logger.warning("未提供prepared_data，新闻分析功能可能受限")
+            logger.warning("未提供prepared_data，影响分解功能可能受限")
 
         # R²分析结果（可选）
         var_industry_map = metadata.get('var_industry_map', {})

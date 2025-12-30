@@ -2,7 +2,7 @@
 """
 核心业务逻辑模块
 
-包含DFM新闻分析的核心算法和数据处理逻辑。
+包含DFM影响分解的核心算法和数据处理逻辑。
 """
 
 from .model_loader import ModelLoader
