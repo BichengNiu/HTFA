@@ -109,40 +109,6 @@ class VariableTransformer:
 
         return result
 
-    def preprocess_negatives(self, series: pd.Series, method: str) -> pd.Series:
-        """
-        负值预处理
-
-        Args:
-            series: 输入序列
-            method: 处理方法 ('none', 'missing', 'abs', 'zero')
-
-        Returns:
-            处理后的序列
-        """
-        if method == 'none':
-            return series.copy()
-
-        var_name = series.name if series.name else "未命名"
-        result = series.copy()
-        neg_mask = result < 0
-        neg_count = neg_mask.sum()
-
-        if neg_count == 0:
-            return result
-
-        if method == 'missing':
-            result[neg_mask] = np.nan
-            self.logger.info(f"变量 '{var_name}' 将 {neg_count} 个负值设为缺失值")
-        elif method == 'abs':
-            result[neg_mask] = np.abs(result[neg_mask])
-            self.logger.info(f"变量 '{var_name}' 将 {neg_count} 个负值取绝对值")
-        elif method == 'zero':
-            result[neg_mask] = 0
-            self.logger.info(f"变量 '{var_name}' 将 {neg_count} 个负值设为0")
-
-        return result
-
     def apply_log(self, series: pd.Series) -> pd.Series:
         """
         对数变换
@@ -150,13 +116,16 @@ class VariableTransformer:
         处理规则：
         - 全为正值：直接使用np.log
         - 包含零值：使用np.log1p (log(1+x))
-        - 包含负值：跳过变换并报错（需先处理负值）
+        - 包含负值：抛出ValueError异常
 
         Args:
             series: 输入时间序列
 
         Returns:
             pd.Series: 对数变换后的序列
+
+        Raises:
+            ValueError: 当序列包含负值时抛出
         """
         var_name = series.name if series.name else "未命名"
 
@@ -168,9 +137,6 @@ class VariableTransformer:
 
         min_val = valid_values.min()
 
-        # 创建结果序列
-        result = series.copy()
-
         if min_val > 0:
             # 全为正值，直接取对数
             result = np.log(series)
@@ -180,12 +146,12 @@ class VariableTransformer:
             result = np.log1p(series)
             self.logger.debug(f"变量 '{var_name}' 应用对数变换 (np.log1p)")
         else:
-            # 包含负值，跳过变换
-            self.logger.error(
-                f"变量 '{var_name}' 包含负值(min={min_val})，"
-                f"无法进行对数变换，请先处理负值"
+            # 包含负值，抛出异常
+            raise ValueError(
+                f"变量 '{var_name}' 包含负值(min={min_val:.4f})，"
+                f"无法进行对数变换。请先使用值替换功能处理负值，"
+                f"或选择其他转换方式（如差分）。"
             )
-            return series.copy()
 
         return result
 
@@ -212,8 +178,7 @@ class VariableTransformer:
         self,
         series: pd.Series,
         operations: List[str],
-        zero_method: str = 'none',
-        neg_method: str = 'none'
+        zero_method: str = 'none'
     ) -> pd.Series:
         """
         按顺序对单个变量应用多个转换操作
@@ -222,7 +187,6 @@ class VariableTransformer:
             series: 输入时间序列
             operations: 操作列表，按顺序执行
             zero_method: 0值处理方法 ('none', 'missing', 'adjust')
-            neg_method: 负值处理方法 ('none', 'missing', 'abs')
 
         Returns:
             pd.Series: 转换后的序列
@@ -230,19 +194,12 @@ class VariableTransformer:
         # 1. 预处理0值
         result = self.preprocess_zeros(series, zero_method)
 
-        # 2. 预处理负值
-        result = self.preprocess_negatives(result, neg_method)
-
         # 如果没有后续操作，直接返回预处理后的结果
         if not operations:
             # 只有预处理时也记录详情
-            if zero_method != 'none' or neg_method != 'none':
+            if zero_method != 'none':
                 var_name = series.name if series.name else "未命名"
-                preprocess_ops = []
-                if zero_method != 'none':
-                    preprocess_ops.append(f'zero_{zero_method}')
-                if neg_method != 'none':
-                    preprocess_ops.append(f'neg_{neg_method}')
+                preprocess_ops = [f'zero_{zero_method}']
                 self._transform_details[var_name] = {
                     'operations': preprocess_ops,
                     'original_stats': {
@@ -264,15 +221,13 @@ class VariableTransformer:
 
         # 过滤掉 'none' 操作
         valid_ops = [op for op in operations if op != 'none']
-        if not valid_ops and zero_method == 'none' and neg_method == 'none':
+        if not valid_ops and zero_method == 'none':
             return series.copy()
 
         applied_ops = []
         # 记录预处理操作
         if zero_method != 'none':
             applied_ops.append(f'zero_{zero_method}')
-        if neg_method != 'none':
-            applied_ops.append(f'neg_{neg_method}')
 
         # 3. 应用转换操作
         for op in valid_ops:
@@ -321,7 +276,7 @@ class VariableTransformer:
 
         Args:
             df: 输入DataFrame
-            transform_config: 变换配置字典 {变量名: {'zero_method': str, 'neg_method': str, 'operations': list}}
+            transform_config: 变换配置字典 {变量名: {'zero_method': str, 'operations': list}}
 
         Returns:
             Tuple[pd.DataFrame, Dict]:
@@ -350,10 +305,9 @@ class VariableTransformer:
 
             # 解析配置
             zero_method = config.get('zero_method', 'none')
-            neg_method = config.get('neg_method', 'none')
             operations = config.get('operations', [])
 
-            if not operations and zero_method == 'none' and neg_method == 'none':
+            if not operations and zero_method == 'none':
                 # 无任何操作，跳过
                 continue
 
@@ -362,8 +316,7 @@ class VariableTransformer:
             transformed_series = self.transform_variable(
                 original_series,
                 operations,
-                zero_method=zero_method,
-                neg_method=neg_method
+                zero_method=zero_method
             )
 
             # 替换原变量
@@ -374,8 +327,6 @@ class VariableTransformer:
             ops_parts = []
             if zero_method != 'none':
                 ops_parts.append(f'0值:{zero_method}')
-            if neg_method != 'none':
-                ops_parts.append(f'负值:{neg_method}')
             for op in operations:
                 ops_parts.append(self.OPERATIONS.get(op, op))
             ops_str = ' -> '.join(ops_parts)
@@ -429,7 +380,7 @@ def get_default_transform_config(
 
     Returns:
         List[Dict]: 配置列表，每项包含 {变量名, 性质, 第一次处理, 第二次处理, 第三次处理}
-        注：零值和负值处理已在基础设置中全局配置，无需单独配置
+        注：零值处理已在基础设置中全局配置，无需单独配置
     """
     from dashboard.models.DFM.utils.text_utils import normalize_text
 

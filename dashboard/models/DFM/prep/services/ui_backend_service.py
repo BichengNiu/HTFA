@@ -34,11 +34,11 @@ class UIBackendService:
             data: 原始数据DataFrame
             transform_config: 转换配置列表，每项为：
                 {
-                    'variable': str,        # 变量名
-                    'operation': str,       # 操作: 'none', 'log', 'diff_1', 'diff_yoy'
-                    'zero_handling': str,   # 零值处理
-                    'negative_handling': str # 负值处理
+                    'variable': str,          # 变量名
+                    'operations': List[str],  # 操作序列: ['log', 'diff_yoy'] 或 ['diff_1']
+                    'zero_handling': str      # 零值处理
                 }
+                注：兼容旧格式 'operation': str（单个操作）
             target_freq: 目标频率
             var_frequency_map: 变量频率映射（用于同比差分）
 
@@ -68,7 +68,7 @@ class UIBackendService:
 
             for config in transform_config:
                 var_name = config.get('variable', '')
-                operation = config.get('operation', 'none')
+                operations = config.get('operations', [])
 
                 if not var_name or var_name not in transformed_data.columns:
                     logger.warning(f"变量 '{var_name}' 不在数据中，跳过")
@@ -76,20 +76,17 @@ class UIBackendService:
                     continue
 
                 try:
-                    logger.debug(f"  转换: {var_name} <- {operation}")
+                    ops_str = ' -> '.join(operations) if operations else '不处理'
+                    logger.debug(f"  转换: {var_name} <- {ops_str}")
 
                     # 提取单个变量的 Series
                     series = transformed_data[var_name].copy()
-
-                    # 构建操作列表
-                    operations = [operation] if operation and operation != 'none' else []
 
                     # 执行转换
                     transformed_series = transformer.transform_variable(
                         series=series,
                         operations=operations,
-                        zero_method=config.get('zero_handling', 'none'),
-                        neg_method=config.get('negative_handling', 'none')
+                        zero_method=config.get('zero_handling', 'none')
                     )
 
                     # 更新 DataFrame
@@ -120,15 +117,21 @@ class UIBackendService:
 
             logger.info(f"平稳性检验完成: {len(stationarity_results)}个变量")
 
-            # 提取非平稳变量
-            problem_variables = UIBackendService._extract_problem_variables(
+            # 提取所有变量（非平稳排在前面）
+            all_variables_sorted = UIBackendService._extract_all_variables_sorted(
                 stationarity_results,
                 transformed_data,
                 transform_details,
                 var_frequency_map or {}
             )
 
-            logger.info(f"非平稳变量: {len(problem_variables)}个")
+            # 统计非平稳变量数量
+            non_stationary_count = sum(
+                1 for v in all_variables_sorted
+                if v['stationarity'] in ['非平稳', '数据不足']
+            )
+
+            logger.info(f"非平稳变量: {non_stationary_count}/{len(all_variables_sorted)}个")
 
             return {
                 'status': 'success',
@@ -136,7 +139,8 @@ class UIBackendService:
                 'data': transformed_data,
                 'transform_details': transform_details,
                 'stationarity_results': stationarity_results,
-                'problem_variables': problem_variables,
+                'all_variables_sorted': all_variables_sorted,
+                'non_stationary_count': non_stationary_count,
                 'errors': errors if errors else None
             }
 
@@ -148,7 +152,8 @@ class UIBackendService:
                 'data': None,
                 'transform_details': {},
                 'stationarity_results': {},
-                'problem_variables': [],
+                'all_variables_sorted': [],
+                'non_stationary_count': 0,
                 'errors': [str(e)]
             }
 
@@ -194,6 +199,68 @@ class UIBackendService:
             })
 
         return problem_vars
+
+    @staticmethod
+    def _extract_all_variables_sorted(
+        stationarity_results: Dict[str, Dict],
+        transformed_data: pd.DataFrame,
+        transform_details: Dict,
+        var_frequency_map: Dict[str, str]
+    ) -> List[Dict]:
+        """
+        提取所有变量的检验结果，非平稳的排在前面
+
+        Args:
+            stationarity_results: 平稳性检验结果字典
+            transformed_data: 转换后的数据
+            transform_details: 转换详情
+            var_frequency_map: 变量频率映射
+
+        Returns:
+            List of dicts with keys: variable, frequency, processing, p_value, stationarity
+            排序规则：非平稳 > 数据不足 > 平稳
+        """
+        all_vars = []
+
+        for col, result in stationarity_results.items():
+            status = result.get('status', '')
+            p_value = result.get('p_value')
+
+            # 获取频率和处理操作
+            col_normalized = normalize_text(col)
+            freq = var_frequency_map.get(col_normalized, '-')
+            ops = transform_details.get(col, {}).get('operations', [])
+            ops_str = ' -> '.join(ops) if ops else '不处理'
+            p_str = f"{p_value:.4f}" if p_value is not None else '-'
+
+            # 转换平稳性状态显示
+            if status == '数据不足':
+                stationarity_display = '数据不足'
+                sort_priority = 1  # 中等优先级
+            elif status == '是':
+                stationarity_display = '平稳'
+                sort_priority = 2  # 最低优先级
+            else:
+                stationarity_display = '非平稳'
+                sort_priority = 0  # 最高优先级
+
+            all_vars.append({
+                'variable': col,
+                'frequency': freq,
+                'processing': ops_str,
+                'p_value': p_str,
+                'stationarity': stationarity_display,
+                '_sort_priority': sort_priority  # 内部排序字段
+            })
+
+        # 排序：非平稳(0) > 数据不足(1) > 平稳(2)
+        all_vars.sort(key=lambda x: x['_sort_priority'])
+
+        # 移除内部排序字段
+        for var in all_vars:
+            del var['_sort_priority']
+
+        return all_vars
 
 
 __all__ = ['UIBackendService']

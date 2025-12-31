@@ -248,7 +248,7 @@ def _render_date_detection(st_obj, uploaded_file):
 
 def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max_date):
     """
-    渲染参数配置区域（8个参数，3行2列布局 + 1个expander）
+    渲染参数配置区域（9个参数，5行2列布局）
 
     Returns:
         bool - 参数是否有效
@@ -265,10 +265,11 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         PrepStateKeys.PARAM_TYPE_MAPPING_SHEET: '指标体系',
         PrepStateKeys.PARAM_DATA_START_DATE: default_start_date,
         PrepStateKeys.PARAM_DATA_END_DATE: default_end_date,
-        PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT: '是',
-        PrepStateKeys.PARAM_ENABLE_BORROWING: '是',
+        PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT: '否',
+        PrepStateKeys.PARAM_ENABLE_BORROWING: '否',
         PrepStateKeys.PARAM_ZERO_HANDLING: 'missing',
-        PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION: '是'
+        PrepStateKeys.PARAM_NEGATIVE_HANDLING: 'none',
+        PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION: '否'
     }
 
     # 初始化默认值（仅当值为None时设置，保留用户手动修改的值）
@@ -300,9 +301,77 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state(PrepStateKeys.PARAM_DATA_END_DATE, end_date_value)
 
-    # 第2行：移除选项和缺失值阈值
+    # 第2行：发布日期校准和频率对齐
     row2_col1, row2_col2 = st_obj.columns(2)
     with row2_col1:
+        publication_options = ["否", "是"]
+        current_publication = _get_state(PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION, '否')
+        publication_index = 1 if current_publication == "是" else 0
+        publication_calibration = st_obj.selectbox(
+            "发布日期校准",
+            options=publication_options,
+            index=publication_index,
+            key="ss_dfm_publication_calibration",
+            help="选择'是'将按指标实际发布日期对齐数据（基于指标体系中的'发布日期'列）"
+        )
+        _set_state(PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION, publication_calibration)
+
+    with row2_col2:
+        freq_alignment_options = ["是", "否"]
+        current_freq_alignment = _get_state(PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT, '否')
+        freq_alignment_index = 0 if current_freq_alignment == "是" else 1
+        enable_freq_alignment = st_obj.selectbox(
+            "频率对齐",
+            options=freq_alignment_options,
+            index=freq_alignment_index,
+            key="ss_dfm_enable_freq_alignment",
+            help="选择'是'将所有数据对齐到目标频率；选择'否'则保留原始发布日期，按发布日合并"
+        )
+        _set_state(PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT, enable_freq_alignment)
+
+    # 第3行：目标频率和启用数据借调
+    row3_col1, row3_col2 = st_obj.columns(2)
+    with row3_col1:
+        # 目标频率选择（仅在频率对齐=是时启用）
+        freq_disabled = (enable_freq_alignment == "否")
+        freq_options = {
+            'D': '日度 (Daily)',
+            'W-FRI': '周度-周五 (Weekly-Friday)',
+            'MS': '月度-周五 (Monthly-Friday)',
+            'QS': '季度-周五 (Quarterly-Friday)',
+            'AS': '年度-周五 (Annual-Friday)'
+        }
+        current_freq = _get_state(PrepStateKeys.PARAM_TARGET_FREQ, 'W-FRI')
+        target_freq = st_obj.selectbox(
+            "目标频率",
+            options=list(freq_options.keys()),
+            format_func=lambda x: freq_options[x],
+            index=list(freq_options.keys()).index(current_freq) if current_freq in freq_options else 0,
+            key="ss_dfm_target_freq",
+            disabled=freq_disabled,
+            help="选择模型的目标频率（仅在频率对齐=是时有效）。日度数据转换为周度时默认取均值聚合，其他频率转换时取最后值。"
+        )
+        _set_state(PrepStateKeys.PARAM_TARGET_FREQ, target_freq)
+
+    with row3_col2:
+        # 启用数据借调（改为selectbox，仅在频率对齐=是时启用）
+        borrowing_disabled = (enable_freq_alignment == "否")
+        borrowing_options = ["是", "否"]
+        current_borrowing = _get_state(PrepStateKeys.PARAM_ENABLE_BORROWING, '否')
+        borrowing_index = 0 if current_borrowing == "是" else 1
+        enable_borrowing = st_obj.selectbox(
+            "启用数据借调",
+            options=borrowing_options,
+            index=borrowing_index,
+            key="ss_dfm_enable_borrowing",
+            disabled=borrowing_disabled,
+            help="开启时，当某个时间窗口无数据但下个窗口有多个数据时，会将数据借调到前一个窗口（仅在频率对齐=是时有效）"
+        )
+        _set_state(PrepStateKeys.PARAM_ENABLE_BORROWING, enable_borrowing)
+
+    # 第4行：移除选项和缺失值阈值（第三执行：步骤5）
+    row4_col1, row4_col2 = st_obj.columns(2)
+    with row4_col1:
         remove_nans = st_obj.selectbox(
             "移除存在过多连续缺失值的变量",
             options=["是", "否"],
@@ -312,7 +381,7 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         )
         _set_state(PrepStateKeys.PARAM_REMOVE_CONSECUTIVE_NANS, remove_nans)
 
-    with row2_col2:
+    with row4_col2:
         # 连续缺失值阈值（仅在移除=是时启用）
         threshold_disabled = (remove_nans == "否")
         nan_threshold = st_obj.number_input(
@@ -328,66 +397,7 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         else:
             _set_state(PrepStateKeys.PARAM_CONSECUTIVE_NAN_THRESHOLD, None)
 
-    # 第3行：频率对齐和目标频率
-    row3_col1, row3_col2 = st_obj.columns(2)
-    with row3_col1:
-        # 频率对齐选项
-        enable_freq_alignment = st_obj.selectbox(
-            "频率对齐",
-            options=["是", "否"],
-            index=0 if _get_state(PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT, '是') == "是" else 1,
-            key="ss_dfm_enable_freq_alignment",
-            help="选择'是'将所有数据对齐到目标频率；选择'否'则保留原始发布日期，按发布日合并"
-        )
-        _set_state(PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT, enable_freq_alignment)
-
-    with row3_col2:
-        # 目标频率选择（仅在频率对齐=是时启用）
-        freq_disabled = (enable_freq_alignment == "否")
-        freq_options = {
-            'D': '日度 (Daily)',
-            'W-FRI': '周度-周五 (Weekly-Friday)',
-            'W-MON': '周度-周一 (Weekly-Monday)',
-            'MS': '月度 (Monthly)',
-            'QS': '季度 (Quarterly)',
-            'AS': '年度 (Annual)'
-        }
-        current_freq = _get_state(PrepStateKeys.PARAM_TARGET_FREQ, 'W-FRI')
-        target_freq = st_obj.selectbox(
-            "目标频率",
-            options=list(freq_options.keys()),
-            format_func=lambda x: freq_options[x],
-            index=list(freq_options.keys()).index(current_freq) if current_freq in freq_options else 1,
-            key="ss_dfm_target_freq",
-            disabled=freq_disabled,
-            help="选择模型的目标频率（仅在频率对齐=是时有效）"
-        )
-        _set_state(PrepStateKeys.PARAM_TARGET_FREQ, target_freq)
-
-    # 第4行：指标映射表名称和数据借调
-    row4_col1, row4_col2 = st_obj.columns(2)
-    with row4_col1:
-        mapping_sheet = st_obj.text_input(
-            "指标映射表名称",
-            value=_get_state(PrepStateKeys.PARAM_TYPE_MAPPING_SHEET),
-            key="ss_dfm_type_map_sheet"
-        )
-        _set_state(PrepStateKeys.PARAM_TYPE_MAPPING_SHEET, mapping_sheet)
-
-    with row4_col2:
-        # 数据借调（仅在频率对齐=是时启用）
-        borrowing_disabled = (enable_freq_alignment == "否")
-        enable_borrowing = st_obj.selectbox(
-            "数据借调",
-            options=["是", "否"],
-            index=0 if _get_state(PrepStateKeys.PARAM_ENABLE_BORROWING, '是') == "是" else 1,
-            key="ss_dfm_enable_borrowing",
-            disabled=borrowing_disabled,
-            help="开启时，当某个时间窗口无数据但下个窗口有多个数据时，会将数据借调到前一个窗口（仅在频率对齐=是时有效）"
-        )
-        _set_state(PrepStateKeys.PARAM_ENABLE_BORROWING, enable_borrowing)
-
-    # 第5行：零值处理（只占一半宽度）
+    # 第5行：零值处理和负值处理
     row5_col1, row5_col2 = st_obj.columns(2)
     with row5_col1:
         zero_options = {
@@ -409,17 +419,23 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         _set_state(PrepStateKeys.PARAM_ZERO_HANDLING, zero_handling)
 
     with row5_col2:
-        publication_options = ["否", "是"]
-        current_publication = _get_state(PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION, '是')
-        publication_index = 1 if current_publication == "是" else 0
-        publication_calibration = st_obj.selectbox(
-            "发布日期校准",
-            options=publication_options,
-            index=publication_index,
-            key="ss_dfm_publication_calibration",
-            help="选择'是'将按指标实际发布日期对齐数据（基于指标体系中的'发布日期'列）"
+        negative_options = {
+            'none': '不处理',
+            'missing': '缺失值',
+            'adjust': '调正（+1）'
+        }
+        current_negative = _get_state(PrepStateKeys.PARAM_NEGATIVE_HANDLING, 'none')
+        negative_keys = list(negative_options.keys())
+        negative_index = negative_keys.index(current_negative) if current_negative in negative_keys else 0
+        negative_handling = st_obj.selectbox(
+            "负值处理",
+            options=negative_keys,
+            format_func=lambda x: negative_options[x],
+            index=negative_index,
+            key="ss_dfm_negative_handling",
+            help="设置全局负值处理方式，对所有变量生效"
         )
-        _set_state(PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION, publication_calibration)
+        _set_state(PrepStateKeys.PARAM_NEGATIVE_HANDLING, negative_handling)
 
     return True
 
@@ -478,13 +494,14 @@ def _prepare_processing_params(uploaded_file, st_obj) -> Optional[dict]:
                 st_obj.warning(f"连续缺失值阈值 '{nan_threshold}' 不是有效整数，将忽略此阈值")
 
     # 频率对齐和数据借调参数
-    enable_freq_alignment = _get_state(PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT, '是') == '是'
-    enable_borrowing = _get_state(PrepStateKeys.PARAM_ENABLE_BORROWING, '是') == '是'
+    enable_freq_alignment = _get_state(PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT, '否') == '是'
+    enable_borrowing = _get_state(PrepStateKeys.PARAM_ENABLE_BORROWING, '否') == '是'
     if not enable_freq_alignment:
         enable_borrowing = False
 
     # 其他参数
     zero_handling = _get_state(PrepStateKeys.PARAM_ZERO_HANDLING, 'missing')
+    negative_handling = _get_state(PrepStateKeys.PARAM_NEGATIVE_HANDLING, 'none')
     enable_publication_calibration = _get_state(PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION, '否') == '是'
 
     return {
@@ -497,6 +514,7 @@ def _prepare_processing_params(uploaded_file, st_obj) -> Optional[dict]:
         'enable_freq_alignment': enable_freq_alignment,
         'enable_borrowing': enable_borrowing,
         'zero_handling': zero_handling,
+        'negative_handling': negative_handling,
         'enable_publication_calibration': enable_publication_calibration,
     }
 
@@ -521,6 +539,7 @@ def _call_prepare_api(params: dict) -> dict:
     logger.info("  - enable_freq_alignment: %s", params['enable_freq_alignment'])
     logger.info("  - enable_borrowing: %s", params['enable_borrowing'])
     logger.info("  - zero_handling: %s", params['zero_handling'])
+    logger.info("  - negative_handling: %s", params['negative_handling'])
     logger.info("  - enable_publication_calibration: %s", params['enable_publication_calibration'])
 
     return prepare_dfm_data_simple(
@@ -534,6 +553,7 @@ def _call_prepare_api(params: dict) -> dict:
         enable_borrowing=params['enable_borrowing'],
         enable_freq_alignment=params['enable_freq_alignment'],
         zero_handling=params['zero_handling'],
+        negative_handling=params['negative_handling'],
         enable_publication_calibration=params['enable_publication_calibration']
     )
 
@@ -798,7 +818,7 @@ def _render_borrowing_details_expander(st_obj):
     格式：按变量分组，借调记录横向流式排列
     仅在启用借调且有借调发生时显示
     """
-    enable_borrowing = _get_state(PrepStateKeys.PARAM_ENABLE_BORROWING, '是') == '是'
+    enable_borrowing = _get_state(PrepStateKeys.PARAM_ENABLE_BORROWING, True)
     if not enable_borrowing:
         return
 
@@ -861,13 +881,17 @@ def _render_transform_details_expander(st_obj, transform_details: dict):
             st.info("没有变量被转换")
 
 
-def _render_stationarity_test_expander(st_obj, problem_variables: List[Dict]):
+def _render_stationarity_test_expander(
+    st_obj,
+    all_variables_sorted: List[Dict],
+    non_stationary_count: int
+):
     """
-    仅显示平稳性检验结果（UI层纯显示，不做检验）
+    显示所有变量的平稳性检验结果（非平稳变量排在前面）
 
     Args:
         st_obj: Streamlit对象
-        problem_variables: 后端返回的非平稳变量列表，每项格式：
+        all_variables_sorted: 所有变量的检验结果（已排序），每项格式：
             {
                 'variable': str,
                 'frequency': str,
@@ -875,20 +899,23 @@ def _render_stationarity_test_expander(st_obj, problem_variables: List[Dict]):
                 'p_value': str,
                 'stationarity': str
             }
+        non_stationary_count: 非平稳变量数量
     """
-    if not problem_variables:
+    if not all_variables_sorted:
         return
 
-    var_count = len(_get_state(PrepStateKeys.PREPARED_DATA_DF).columns) if _get_state(PrepStateKeys.PREPARED_DATA_DF) is not None else 0
-    problem_count = len(problem_variables)
+    total_count = len(all_variables_sorted)
+    stationary_count = total_count - non_stationary_count
 
-    with st_obj.expander(f"平稳性检验结果 ({var_count}个变量)", expanded=False):
-        if problem_count == 0:
+    # 标题：显示统计信息
+    title = f"平稳性检验结果 (共{total_count}个变量: {stationary_count}个平稳, {non_stationary_count}个非平稳/数据不足)"
+
+    with st_obj.expander(title, expanded=False):
+        if non_stationary_count == 0:
             st.success("所有变量均通过平稳性检验")
-            return
 
-        # 构建DataFrame用于展示
-        display_df = pd.DataFrame(problem_variables)
+        # 构建DataFrame用于展示（显示所有变量）
+        display_df = pd.DataFrame(all_variables_sorted)
         display_df = display_df.rename(columns={
             'variable': '变量名',
             'frequency': '频率',
@@ -910,6 +937,10 @@ def _render_stationarity_test_expander(st_obj, problem_variables: List[Dict]):
             hide_index=True,
             width='stretch'
         )
+
+        # 添加说明信息
+        if non_stationary_count > 0:
+            st.caption(f"注：非平稳和数据不足的变量已排在前{non_stationary_count}行")
 
 
 # ============================================================================
@@ -1117,13 +1148,11 @@ def _apply_variable_transforms(st_obj, config_df):
 
         # 如果有任何操作，添加到配置
         if ops:
-            # 转换为单个操作代码（取最后一个操作）
-            operation = ops[-1] if ops else 'none'
+            # 传递完整的操作序列
             transform_config.append({
                 'variable': var_name,
-                'operation': operation,
-                'zero_handling': 'none',
-                'negative_handling': 'none'
+                'operations': ops,  # 传递操作列表
+                'zero_handling': 'none'
             })
 
     if not transform_config:
@@ -1150,7 +1179,8 @@ def _apply_variable_transforms(st_obj, config_df):
         transformed_df = result['data']
         transform_details = result['transform_details']
         stationarity_results = result['stationarity_results']
-        problem_variables = result['problem_variables']
+        all_variables_sorted = result['all_variables_sorted']
+        non_stationary_count = result['non_stationary_count']
 
         # 保存结果到状态
         _set_state(PrepStateKeys.PREPARED_DATA_DF, transformed_df)
@@ -1160,16 +1190,23 @@ def _apply_variable_transforms(st_obj, config_df):
         # 显示转换详情
         _render_transform_details_expander(st_obj, transform_details)
 
-        # 显示平稳性检验结果（UI只负责显示，检验已在后端完成）
-        _render_stationarity_test_expander(st_obj, problem_variables)
+        # 显示平稳性检验结果（所有变量，非平稳排在前面）
+        _render_stationarity_test_expander(st_obj, all_variables_sorted, non_stationary_count)
 
         # 重新生成导出文件
         _regenerate_export_file(st_obj, transformed_df)
 
-        st_obj.success("转换和检验完成！")
-
+        # 根据是否有错误显示不同的结果提示
         if result.get('errors'):
-            st_obj.warning(f"处理过程中有{len(result['errors'])}个错误: {result['errors'][:3]}")
+            error_count = len(result['errors'])
+            st_obj.warning(f"转换过程中有 {error_count} 个变量处理失败:")
+            for err in result['errors'][:5]:
+                st_obj.error(f"• {err}")
+            if error_count > 5:
+                st_obj.caption(f"... 还有 {error_count - 5} 个错误未显示")
+            st_obj.info("其他变量已成功转换。请检查失败变量的数据或选择其他转换方式。")
+        else:
+            st_obj.success("转换和检验完成！")
 
     except Exception as e:
         st_obj.error(f"后端服务调用失败: {e}")

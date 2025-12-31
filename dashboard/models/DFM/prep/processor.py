@@ -56,6 +56,7 @@ class DataPreparationProcessor:
         enable_borrowing: bool = True,
         enable_freq_alignment: bool = True,
         zero_handling: str = 'missing',
+        negative_handling: str = 'none',
         var_publication_lag_map: Dict[str, int] = None,
         enable_publication_calibration: bool = False,
         parallel_config: Optional[PrepParallelConfig] = None
@@ -74,6 +75,7 @@ class DataPreparationProcessor:
             enable_borrowing: 是否启用数据借调，默认True
             enable_freq_alignment: 是否启用频率对齐，默认True。选择False时保留原始日期
             zero_handling: 零值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1
+            negative_handling: 负值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1
             var_publication_lag_map: 变量-发布日期滞后映射（从指标体系加载）
             enable_publication_calibration: 是否启用发布日期校准，默认False
             parallel_config: 并行处理配置，默认启用并行
@@ -93,6 +95,7 @@ class DataPreparationProcessor:
         self.enable_borrowing = enable_borrowing
         self.enable_freq_alignment = enable_freq_alignment
         self.zero_handling = zero_handling
+        self.negative_handling = negative_handling
         self.var_publication_lag_map = var_publication_lag_map or {}
         self.enable_publication_calibration = enable_publication_calibration
         self.parallel_config = parallel_config or create_default_prep_config()
@@ -114,11 +117,11 @@ class DataPreparationProcessor:
         self.transform_log = {}
 
         logger.info(f"[Processor] 初始化完成: 目标变量={target_variable_name}, 频率对齐={'启用' if enable_freq_alignment else '禁用'}")
-        logger.info(f"[Processor] 零值处理={zero_handling}, 发布日期校准={'启用' if enable_publication_calibration else '禁用'}")
+        logger.info(f"[Processor] 零值处理={zero_handling}, 负值处理={negative_handling}, 发布日期校准={'启用' if enable_publication_calibration else '禁用'}")
         logger.info(f"[Processor] 并行配置: {self.parallel_config}")
 
     def _apply_global_preprocessing(self, df: pd.DataFrame) -> pd.DataFrame:
-        """应用全局零值处理
+        """应用全局零值和负值处理
 
         在数据加载后、频率对齐前统一应用，确保所有后续处理都基于相同的预处理结果。
 
@@ -146,6 +149,21 @@ class DataPreparationProcessor:
             result = result.replace(0, 1)
             if zero_count > 0:
                 logger.info(f"  [全局预处理] 零值处理(调正): {zero_count}个零值调正为1")
+        # 'none' 不处理
+
+        # 负值处理
+        if self.negative_handling == 'missing':
+            negative_mask = result < 0
+            negative_count = negative_mask.sum().sum()
+            result[negative_mask] = np.nan
+            if negative_count > 0:
+                logger.info(f"  [全局预处理] 负值处理(缺失值): {negative_count}个负值转为NaN")
+        elif self.negative_handling == 'adjust':
+            negative_mask = result < 0
+            negative_count = negative_mask.sum().sum()
+            result[negative_mask] = 1  # 所有负值统一变成1
+            if negative_count > 0:
+                logger.info(f"  [全局预处理] 负值处理(调正): {negative_count}个负值调正为1")
         # 'none' 不处理
 
         return result

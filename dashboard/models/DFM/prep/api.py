@@ -320,6 +320,7 @@ def prepare_dfm_data_simple(
     enable_borrowing: bool = True,
     enable_freq_alignment: bool = True,
     zero_handling: str = "missing",
+    negative_handling: str = "none",
     enable_publication_calibration: bool = False,
     parallel_config: Optional[PrepParallelConfig] = None
 ) -> Dict[str, Any]:
@@ -346,7 +347,9 @@ def prepare_dfm_data_simple(
         enable_borrowing: 是否启用数据借调，默认True
         enable_freq_alignment: 是否启用频率对齐，默认True。选择False时保留原始日期
         zero_handling: 零值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1，默认'missing'
+        negative_handling: 负值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1，默认'none'
         enable_publication_calibration: 是否启用发布日期校准，默认False。启用时按指标实际发布日期对齐
+        parallel_config: 并行配置（可选）
 
     Returns:
         dict: {
@@ -394,6 +397,7 @@ def prepare_dfm_data_simple(
         logger.info("\n开始执行数据处理流程...")
         logger.info(f"频率对齐模式: {'启用' if enable_freq_alignment else '禁用（保留原始日期）'}")
         logger.info(f"零值处理: {zero_handling}")
+        logger.info(f"负值处理: {negative_handling}")
         logger.info(f"发布日期校准: {'启用' if enable_publication_calibration else '禁用'}")
         processor = DataPreparationProcessor(
             excel_path=excel_input,
@@ -407,6 +411,7 @@ def prepare_dfm_data_simple(
             enable_borrowing=enable_borrowing,
             enable_freq_alignment=enable_freq_alignment,
             zero_handling=zero_handling,
+            negative_handling=negative_handling,
             var_publication_lag_map=var_publication_lag_map,
             enable_publication_calibration=enable_publication_calibration,
             parallel_config=parallel_config

@@ -7,6 +7,7 @@
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 from typing import Optional
 from datetime import date
 
@@ -270,19 +271,26 @@ def _handle_preview(prepared_data: pd.DataFrame, rule: ReplacementRule, selected
             # 处理new_value的类型，确保'NaN'字符串转换为实际的NaN值
             new_val = np.nan if result.new_value == 'NaN' else result.new_value
             preview_df['替换后'] = new_val
-            preview_df.columns = ['原值', '替换后']
 
-            # 格式化时间索引为 年-月-日
+            # 保留变量名在列标题中
+            preview_df.columns = [f'{selected_var}(原值)', '替换后']
+
+            # 格式化时间索引为 年-月-日，并保留为列
             if isinstance(preview_df.index, pd.DatetimeIndex):
+                preview_df.index.name = '日期'
                 preview_df.index = preview_df.index.strftime('%Y-%m-%d')
 
-            # 重置索引以避免Arrow序列化问题
-            preview_df.reset_index(drop=True, inplace=True)
+            # 重置索引，保留日期作为列
+            preview_df.reset_index(inplace=True)
+
+            # 按日期降序排列（从新到旧）
+            preview_df.sort_values(by='日期', ascending=False, inplace=True)
 
             if result.affected_count > max_show:
                 st.caption(f"（仅显示前{max_show}条，共{result.affected_count}条）")
 
-            st.dataframe(preview_df, width='stretch')
+            # 隐藏数值索引
+            st.dataframe(preview_df, hide_index=True, use_container_width=True)
     except ValueError as e:
         st.error(str(e))
 
@@ -393,12 +401,6 @@ def _render_replacement_history_inline(prepared_data: pd.DataFrame) -> Optional[
             else:
                 st.warning("没有可恢复的基准数据")
 
-    return None
-
-
-def _render_replacement_history(prepared_data: pd.DataFrame) -> Optional[pd.DataFrame]:
-    """渲染替换历史记录（保留以兼容旧代码）"""
-    # 现在历史记录已在上方显示，此函数仅保留兼容性
     return None
 
 

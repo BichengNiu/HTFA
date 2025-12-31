@@ -160,9 +160,25 @@ class ExportService:
                 else:
                     ops_str = '不处理'
 
-                # 获取平稳性检验结果（使用标准化名称）
+                # 获取平稳性检验结果（多级fallback查找）
+                stat_result = None
+
+                # 尝试1: 规范化键精确匹配
                 if col_norm in stationarity_check_results:
                     stat_result = stationarity_check_results[col_norm]
+
+                # 尝试2: 原始列名匹配
+                if stat_result is None and col in stationarity_check_results:
+                    stat_result = stationarity_check_results[col]
+
+                # 尝试3: 模糊匹配（规范化后比较）
+                if stat_result is None:
+                    for key in stationarity_check_results.keys():
+                        if normalize_text(key) == col_norm:
+                            stat_result = stationarity_check_results[key]
+                            break
+
+                if stat_result is not None:
                     p_value = stat_result.get('p_value')
                     status = stat_result.get('status', '未检验')
 
@@ -179,7 +195,7 @@ class ExportService:
                     else:
                         stationarity_str = '非平稳'
                 else:
-                    logger.warning(f"保留变量 '{col_norm}' 没有检验结果，可能检验失败或被跳过")
+                    logger.warning(f"保留变量 '{col}' 没有检验结果，可能检验失败或被跳过")
                     p_value_str = '-'
                     stationarity_str = '未检验'
 

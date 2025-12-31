@@ -8,9 +8,8 @@
 
 import pandas as pd
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
-from dashboard.models.DFM.prep.utils.friday_utils import get_friday_with_lag
 from dashboard.models.DFM.utils.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
@@ -19,11 +18,7 @@ logger = logging.getLogger(__name__)
 class PublicationCalibrator:
     """发布日期校准器
 
-    根据频率类型采用不同的校准逻辑：
-    - 日度/周度/旬度：数据日期 + 滞后天数 = 实际发布日期
-    - 月度：对齐到发布月份内的周五
-    - 季度：对齐到发布季度内的周五
-    - 年度：对齐到发布年份内的周五
+    所有频率统一处理：数据日期 + 滞后天数 = 实际发布日期
     """
 
     def __init__(self, publication_lag_map: Dict[str, int]):
@@ -37,9 +32,11 @@ class PublicationCalibrator:
     def calibrate(self, df: pd.DataFrame, freq_type: str) -> pd.DataFrame:
         """应用发布日期校准
 
+        所有频率统一处理：数据日期 + 滞后天数 = 实际发布日期
+
         Args:
             df: 输入DataFrame，索引为数据日期
-            freq_type: 频率类型 ('daily', 'weekly', 'dekad', 'monthly', 'quarterly', 'yearly')
+            freq_type: 频率类型（仅用于日志记录）
 
         Returns:
             pd.DataFrame: 索引为校准后日期的DataFrame
@@ -54,17 +51,6 @@ class PublicationCalibrator:
         calibration_count = 0
         result_columns = {}
 
-        # 映射频率类型到周期类型
-        period_type_map = {
-            'daily': None,      # 直接加滞后天数
-            'weekly': None,     # 直接加滞后天数
-            'dekad': None,      # 直接加滞后天数
-            'monthly': 'month',
-            'quarterly': 'quarter',
-            'yearly': 'year'
-        }
-        period_type = period_type_map.get(freq_type)
-
         for col in df.columns:
             col_norm = normalize_text(col)
             lag_days = self.lag_map.get(col_norm)
@@ -75,15 +61,8 @@ class PublicationCalibrator:
                     result_columns[col] = df[col]
                     continue
 
-                # 根据频率类型计算校准后的日期
-                if period_type is None:
-                    # 日度/周度/旬度：直接加滞后天数
-                    new_index = series.index + pd.Timedelta(days=lag_days)
-                else:
-                    # 月度/季度/年度：使用friday_utils计算
-                    new_index = series.index.map(
-                        lambda d: get_friday_with_lag(d, lag_days, period_type)
-                    )
+                # 所有频率统一处理：直接加滞后天数
+                new_index = series.index + pd.Timedelta(days=lag_days)
 
                 calibrated_series = pd.Series(series.values, index=new_index, name=col)
                 result_columns[col] = calibrated_series

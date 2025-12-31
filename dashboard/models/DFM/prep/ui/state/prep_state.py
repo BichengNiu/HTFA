@@ -48,6 +48,7 @@ class PrepStateKeys:
     PARAM_ENABLE_FREQ_ALIGNMENT = "param_enable_freq_alignment"
     PARAM_ENABLE_BORROWING = "param_enable_borrowing"
     PARAM_ZERO_HANDLING = "param_zero_handling"
+    PARAM_NEGATIVE_HANDLING = "param_negative_handling"
     PARAM_PUBLICATION_DATE_CALIBRATION = "param_publication_date_calibration"
 
     # ============================================================================
