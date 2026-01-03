@@ -251,15 +251,15 @@ class FileUploaderComponent:
             print(f"[模型训练] 映射表shape: {industry_map_df.shape}, 列名: {list(industry_map_df.columns)}")
 
             # 验证必需列
-            if 'Indicator' not in industry_map_df.columns or 'Industry' not in industry_map_df.columns or 'Unit' not in industry_map_df.columns:
-                st_instance.error("映射表格式错误：必须包含'Indicator'、'Industry'和'Unit'列")
+            if '指标名称' not in industry_map_df.columns or '行业' not in industry_map_df.columns or '单位' not in industry_map_df.columns:
+                st_instance.error("映射表格式错误：必须包含'指标名称'、'行业'和'单位'列")
                 return None, {}, {}, {}, {}
 
             # 解析行业映射
             var_industry_map = {}
             filtered_count = 0
 
-            for idx, (k, v) in enumerate(zip(industry_map_df['Indicator'], industry_map_df['Industry'])):
+            for idx, (k, v) in enumerate(zip(industry_map_df['指标名称'], industry_map_df['行业'])):
                 if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip():
                     normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
                     var_industry_map[normalized_key] = str(v).strip()
@@ -284,7 +284,7 @@ class FileUploaderComponent:
             if '一次估计' in industry_map_df.columns:
                 dfm_default_single_stage = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['一次估计'])
+                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['一次估计'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
                 print(f"[模型训练] 一次估计默认变量: {len(dfm_default_single_stage)}个")
@@ -292,7 +292,7 @@ class FileUploaderComponent:
             if '一阶段预测' in industry_map_df.columns:
                 dfm_first_stage_pred = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['一阶段预测'])
+                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段预测'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
                 print(f"[模型训练] 一阶段预测默认变量: {len(dfm_first_stage_pred)}个")
@@ -300,7 +300,7 @@ class FileUploaderComponent:
             if '一阶段目标' in industry_map_df.columns:
                 dfm_first_stage_target = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['一阶段目标'])
+                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段目标'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
                 print(f"[模型训练] 一阶段目标默认变量: {len(dfm_first_stage_target)}个")
@@ -308,20 +308,20 @@ class FileUploaderComponent:
             if '二阶段目标' in industry_map_df.columns:
                 dfm_second_stage_target = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['Indicator'], industry_map_df['二阶段目标'])
+                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['二阶段目标'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
                 print(f"[模型训练] 二阶段目标默认变量: {len(dfm_second_stage_target)}个")
 
             # 解析频率映射（必需）
-            if 'Frequency' not in industry_map_df.columns:
-                st_instance.error("映射表格式错误：缺少'Frequency'列。请重新运行数据准备模块导出最新版本的Excel文件。")
+            if '频率' not in industry_map_df.columns:
+                st_instance.error("映射表格式错误：缺少'频率'列。请重新运行数据准备模块导出最新版本的Excel文件。")
                 with st_instance.expander("查看解决方法"):
                     st_instance.markdown("""
                     **解决步骤：**
                     1. 切换到"数据准备"页面
                     2. 重新上传原始数据文件并运行数据处理
-                    3. 导出新的Excel文件（将包含8列映射表，包括Frequency和Unit列）
+                    3. 导出新的Excel文件（将包含12列映射表，包括频率和单位列）
                     4. 返回此页面，上传新导出的Excel文件
 
                     **说明：**
@@ -340,7 +340,7 @@ class FileUploaderComponent:
 
             var_frequency_map = {}
             invalid_frequencies = []
-            for k, v in zip(industry_map_df['Indicator'], industry_map_df['Frequency']):
+            for k, v in zip(industry_map_df['指标名称'], industry_map_df['频率']):
                 if pd.notna(k) and pd.notna(v) and str(v).strip():
                     normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
                     freq_raw = str(v).strip()
@@ -363,20 +363,20 @@ class FileUploaderComponent:
                 return None, {}, {}, {}, {}
 
             if len(var_frequency_map) == 0:
-                st_instance.error("频率映射为空。请检查Excel文件的'映射'sheet中'Frequency'列是否填写完整。")
+                st_instance.error("频率映射为空。请检查Excel文件的'映射'sheet中'频率'列是否填写完整。")
                 return None, {}, {}, {}, {}
 
             print(f"[模型训练] 频率映射加载完成: {len(var_frequency_map)}个变量")
 
             # 解析单位映射（必需）
             var_unit_map = {}
-            for k, v in zip(industry_map_df['Indicator'], industry_map_df['Unit']):
+            for k, v in zip(industry_map_df['指标名称'], industry_map_df['单位']):
                 if pd.notna(k) and pd.notna(v) and str(v).strip():
                     normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
                     var_unit_map[normalized_key] = str(v).strip()
 
             if len(var_unit_map) == 0:
-                st_instance.error("单位映射为空。请检查Excel文件的'映射'sheet中'Unit'列是否填写完整。")
+                st_instance.error("单位映射为空。请检查Excel文件的'映射'sheet中'单位'列是否填写完整。")
                 return None, {}, {}, {}, {}
 
             print(f"[模型训练] 单位映射加载完成: {len(var_unit_map)}个变量")
@@ -422,7 +422,7 @@ class FileUploaderComponent:
                     missing_details.append("Excel文件：上传成功但解析失败，请检查文件格式")
 
             if not var_industry_map:
-                missing_details.append("行业映射：解析失败，请检查Excel文件的'映射'sheet是否包含'Indicator'和'Industry'列")
+                missing_details.append("行业映射：解析失败，请检查Excel文件的'映射'sheet是否包含'指标名称'和'行业'列")
 
             st_instance.error(f"数据验证失败：\n\n" + "\n\n".join([f"{i+1}. {detail}" for i, detail in enumerate(missing_details)]))
 
@@ -432,7 +432,7 @@ class FileUploaderComponent:
                 **Excel文件要求：**
                 - 包含两个sheet：'数据'和'映射'
                 - '数据'sheet：第一列为日期索引，其余列为变量
-                - '映射'sheet：包含'Indicator'和'Industry'两列
+                - '映射'sheet：包含'指标名称'和'行业'等列
 
                 **常见问题：**
                 - Sheet名称错误：确保sheet名称为'数据'和'映射'

@@ -270,11 +270,11 @@ class ExportService:
             log_info = log_lookup.get(indicator, {})
 
             unified_mapping_data.append({
-                'Indicator': indicator,
-                'Industry': industry_map.get(indicator, ''),
-                'Frequency': var_frequency_map.get(indicator, ''),
-                'Unit': var_unit_map.get(indicator, ''),
-                'Nature': var_nature_map.get(indicator, ''),
+                '指标名称': indicator,
+                '行业': industry_map.get(indicator, ''),
+                '频率': var_frequency_map.get(indicator, ''),
+                '单位': var_unit_map.get(indicator, ''),
+                '性质': var_nature_map.get(indicator, ''),
                 '一次估计': dfm_single_stage_map.get(indicator, ''),
                 '一阶段预测': dfm_first_stage_pred_map.get(indicator, ''),
                 '一阶段目标': dfm_first_stage_target_map.get(indicator, ''),
@@ -286,7 +286,7 @@ class ExportService:
 
         df_unified_map = pd.DataFrame(
             unified_mapping_data,
-            columns=['Indicator', 'Industry', 'Frequency', 'Unit', 'Nature',
+            columns=['指标名称', '行业', '频率', '单位', '性质',
                      '一次估计', '一阶段预测', '一阶段目标', '二阶段目标',
                      '处理详情', 'P值', '平稳性检验（0.05）']
         )

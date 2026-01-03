@@ -19,15 +19,15 @@ class UIConfig:
 
     # 估计方法选项
     ESTIMATION_METHODS = {
-        'single_stage': '一次估计法 (推荐)',
+        'single_stage': '一次估计法',
         'two_stage': '二次估计法'
     }
     DEFAULT_ESTIMATION_METHOD = 'single_stage'
 
-    # 目标对齐方式选项
+    # 目标值选项
     TARGET_ALIGNMENT_OPTIONS = {
-        'next_month': "下月值 (m月预测m+1月)",
-        'current_month': "本月值 (m月预测m月)"
+        'next_month': "下月值",
+        'current_month': "本月值"
     }
     DEFAULT_TARGET_ALIGNMENT = 'next_month'
 

@@ -283,8 +283,8 @@ def render_dfm_model_training_page(st_instance):
             if _state.get('dfm_observation_start_date') is None:
                 _state.set('dfm_observation_start_date', UIConfig.DEFAULT_OBSERVATION_START)
 
-    # ===== 训练算法选择 =====
-    st_instance.subheader("训练算法")
+    # ===== 训练设置 =====
+    st_instance.subheader("训练设置")
 
     current_algorithm = _state.get('dfm_algorithm', UIConfig.DEFAULT_ALGORITHM)
     if current_algorithm not in UIConfig.ALGORITHM_OPTIONS:
@@ -303,8 +303,7 @@ def render_dfm_model_training_page(st_instance):
     _state.set('dfm_algorithm', algorithm_value)
     current_algorithm = algorithm_value
 
-    # ===== 卡片1: 训练周期设置 =====
-    st_instance.subheader("训练周期设置")
+    # ===== 训练周期设置 =====
 
     # 获取目标变量的频率标签（用于动态文案）
     target_variable = _state.get('dfm_target_variable', '')
@@ -385,10 +384,8 @@ def render_dfm_model_training_page(st_instance):
             # 经典DFM：validation_end = observation_start的前一期
             validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
             _state.set('dfm_validation_end_date', validation_end_value)
-            st_instance.caption(f"验证期结束: {validation_end_value.strftime('%Y-%m-%d')}")
 
-    # ===== 卡片2: 模型核心配置 =====
-    st_instance.subheader("模型核心配置")
+    # ===== 模型核心配置 =====
 
     # 深度学习模式标志（复用上面的algorithm_value）
     is_deep_learning = (algorithm_value == 'deep_learning')
@@ -427,7 +424,7 @@ def render_dfm_model_training_page(st_instance):
             raise ValueError(f"无效的目标对齐方式: {current_alignment}，有效值: {list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys())}")
 
         alignment_value = st_instance.selectbox(
-            "目标对齐方式",
+            "目标值",
             options=list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys()),
             format_func=lambda x: UIConfig.TARGET_ALIGNMENT_OPTIONS[x],
             index=UIConfig.get_safe_option_index(
