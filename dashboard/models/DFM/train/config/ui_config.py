@@ -14,7 +14,7 @@ class UIConfig:
 
     # 日期默认值
     DEFAULT_TRAINING_START = date(2020, 1, 1)
-    DEFAULT_VALIDATION_START = date(2025, 7, 1)
+    DEFAULT_VALIDATION_START = date(2025, 4, 1)  # 验证期开始日期，至少在观察期开始前3个月
     DEFAULT_OBSERVATION_START = date(2025, 7, 1)  # 观察期开始日期（DDFM模式使用）
 
     # 估计方法选项
@@ -64,6 +64,22 @@ class UIConfig:
     }
     DEFAULT_VAR_SELECTION = 'none'
 
+    # 变量选择保留数配置 (2026-01新增)
+    MIN_VARIABLES_AFTER_SELECTION_DEFAULT = 5  # 默认最少保留变量数
+    MIN_VARIABLES_AFTER_SELECTION_MIN = 3
+    MIN_VARIABLES_AFTER_SELECTION_MAX = 20
+
+    # 第一阶段并行配置 (2026-01新增)
+    FIRST_STAGE_PARALLEL_DEFAULT = True  # 默认启用第一阶段并行
+    FIRST_STAGE_N_JOBS_OPTIONS = {
+        -1: "所有核心",
+        1: "1个核心 (串行)",
+        2: "2个核心",
+        4: "4个核心",
+        8: "8个核心"
+    }
+    FIRST_STAGE_N_JOBS_DEFAULT = -1
+
     # 筛选策略选项
     SELECTION_CRITERIA = {
         'rmse': "RMSE",
@@ -84,6 +100,17 @@ class UIConfig:
     TRAINING_WEIGHT_MIN = 0       # 0%=仅验证期
     TRAINING_WEIGHT_MAX = 100     # 100%=仅训练期
     TRAINING_WEIGHT_STEP = 10
+
+    # 容忍度配置 (2026-01新增)
+    DEFAULT_RMSE_TOLERANCE = 1.0  # RMSE容忍度（百分比）
+    RMSE_TOLERANCE_MIN = 0.5
+    RMSE_TOLERANCE_MAX = 5.0
+    RMSE_TOLERANCE_STEP = 0.1
+
+    DEFAULT_WIN_RATE_TOLERANCE = 5.0  # Win Rate容忍度（百分比）
+    WIN_RATE_TOLERANCE_MIN = 1.0
+    WIN_RATE_TOLERANCE_MAX = 10.0
+    WIN_RATE_TOLERANCE_STEP = 0.5
 
     # ========== 算法选择配置（2025-12-21新增）==========
     ALGORITHM_OPTIONS = {
@@ -159,8 +186,10 @@ class UIConfig:
     BATCH_NORM_HELP = "批量归一化可提高训练稳定性"
 
     # EM算法配置
-    EM_MAX_ITERATIONS = 100
-    EM_MIN_ITERATIONS = 10
+    EM_MAX_ITERATIONS_DEFAULT = 30  # 默认最大迭代次数
+    EM_MAX_ITERATIONS_MIN = 10
+    EM_MAX_ITERATIONS_MAX = 100
+    EM_MAX_ITERATIONS_STEP = 5
     EM_TOLERANCE = 1e-6
 
     # 因子AR阶数

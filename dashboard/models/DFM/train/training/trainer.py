@@ -255,7 +255,11 @@ class DFMTrainer:
                             'win_rate_tolerance_percent': self.config.win_rate_tolerance_percent,
                             'selection_criterion': self.config.selection_criterion,
                             'prioritize_win_rate': self.config.prioritize_win_rate,
-                            'training_weight': self.config.training_weight  # 训练期权重（2025-12-20修复）
+                            'training_weight': self.config.training_weight,  # 训练期权重（2025-12-20修复）
+                            # 动态因子选择参数（2026-01-03新增）
+                            'factor_selection_method': self.config.factor_selection_method,
+                            'pca_threshold': self.config.pca_threshold or 0.9,
+                            'kaiser_threshold': self.config.kaiser_threshold or 1.0
                         },
                         validation_start=self.config.validation_start,
                         validation_end=self.config.validation_end,

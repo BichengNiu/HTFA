@@ -608,24 +608,39 @@ def render_dfm_model_training_page(st_instance):
                 )
                 _state.set('dfm_ddfm_lags_input', lags_input_value)
 
+            # 第五行：每次MCMC的epoch数 + MCMC收敛阈值
+            ddfm_col9, ddfm_col10 = st_instance.columns(2)
+
+            with ddfm_col9:
+                epochs_per_mcmc_value = st_instance.number_input(
+                    "每次MCMC训练轮数",
+                    min_value=UIConfig.EPOCHS_PER_MCMC_MIN,
+                    max_value=UIConfig.EPOCHS_PER_MCMC_MAX,
+                    value=_state.get('dfm_ddfm_epochs', UIConfig.EPOCHS_PER_MCMC_DEFAULT),
+                    step=UIConfig.EPOCHS_PER_MCMC_STEP,
+                    key='dfm_ddfm_epochs_input',
+                    help="每次MCMC迭代中神经网络训练的epoch数"
+                )
+                _state.set('dfm_ddfm_epochs', epochs_per_mcmc_value)
+
+            with ddfm_col10:
+                mcmc_tolerance_value = st_instance.number_input(
+                    "MCMC收敛阈值",
+                    min_value=UIConfig.MCMC_TOLERANCE_MIN,
+                    max_value=UIConfig.MCMC_TOLERANCE_MAX,
+                    value=_state.get('dfm_ddfm_tolerance', UIConfig.MCMC_TOLERANCE_DEFAULT),
+                    step=0.0001,
+                    format="%.5f",
+                    key='dfm_ddfm_tolerance_input',
+                    help="MCMC算法收敛判定阈值"
+                )
+                _state.set('dfm_ddfm_tolerance', mcmc_tolerance_value)
+
             st_instance.divider()
 
         # ===== 经典DFM因子参数（仅经典算法显示）=====
         if not is_deep_learning:
             # 因子参数（根据策略条件显示）- 两列布局
-            st_instance.markdown("**因子参数**")
-
-            # 初始化默认值
-            if strategy_value == 'fixed_number':
-                if _state.get('dfm_fixed_number_of_factors') is None:
-                    _state.set('dfm_fixed_number_of_factors', UIConfig.DEFAULT_K_FACTORS)
-            elif strategy_value == 'cumulative_variance':
-                if _state.get('dfm_cumulative_variance_threshold') is None:
-                    _state.set('dfm_cumulative_variance_threshold', UIConfig.DEFAULT_CUM_VARIANCE)
-            elif strategy_value == 'kaiser':
-                if _state.get('dfm_kaiser_threshold') is None:
-                    _state.set('dfm_kaiser_threshold', UIConfig.DEFAULT_KAISER_THRESHOLD)
-
             # 两列布局：左列策略参数，右列因子自回归阶数
             factor_col1, factor_col2 = st_instance.columns(2)
 
@@ -680,6 +695,37 @@ def render_dfm_model_training_page(st_instance):
                 )
                 _state.set('dfm_factor_ar_order', ar_order_value)
 
+            # EM算法最大迭代次数（始终显示）+ 最少保留变量数（仅启用筛选时显示）
+            if enable_var_selection:
+                em_var_col1, em_var_col2 = st_instance.columns(2)
+            else:
+                em_var_col1 = st_instance.container()
+
+            with em_var_col1:
+                max_iterations_value = st_instance.number_input(
+                    "EM算法最大迭代次数",
+                    min_value=UIConfig.EM_MAX_ITERATIONS_MIN,
+                    max_value=UIConfig.EM_MAX_ITERATIONS_MAX,
+                    value=_state.get('dfm_max_iterations', UIConfig.EM_MAX_ITERATIONS_DEFAULT),
+                    step=UIConfig.EM_MAX_ITERATIONS_STEP,
+                    key='dfm_max_iterations_input',
+                    help="EM算法的最大迭代次数，影响训练时间和收敛质量"
+                )
+                _state.set('dfm_max_iterations', max_iterations_value)
+
+            if enable_var_selection:
+                with em_var_col2:
+                    min_vars_value = st_instance.number_input(
+                        "最少保留变量数",
+                        min_value=UIConfig.MIN_VARIABLES_AFTER_SELECTION_MIN,
+                        max_value=UIConfig.MIN_VARIABLES_AFTER_SELECTION_MAX,
+                        value=_state.get('dfm_min_variables_after_selection', UIConfig.MIN_VARIABLES_AFTER_SELECTION_DEFAULT),
+                        step=1,
+                        key='dfm_min_variables_after_selection_input',
+                        help="变量筛选后至少保留的变量数，防止过度删减"
+                    )
+                    _state.set('dfm_min_variables_after_selection', min_vars_value)
+
         # === 第一阶段分行业因子数（仅二次估计法）===
         if estimation_method == 'two_stage':
             st_instance.divider()
@@ -716,6 +762,37 @@ def render_dfm_model_training_page(st_instance):
 
                     # 存储到session_state
                     _state.set('dfm_industry_k_factors', industry_k_factors)
+
+                    # 第一阶段并行配置（2026-01新增）
+                    st_instance.divider()
+                    st_instance.markdown("**第一阶段并行计算**")
+
+                    parallel_col1, parallel_col2 = st_instance.columns(2)
+
+                    with parallel_col1:
+                        enable_first_parallel = st_instance.checkbox(
+                            "启用并行计算",
+                            value=_state.get('dfm_enable_first_stage_parallel', UIConfig.FIRST_STAGE_PARALLEL_DEFAULT),
+                            key='dfm_enable_first_stage_parallel_input',
+                            help="分行业训练时并行执行，提升训练速度"
+                        )
+                        _state.set('dfm_enable_first_stage_parallel', enable_first_parallel)
+
+                    with parallel_col2:
+                        if enable_first_parallel:
+                            current_n_jobs = _state.get('dfm_first_stage_n_jobs', UIConfig.FIRST_STAGE_N_JOBS_DEFAULT)
+                            n_jobs_options = list(UIConfig.FIRST_STAGE_N_JOBS_OPTIONS.keys())
+                            if current_n_jobs not in n_jobs_options:
+                                raise ValueError(f"无效的并行任务数: {current_n_jobs}，有效值: {n_jobs_options}")
+                            n_jobs_value = st_instance.selectbox(
+                                "并行任务数",
+                                options=n_jobs_options,
+                                format_func=lambda x: UIConfig.FIRST_STAGE_N_JOBS_OPTIONS[x],
+                                index=n_jobs_options.index(current_n_jobs),
+                                key='dfm_first_stage_n_jobs_input',
+                                help="-1表示使用所有CPU核心"
+                            )
+                            _state.set('dfm_first_stage_n_jobs', n_jobs_value)
                 else:
                     st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
             else:
@@ -724,7 +801,6 @@ def render_dfm_model_training_page(st_instance):
         # 筛选策略和混合优先级（筛选启用时显示）- 两列布局
         if enable_var_selection:
             st_instance.divider()
-            st_instance.markdown("**筛选参数**")
 
             current_criterion = _state.get('dfm_selection_criterion', UIConfig.DEFAULT_SELECTION_CRITERION)
             # 验证策略有效性
@@ -767,26 +843,55 @@ def render_dfm_model_training_page(st_instance):
                     )
                     _state.set('dfm_hybrid_priority', priority_value)
 
-            # 评分权重 - 独占一行
+            # 训练期权重（始终显示）+ 阈值（仅混合策略显示）
             st_instance.divider()
-            st_instance.markdown("**评分权重**")
 
-            current_weight = _state.get('dfm_training_weight', UIConfig.DEFAULT_TRAINING_WEIGHT)
+            if criterion_value == 'hybrid':
+                # 混合策略：三列布局
+                weight_col1, weight_col2, weight_col3 = st_instance.columns(3)
+            else:
+                # 非混合策略：单列显示训练期权重
+                weight_col1 = st_instance.container()
 
-            training_weight_value = st_instance.slider(
-                "训练期权重 (%)",
-                min_value=UIConfig.TRAINING_WEIGHT_MIN,
-                max_value=UIConfig.TRAINING_WEIGHT_MAX,
-                value=current_weight,
-                step=UIConfig.TRAINING_WEIGHT_STEP,
-                key='dfm_training_weight_input',
-                help="0%=仅验证期, 100%=仅训练期"
-            )
-            _state.set('dfm_training_weight', training_weight_value)
+            with weight_col1:
+                current_weight = _state.get('dfm_training_weight', UIConfig.DEFAULT_TRAINING_WEIGHT)
+                training_weight_value = st_instance.slider(
+                    "训练期权重 (%)",
+                    min_value=UIConfig.TRAINING_WEIGHT_MIN,
+                    max_value=UIConfig.TRAINING_WEIGHT_MAX,
+                    value=current_weight,
+                    step=UIConfig.TRAINING_WEIGHT_STEP,
+                    key='dfm_training_weight_input',
+                    help="0%=仅验证期, 100%=仅训练期"
+                )
+                _state.set('dfm_training_weight', training_weight_value)
 
-            # 显示权重说明
-            validation_weight = 100 - training_weight_value
-            st_instance.caption(f"训练期 {training_weight_value}% + 验证期 {validation_weight}%")
+            if criterion_value == 'hybrid':
+                with weight_col2:
+                    current_rmse_tolerance = _state.get('dfm_rmse_tolerance', UIConfig.DEFAULT_RMSE_TOLERANCE)
+                    rmse_tolerance_value = st_instance.slider(
+                        "RMSE相近阈值 (%)",
+                        min_value=UIConfig.RMSE_TOLERANCE_MIN,
+                        max_value=UIConfig.RMSE_TOLERANCE_MAX,
+                        value=float(current_rmse_tolerance),
+                        step=UIConfig.RMSE_TOLERANCE_STEP,
+                        key='dfm_rmse_tolerance_input',
+                        help="当两个模型RMSE差异小于此百分比时视为相近"
+                    )
+                    _state.set('dfm_rmse_tolerance', rmse_tolerance_value)
+
+                with weight_col3:
+                    current_win_rate_tolerance = _state.get('dfm_win_rate_tolerance', UIConfig.DEFAULT_WIN_RATE_TOLERANCE)
+                    win_rate_tolerance_value = st_instance.slider(
+                        "胜率相近阈值 (%)",
+                        min_value=UIConfig.WIN_RATE_TOLERANCE_MIN,
+                        max_value=UIConfig.WIN_RATE_TOLERANCE_MAX,
+                        value=float(current_win_rate_tolerance),
+                        step=UIConfig.WIN_RATE_TOLERANCE_STEP,
+                        key='dfm_win_rate_tolerance_input',
+                        help="当两个模型胜率差异小于此百分点时视为相近"
+                    )
+                    _state.set('dfm_win_rate_tolerance', win_rate_tolerance_value)
 
     # ===== 变量选择 =====
     st_instance.markdown("--- ")

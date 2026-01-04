@@ -184,4 +184,87 @@ def select_num_factors(
     return k, pca_analysis
 
 
-__all__ = ['select_num_factors']
+def compute_optimal_k_factors(
+    data: pd.DataFrame,
+    variables: List[str],
+    method: str,
+    fixed_k: int,
+    pca_threshold: float = 0.9,
+    kaiser_threshold: float = 1.0,
+    train_end: Optional[str] = None
+) -> int:
+    """
+    计算最优因子数（用于变量选择过程中动态计算）
+
+    轻量级接口，在变量选择过程中快速计算k_factors。
+
+    Args:
+        data: 完整数据DataFrame
+        variables: 当前变量列表（预测变量）
+        method: 选择方法 ('fixed', 'cumulative', 'kaiser')
+        fixed_k: 固定因子数（method='fixed'时使用）
+        pca_threshold: PCA累积方差阈值（method='cumulative'时使用，默认0.9）
+        kaiser_threshold: Kaiser特征值阈值（method='kaiser'时使用，默认1.0）
+        train_end: 训练期结束日期（用于避免数据泄露）
+
+    Returns:
+        k_factors: 计算得到的因子数
+
+    Raises:
+        ValueError: 如果输入参数无效
+
+    Examples:
+        >>> # fixed模式直接返回
+        >>> k = compute_optimal_k_factors(data, vars, 'fixed', fixed_k=5)
+
+        >>> # cumulative模式动态计算
+        >>> k = compute_optimal_k_factors(
+        ...     data, vars, 'cumulative',
+        ...     fixed_k=5, pca_threshold=0.85
+        ... )
+    """
+    # 输入验证
+    if not variables:
+        raise ValueError("变量列表不能为空")
+
+    if fixed_k < 1:
+        raise ValueError(f"fixed_k必须>=1，当前值: {fixed_k}")
+
+    if method not in ['fixed', 'cumulative', 'kaiser', 'elbow']:
+        raise ValueError(f"无效的方法: {method}，必须是'fixed', 'cumulative', 'kaiser'或'elbow'之一")
+
+    n_vars = len(variables)
+    max_k = n_vars - 1
+
+    # fixed模式快速路径
+    if method == 'fixed':
+        return min(fixed_k, max_k)
+
+    # 变量数过少时使用固定值（避免PCA不稳定）
+    if n_vars < 5:
+        k = min(fixed_k, max(1, max_k))
+        logger.debug(
+            f"[DynamicK] 变量数{n_vars}<5，使用固定k={k}"
+        )
+        return k
+
+    # 调用完整PCA分析（静默模式）
+    k, _ = select_num_factors(
+        data=data,
+        selected_vars=variables,
+        method=method,
+        fixed_k=fixed_k,
+        pca_threshold=pca_threshold,
+        kaiser_threshold=kaiser_threshold,
+        train_end=train_end,
+        progress_callback=None  # 静默模式，不输出进度
+    )
+
+    logger.debug(
+        f"[DynamicK] 变量数={len(variables)}, method={method}, k={k}"
+    )
+
+    return k
+
+
+__all__ = ['select_num_factors', 'compute_optimal_k_factors']

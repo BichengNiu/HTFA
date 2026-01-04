@@ -878,6 +878,63 @@ config = TrainingConfig(
 - 配置参数：`config.py:68-71`
 - 配置验证：`config.py:141-145`
 
+## 动态因子数选择（2026-01-03）
+
+### 功能概述
+
+变量选择过程中，因子数k_factors现在会根据当前变量集动态计算，而非保持固定。
+
+**行为规则**：
+- `factor_selection_method='fixed'`：使用固定k_factors（原有行为，不变）
+- `factor_selection_method='cumulative'`：每次评估前基于当前变量集PCA计算k
+- `factor_selection_method='kaiser'`：每次评估前基于当前变量集PCA计算k
+
+### 理论依据
+
+选择累积方差/Kaiser方法意味着希望基于数据自动确定因子数，这个原则应贯穿整个变量选择过程：
+- 初始10个变量时，基于10个变量PCA计算k=5
+- 移除到8个变量时，基于8个变量PCA计算k=4
+- 移除到6个变量时，基于6个变量PCA计算k=3
+
+### 实现位置
+
+- 核心函数：`core/pca_utils.py:187-250` - `compute_optimal_k_factors()`
+- 动态计算逻辑：`training/evaluator_strategy.py:154-167`
+- 参数传递：`training/trainer.py:259-262`, `selection/backward_selector.py:338-341`
+
+### 使用示例
+
+```python
+# 动态因子选择（cumulative/kaiser模式自动启用）
+config = TrainingConfig(
+    data_path="data.csv",
+    target_variable="GDP",
+    enable_variable_selection=True,
+    factor_selection_method='cumulative',  # 或 'kaiser'
+    pca_threshold=0.85  # 累积方差阈值
+)
+# 变量选择过程中k_factors会随变量数变化而动态调整
+
+# 固定因子数（原有行为）
+config = TrainingConfig(
+    data_path="data.csv",
+    target_variable="GDP",
+    enable_variable_selection=True,
+    factor_selection_method='fixed',
+    k_factors=5  # 整个选择过程使用固定k=5
+)
+```
+
+### 性能影响
+
+- **额外开销**：~20次PCA × 0.3秒 = 6秒
+- **可接受性**：相比训练总时间（数十秒到数分钟），增加5-10%
+
+### 边界情况处理
+
+- 变量数<5时强制使用固定值，避免PCA不稳定
+- `fixed_k`作为fallback保证k不超过变量数-1
+
 ## 数据预览模块
 
 **频率支持**: 周度、月度、日度、旬度、年度

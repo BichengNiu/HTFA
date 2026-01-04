@@ -35,6 +35,27 @@ class TrainingConfigBuilder:
         """
         self.state = state_manager
 
+    def _get_required(self, key: str) -> Any:
+        """
+        获取必需的状态值，如果不存在则抛出错误
+
+        Args:
+            key: 状态键名
+
+        Returns:
+            状态值
+
+        Raises:
+            ValueError: 如果键不存在
+        """
+        value = self.state.get(key)
+        if value is None:
+            raise ValueError(
+                f"必需的UI参数 '{key}' 未设置。"
+                f"这表明UI控件未正常初始化，请检查model_training_page.py中的控件定义。"
+            )
+        return value
+
     def build(
         self,
         input_df: pd.DataFrame,
@@ -56,13 +77,12 @@ class TrainingConfigBuilder:
             ValueError: 配置验证失败
         """
         # 1. 获取核心配置
-        target_variable = self.state.get('dfm_target_variable')
-        current_selected_indicators = self.state.get('dfm_selected_indicators', [])
+        target_variable = self._get_required('dfm_target_variable')
+        current_selected_indicators = self._get_required('dfm_selected_indicators')
 
-        if not target_variable:
-            raise ValueError("未设置目标变量")
+        # 验证非空
         if not current_selected_indicators:
-            raise ValueError("未选择预测指标")
+            raise ValueError("预测指标列表不能为空")
 
         # 2. 获取日期配置
         training_start_value = self.state.get('dfm_training_start_date')
@@ -74,7 +94,7 @@ class TrainingConfigBuilder:
             raise ValueError("日期配置不完整")
 
         # 获取算法类型（需要提前获取以计算train_end_date）
-        algorithm = self.state.get('dfm_algorithm', 'classical')
+        algorithm = self._get_required('dfm_algorithm')
 
         # 获取目标变量的频率
         target_freq_code = get_target_frequency(
@@ -107,7 +127,7 @@ class TrainingConfigBuilder:
         corrected_indicators = self._correct_variable_names(input_df, current_selected_indicators)
 
         # 4. 获取变量选择配置
-        var_selection_method = self.state.get('dfm_variable_selection_method', 'none')
+        var_selection_method = self._get_required('dfm_variable_selection_method')
         enable_var_selection = (var_selection_method != 'none')
         mapped_var_selection_method = self._map_variable_selection_method(var_selection_method)
 
@@ -115,7 +135,7 @@ class TrainingConfigBuilder:
         factor_selection_method, factor_params = self._get_factor_selection_params()
 
         # 6. 获取估计方法配置
-        estimation_method = self.state.get('dfm_estimation_method', 'single_stage')
+        estimation_method = self._get_required('dfm_estimation_method')
 
         # 7. 二次估计法特定配置
         industry_k_factors_dict = {}
@@ -123,30 +143,29 @@ class TrainingConfigBuilder:
         first_stage_target_map = {}
 
         if estimation_method == 'two_stage':
-            industry_k_factors_dict = self.state.get('dfm_industry_k_factors', {})
-            second_stage_extra_predictors = self.state.get('dfm_second_stage_extra_predictors', [])
-            first_stage_target_map = self.state.get('dfm_first_stage_target_map', {})
+            industry_k_factors_dict = self._get_required('dfm_industry_k_factors')
+            second_stage_extra_predictors = self.state.get('dfm_second_stage_extra_predictors') or []  # 可选参数，允许为空
+            first_stage_target_map = self._get_required('dfm_first_stage_target_map')
 
         # 7.5 获取目标变量配对模式（2025-12新增）
-        target_alignment_mode = self.state.get('dfm_target_alignment_mode', 'next_month')
+        target_alignment_mode = self._get_required('dfm_target_alignment_mode')
 
         # 7.6 获取筛选策略配置（2025-12-20新增）
         selection_criterion = 'hybrid'
         prioritize_win_rate = True
+        training_weight = 0.5
 
         if enable_var_selection:
-            selection_criterion = self.state.get('dfm_selection_criterion', 'hybrid')
-            hybrid_priority = self.state.get('dfm_hybrid_priority', 'win_rate_first')
+            selection_criterion = self._get_required('dfm_selection_criterion')
+            training_weight_pct = self._get_required('dfm_training_weight')
+            training_weight = training_weight_pct / 100.0  # 转换为0-1范围
 
             # 转换为后端参数
             if selection_criterion == 'hybrid':
+                hybrid_priority = self._get_required('dfm_hybrid_priority')
                 prioritize_win_rate = (hybrid_priority == 'win_rate_first')
             else:
                 prioritize_win_rate = None  # 纯策略不需要此参数
-
-        # 7.7 获取训练期权重配置（2025-12-20新增）
-        training_weight_pct = self.state.get('dfm_training_weight', 50)
-        training_weight = training_weight_pct / 100.0  # 转换为0-1范围
 
         # 7.8 algorithm已在步骤2中获取（用于计算train_end_date）
 
@@ -174,12 +193,14 @@ class TrainingConfigBuilder:
 
             # 模型参数
             'k_factors': factor_params.get('k_factors', 4),
-            'max_lags': self.state.get('dfm_factor_ar_order', 1),
+            'max_lags': self._get_required('dfm_factor_ar_order'),
+            'max_iterations': self._get_required('dfm_max_iterations'),
             'tolerance': 1e-6,
 
             # 变量选择配置
             'enable_variable_selection': enable_var_selection,
             'variable_selection_method': mapped_var_selection_method,
+            'min_variables_after_selection': self._get_required('dfm_min_variables_after_selection') if enable_var_selection else None,
 
             # 因子数选择配置
             'factor_selection_method': factor_selection_method,
@@ -201,6 +222,10 @@ class TrainingConfigBuilder:
             'second_stage_extra_predictors': second_stage_extra_predictors,
             'first_stage_target_map': first_stage_target_map,
 
+            # 第一阶段并行配置（2026-01新增）
+            'enable_first_stage_parallel': self._get_required('dfm_enable_first_stage_parallel') if estimation_method == 'two_stage' else False,
+            'first_stage_n_jobs': self._get_required('dfm_first_stage_n_jobs') if estimation_method == 'two_stage' else 1,
+
             # 目标变量配对模式（2025-12新增）
             'target_alignment_mode': target_alignment_mode,
 
@@ -210,6 +235,10 @@ class TrainingConfigBuilder:
 
             # 训练期权重配置（2025-12-20新增）
             'training_weight': training_weight,
+
+            # 容忍度配置（2026-01新增）
+            'rmse_tolerance_percent': self._get_required('dfm_rmse_tolerance') if enable_var_selection else 1.0,
+            'win_rate_tolerance_percent': self._get_required('dfm_win_rate_tolerance') if enable_var_selection else 5.0,
 
             # 算法选择（2025-12-21新增）
             'algorithm': algorithm,
@@ -368,13 +397,8 @@ class TrainingConfigBuilder:
         Returns:
             DDFM参数字典
         """
-        from dashboard.models.DFM.train.config import UIConfig
-
         # 解析编码器结构字符串
-        encoder_structure_str = self.state.get(
-            'dfm_encoder_structure',
-            UIConfig.ENCODER_STRUCTURE_DEFAULT
-        )
+        encoder_structure_str = self._get_required('dfm_encoder_structure')
         encoder_structure = self._parse_encoder_structure(encoder_structure_str)
 
         return {
@@ -383,20 +407,20 @@ class TrainingConfigBuilder:
             'decoder_structure': None,  # 使用默认对称结构
             'use_bias': True,
             'batch_norm': True,  # 默认使用批量归一化
-            'activation': self.state.get('dfm_ddfm_activation', UIConfig.DDFM_ACTIVATION_DEFAULT),
+            'activation': self._get_required('dfm_ddfm_activation'),
 
             # 因子动态
-            'factor_order': self.state.get('dfm_ddfm_factor_order', UIConfig.DDFM_FACTOR_ORDER_DEFAULT),
-            'lags_input': self.state.get('dfm_ddfm_lags_input', UIConfig.LAGS_INPUT_DEFAULT),
+            'factor_order': self._get_required('dfm_ddfm_factor_order'),
+            'lags_input': self._get_required('dfm_ddfm_lags_input'),
 
             # 训练参数
-            'learning_rate': self.state.get('dfm_ddfm_learning_rate', UIConfig.LEARNING_RATE_DEFAULT),
-            'ddfm_optimizer': self.state.get('dfm_ddfm_optimizer', UIConfig.DDFM_OPTIMIZER_DEFAULT),
+            'learning_rate': self._get_required('dfm_ddfm_learning_rate'),
+            'ddfm_optimizer': self._get_required('dfm_ddfm_optimizer'),
             'decay_learning_rate': True,
-            'epochs_per_mcmc': self.state.get('dfm_ddfm_epochs', UIConfig.EPOCHS_PER_MCMC_DEFAULT),
-            'batch_size': self.state.get('dfm_ddfm_batch_size', UIConfig.BATCH_SIZE_DEFAULT),
-            'mcmc_max_iter': self.state.get('dfm_ddfm_max_iter', UIConfig.MCMC_MAX_ITER_DEFAULT),
-            'mcmc_tolerance': self.state.get('dfm_ddfm_tolerance', UIConfig.MCMC_TOLERANCE_DEFAULT),
+            'epochs_per_mcmc': self._get_required('dfm_ddfm_epochs'),
+            'batch_size': self._get_required('dfm_ddfm_batch_size'),
+            'mcmc_max_iter': self._get_required('dfm_ddfm_max_iter'),
+            'mcmc_tolerance': self._get_required('dfm_ddfm_tolerance'),
             'display_interval': 10,
             'ddfm_seed': 3,
         }

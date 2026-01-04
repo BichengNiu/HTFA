@@ -15,6 +15,7 @@ import pandas as pd
 from typing import Tuple, List, Callable, Dict, Any
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.training.model_ops import train_dfm_with_forecast, evaluate_model_performance
+from dashboard.models.DFM.train.core.pca_utils import compute_optimal_k_factors
 
 logger = get_logger(__name__)
 
@@ -111,16 +112,19 @@ def _evaluate_variable_selection_model(
     max_iterations: int,
     tolerance: float,
     alignment_mode: str = 'next_month',
+    factor_selection_method: str = 'fixed',
+    pca_threshold: float = 0.9,
+    kaiser_threshold: float = 1.0,
     **kwargs
 ) -> Tuple[float, float, float, float, float, float, bool, None, None]:
     """
-    顶层变量选择评估函数（可序列化）
+    顶层变量选择评估函数（可序列化，支持动态因子数）
 
     Args:
         variables: 变量列表（包含目标变量）
         target_variable: 目标变量名
         full_data: 完整数据DataFrame
-        k_factors: 因子数
+        k_factors: 因子数（fixed模式使用，或作为动态模式的fallback）
         training_start: 训练开始日期
         train_end: 训练结束日期
         validation_start: 验证开始日期
@@ -128,10 +132,17 @@ def _evaluate_variable_selection_model(
         max_iter: 最大迭代次数
         tolerance: 容差
         alignment_mode: 目标配对模式 ('current_month' 或 'next_month')
+        factor_selection_method: 因子选择方法 ('fixed', 'cumulative', 'kaiser')
+        pca_threshold: PCA累积方差阈值（method='cumulative'时使用）
+        kaiser_threshold: Kaiser特征值阈值（method='kaiser'时使用）
         **kwargs: 其他参数
 
     Returns:
         9元组: (is_rmse, oos_rmse, None, None, is_win_rate, oos_win_rate, is_svd_error, None, None)
+
+    Note:
+        当factor_selection_method!='fixed'时，会基于当前变量集动态计算最优k_factors。
+        这确保了变量选择过程中每次评估都使用最优的因子数。
     """
     try:
         # 分离预测变量
@@ -141,15 +152,29 @@ def _evaluate_variable_selection_model(
             logger.warning("[VarSelectionEvaluator] 预测变量为空，返回无穷大RMSE")
             return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, False, None, None)
 
+        # 动态计算因子数（新增逻辑）
+        if factor_selection_method != 'fixed':
+            k_factors_effective = compute_optimal_k_factors(
+                data=full_data,
+                variables=predictor_vars,
+                method=factor_selection_method,
+                fixed_k=k_factors,
+                pca_threshold=pca_threshold,
+                kaiser_threshold=kaiser_threshold,
+                train_end=train_end
+            )
+        else:
+            k_factors_effective = k_factors
+
         # 准备数据
         predictor_data = full_data[predictor_vars]
         target_data = full_data[target_variable]
 
-        # 训练模型
+        # 训练模型（使用有效的k_factors）
         model_result = train_dfm_with_forecast(
             predictor_data=predictor_data,
             target_data=target_data,
-            k_factors=k_factors,
+            k_factors=k_factors_effective,
             training_start=training_start,
             train_end=train_end,
             validation_start=validation_start,

@@ -334,7 +334,11 @@ class BackwardSelector:
                 'validation_end': self._eval_params['validation_end'],
                 'max_iterations': self._eval_params.get('max_iter', 30),
                 'tolerance': self._eval_params.get('tolerance', 1e-4),
-                'alignment_mode': self._eval_params.get('alignment_mode', 'next_month')
+                'alignment_mode': self._eval_params.get('alignment_mode', 'next_month'),
+                # 动态因子选择参数（2026-01-03新增）
+                'factor_selection_method': self._eval_params['params'].get('factor_selection_method', 'fixed'),
+                'pca_threshold': self._eval_params['params'].get('pca_threshold', 0.9),
+                'kaiser_threshold': self._eval_params['params'].get('kaiser_threshold', 1.0)
             }
 
             # 并行评估
