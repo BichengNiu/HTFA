@@ -314,7 +314,7 @@ class TrainingResultExporter:
             logger.info(f"保存完整观测数据: 形状={prepared_data.shape}, 时间范围={prepared_data.index[0]}至{prepared_data.index[-1]}")
         else:
             metadata['prepared_data'] = None
-            logger.warning("未提供prepared_data，影响分解功能可能受限")
+            logger.debug("未提供prepared_data，影响分解功能可能受限")
 
         # R²分析结果（可选）
         var_industry_map = metadata.get('var_industry_map', {})
@@ -484,10 +484,16 @@ class TrainingResultExporter:
 
             factor_names = [f'Factor_{i+1}' for i in range(k_factors)]
 
-            # 从selected_variables中排除目标变量，因为H只包含预测变量
-            var_names = result.selected_variables
-            if config and hasattr(config, 'target_variable'):
-                var_names = [v for v in var_names if v != config.target_variable]
+            # 使用model_result中保存的variable_names（必须存在）
+            if not (hasattr(result, 'model_result') and
+                result.model_result is not None and
+                hasattr(result.model_result, 'variable_names') and
+                result.model_result.variable_names is not None):
+                raise ValueError(
+                    "model_result.variable_names不存在，无法提取因子载荷矩阵。"
+                    "请使用最新版本重新训练模型。"
+                )
+            var_names = result.model_result.variable_names
 
             # 严格检查变量名列表长度与H的行数是否匹配
             if len(var_names) != H_trimmed.shape[0]:
@@ -577,8 +583,9 @@ class TrainingResultExporter:
         Returns:
             合并后的Nowcast序列，如果失败则返回None
         """
-        # 判断是否为DDFM模式
-        is_ddfm = getattr(config, 'algorithm', 'classical') == 'deep_learning'
+        # 判断是否为DDFM模式（包括deep_learning算法和二次估计法）
+        is_ddfm = (getattr(config, 'algorithm', 'classical') == 'deep_learning' or
+                   getattr(config, 'estimation_method', 'single_stage') == 'two_stage')
 
         forecast_is = None
         forecast_oos = None
@@ -1043,8 +1050,11 @@ class TrainingResultExporter:
             X_clean = X[valid_mask]
             Y_clean = Y[valid_mask]
 
-            if len(X_clean) < 10:
-                logger.warning(f"行业 '{industry}' 有效样本太少: {len(X_clean)}")
+            # 最小样本数要求：至少10个有效样本才能计算R²
+            min_samples = 10
+            if len(X_clean) < min_samples:
+                # 只在debug级别记录，避免大量警告刷屏
+                logger.debug(f"行业 '{industry}' 有效样本不足({len(X_clean)}<{min_samples})，跳过R²计算")
                 continue
 
             try:
@@ -1085,7 +1095,7 @@ class TrainingResultExporter:
                     continue
 
         if not industry_r2_results:
-            logger.warning("没有成功计算任何行业的R²")
+            logger.info("没有行业满足R²计算的最小样本要求，跳过R²分析")
             return None, None
 
         industry_r2_series = pd.Series(industry_r2_results)
@@ -1288,7 +1298,8 @@ class TrainingResultExporter:
         self,
         result,  # TwoStageTrainingResult
         config,  # TrainingConfig
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        prepared_data: Optional[pd.DataFrame] = None  # 添加prepared_data参数
     ) -> Dict[str, str]:
         """
         导出二次估计法训练结果
@@ -1309,6 +1320,7 @@ class TrainingResultExporter:
             result: 二次估计法训练结果
             config: 训练配置
             output_dir: 输出目录（None=创建临时目录）
+            prepared_data: 预处理后的完整数据（用于影响分解功能）
 
         Returns:
             文件路径字典（仅包含用户可下载的文件）
@@ -1405,7 +1417,7 @@ class TrainingResultExporter:
                 result=result.second_stage_result,
                 config=config,
                 output_dir=output_dir,
-                prepared_data=None
+                prepared_data=prepared_data  # 传递prepared_data
             )
 
             export_paths.update(second_stage_paths)

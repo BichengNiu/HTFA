@@ -372,7 +372,8 @@ def evaluate_model_performance(
                     forecast=model_result.forecast_oos,
                     actual=val_data,
                     period_type="oos",
-                    alignment_mode=alignment_mode
+                    alignment_mode=alignment_mode,
+                    full_target_data=target_data  # 传递完整target用于下月配对
                 )
 
             # 4. 观察期评估（验证期之后）
@@ -409,7 +410,8 @@ def _evaluate_performance(
     forecast: np.ndarray,
     actual: pd.Series,
     period_type: str,
-    alignment_mode: str = 'next_month'
+    alignment_mode: str = 'next_month',
+    full_target_data: Optional[pd.Series] = None
 ) -> None:
     """
     计算评估指标（统一的训练期/验证期/观察期评估逻辑）
@@ -424,13 +426,15 @@ def _evaluate_performance(
         actual: 真实值Series
         period_type: 时间段类型，'is'表示训练期，'oos'表示验证期，'obs'表示观察期
         alignment_mode: 配对模式 ('current_month' 或 'next_month')
+        full_target_data: 完整的target数据（用于下月配对时获取下月target）
     """
     min_len = min(len(forecast), len(actual))
     forecast_aligned = forecast[:min_len]
 
     actual_index = pd.to_datetime(actual.index[:min_len])
     pred_series = pd.Series(forecast_aligned, index=actual_index)
-    actual_series = actual
+    # 对于下月配对模式，使用完整target数据；否则使用切分后的数据
+    actual_series = full_target_data if full_target_data is not None else actual
 
     # 日志前缀映射：训练期/验证期/观察期
     log_prefix_map = {

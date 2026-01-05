@@ -89,20 +89,6 @@ class DFMModel:
         import random
         random.seed(DFM_SEED)
 
-        # 数据质量检查：过滤掉有效数据点不足的变量
-        min_required_points = max(self.n_factors + 5, 20)  # 至少需要n_factors+5个数据点
-        valid_counts = data.notna().sum()
-        valid_vars = valid_counts[valid_counts >= min_required_points].index.tolist()
-
-        if len(valid_vars) < len(data.columns):
-            dropped_vars = set(data.columns) - set(valid_vars)
-            logger.warning(f"过滤掉{len(dropped_vars)}个数据不足的变量（需要至少{min_required_points}个有效点）")
-            logger.debug(f"过滤掉的变量: {list(dropped_vars)[:5]}...")  # 只显示前5个
-            data = data[valid_vars]
-
-        if len(valid_vars) < self.n_factors:
-            raise ValueError(f"有效变量数（{len(valid_vars)}）少于因子数（{self.n_factors}），无法进行DFM估计")
-
         Z_orig = data.copy()
 
         # 根据训练期日期范围切分数据
@@ -113,13 +99,6 @@ class DFMModel:
             raise ValueError(
                 f"训练期({training_start}至{train_end})内没有数据。"
                 f"请检查日期范围是否正确。数据时间范围：{data.index.min()}至{data.index.max()}"
-            )
-
-        min_train_rows = max(self.n_factors * 3, 20)
-        if len(Z_train) < min_train_rows:
-            raise ValueError(
-                f"训练期数据不足：仅有{len(Z_train)}行，至少需要{min_train_rows}行。"
-                f"请扩大训练期范围或减少因子数（当前因子数：{self.n_factors}）。"
             )
 
         # 数据预处理：计算中心化和标准化数据（使用训练期参数）
@@ -500,6 +479,7 @@ class DFMModel:
             factors_smooth=factors_smoothed_final,  # 同上
             kalman_gains_history=filter_result.kalman_gains_history,  # 保存卡尔曼增益历史
             factor_states_predicted=factor_states_predicted,  # 先验因子状态 (n_time, n_factors)
+            variable_names=obs_centered.columns.tolist(),  # 保存训练时使用的变量名列表
             converged=converged,
             iterations=iteration + 1,
             log_likelihood=loglik_current

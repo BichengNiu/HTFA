@@ -289,13 +289,40 @@ class FileUploaderComponent:
                 }
                 print(f"[模型训练] 一次估计默认变量: {len(dfm_default_single_stage)}个")
 
-            if '一阶段预测' in industry_map_df.columns:
-                dfm_first_stage_pred = {
-                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段预测'])
-                    if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
-                }
-                print(f"[模型训练] 一阶段预测默认变量: {len(dfm_first_stage_pred)}个")
+            # 一阶段预测：直接从原始DFM预处理数据.xlsx读取，确保使用完整的映射表
+            # 修改于2026-01-04：用户要求以原始映射表为准，不受数据准备过滤影响
+            try:
+                import os
+                original_excel_path = r'c:\Users\NIU\Desktop\HTFA\data\DFM预处理数据.xlsx'
+                if os.path.exists(original_excel_path):
+                    original_map_df = pd.read_excel(original_excel_path, sheet_name='映射')
+                    if '一阶段预测' in original_map_df.columns:
+                        dfm_first_stage_pred = {
+                            unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                            for k, v in zip(original_map_df['指标名称'], original_map_df['一阶段预测'])
+                            if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                        }
+                        print(f"[模型训练] 一阶段预测默认变量(从原始映射表): {len(dfm_first_stage_pred)}个")
+                    else:
+                        print("[模型训练] 原始映射表中没有'一阶段预测'列")
+                else:
+                    # 回退到上传的Excel
+                    if '一阶段预测' in industry_map_df.columns:
+                        dfm_first_stage_pred = {
+                            unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                            for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段预测'])
+                            if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                        }
+                        print(f"[模型训练] 一阶段预测默认变量(从上传文件): {len(dfm_first_stage_pred)}个")
+            except Exception as e:
+                print(f"[模型训练] 读取原始映射表失败: {e}，使用上传的Excel")
+                if '一阶段预测' in industry_map_df.columns:
+                    dfm_first_stage_pred = {
+                        unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                        for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段预测'])
+                        if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
+                    }
+                    print(f"[模型训练] 一阶段预测默认变量: {len(dfm_first_stage_pred)}个")
 
             if '一阶段目标' in industry_map_df.columns:
                 dfm_first_stage_target = {

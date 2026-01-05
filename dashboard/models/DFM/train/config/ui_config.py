@@ -115,7 +115,7 @@ class UIConfig:
     # ========== 算法选择配置（2025-12-21新增）==========
     ALGORITHM_OPTIONS = {
         'classical': '经典DFM (EM算法)',
-        'deep_learning': '深度学习DFM (自编码器)'
+        'deep_learning': '深度学习DFM (DDFM)'
     }
     DEFAULT_ALGORITHM = 'classical'
 

@@ -95,6 +95,9 @@ class DFMModelResult:
     kalman_gains_history: Optional[List[np.ndarray]] = None  # 卡尔曼增益历史（用于新闻分解）
     factor_states_predicted: Optional[np.ndarray] = None  # 先验因子状态 (n_time, n_factors)，用于新闻分解的expected_value计算
 
+    # 变量名列表（用于导出时H矩阵维度匹配）
+    variable_names: Optional[List[str]] = None  # 训练时使用的变量名列表
+
     # 预测结果
     forecast_is: np.ndarray = None  # 训练期预测
     forecast_oos: np.ndarray = None  # 观察期预测

@@ -40,8 +40,9 @@ def generate_training_summary(
     # 判断是否为二次估计法
     is_two_stage = isinstance(result, TwoStageTrainingResult)
 
-    # 判断是否为DDFM（深度学习算法）
-    is_ddfm = getattr(config, 'algorithm', 'classical') == 'deep_learning'
+    # 判断是否为DDFM（深度学习算法或二次估计法）
+    is_ddfm = (getattr(config, 'algorithm', 'classical') == 'deep_learning' or
+               getattr(config, 'estimation_method', 'single_stage') == 'two_stage')
 
     lines = []
     lines.append("=" * 80)
@@ -73,7 +74,7 @@ def generate_training_summary(
                 first_stage_targets.append(f"{industry}: {ind_result.selected_variables[0]}")
 
         if first_stage_targets:
-            lines.append(f"  第一阶段目标变量数量（各行业）: {len(first_stage_targets)}")
+            lines.append(f"  第一阶段目标变量数量: {len(first_stage_targets)}")
             lines.append("  第一阶段目标变量明细:")
             for target in first_stage_targets:
                 lines.append(f"    - {target}")

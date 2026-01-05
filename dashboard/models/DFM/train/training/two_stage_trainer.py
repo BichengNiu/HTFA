@@ -369,7 +369,8 @@ class TwoStageTrainer:
                 export_files = exporter.export_two_stage_results(
                     result,
                     self.config,
-                    export_output_dir
+                    export_output_dir,
+                    prepared_data=data  # 传递prepared_data用于影响分解功能
                 )
 
                 result.export_files = export_files
@@ -475,7 +476,7 @@ class TwoStageTrainer:
         )(
             delayed(_train_single_industry)(
                 industry,
-                processor.data,  # 传递完整数据
+                processor.prepared_data,  # 传递完整数据
                 self.config.industry_map,
                 self.config.industry_k_factors,
                 config_dict,
@@ -662,6 +663,7 @@ class TwoStageTrainer:
         # 注意：卡尔曼滤波从t=1开始预测，所以预测序列比原始数据少一个时间点
         # 使用data.index[1:]跳过第一个时间点（t=0是初始化状态，没有预测值）
         date_index = data.index[1:]  # 跳过t=0时刻
+        expected_len = len(date_index)
 
         for industry, result in first_stage_results.items():
             if result.model_result is None:
@@ -684,9 +686,16 @@ class TwoStageTrainer:
                 continue
 
             # 确保预测序列长度与时间索引一致
-            if len(full_forecast) != len(date_index):
-                logger.warning(f"行业 {industry} 预测序列长度({len(full_forecast)})与时间索引长度({len(date_index)})不一致，进行截断对齐")
-                min_len = min(len(full_forecast), len(date_index))
+            forecast_len = len(full_forecast)
+            if forecast_len != expected_len:
+                # 计算差异并进行对齐（这是预期行为，因为不同行业数据可能有不同的有效范围）
+                diff = expected_len - forecast_len
+                if abs(diff) > expected_len * 0.1:  # 差异超过10%才警告
+                    logger.warning(
+                        f"行业 {industry} 预测序列长度({forecast_len})与时间索引长度({expected_len})不一致，"
+                        f"差异{abs(diff)}个时间点，进行截断对齐"
+                    )
+                min_len = min(forecast_len, expected_len)
                 full_forecast = full_forecast[:min_len]
                 current_date_index = date_index[:min_len]
             else:
@@ -799,6 +808,7 @@ class TwoStageTrainer:
             min_variables_for_parallel=self.config.min_variables_for_parallel,
             output_dir=self.config.output_dir,
             industry_map={},  # 第二阶段不需要行业映射
+            estimation_method='two_stage',  # 标记为二次估计法，确保is_ddfm判断正确
             # 筛选策略参数（2025-12-20修复：确保第二阶段继承父配置）
             selection_criterion=self.config.selection_criterion,
             prioritize_win_rate=self.config.prioritize_win_rate,

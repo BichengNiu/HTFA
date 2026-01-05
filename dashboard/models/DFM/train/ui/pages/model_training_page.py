@@ -763,36 +763,9 @@ def render_dfm_model_training_page(st_instance):
                     # 存储到session_state
                     _state.set('dfm_industry_k_factors', industry_k_factors)
 
-                    # 第一阶段并行配置（2026-01新增）
-                    st_instance.divider()
-                    st_instance.markdown("**第一阶段并行计算**")
-
-                    parallel_col1, parallel_col2 = st_instance.columns(2)
-
-                    with parallel_col1:
-                        enable_first_parallel = st_instance.checkbox(
-                            "启用并行计算",
-                            value=_state.get('dfm_enable_first_stage_parallel', UIConfig.FIRST_STAGE_PARALLEL_DEFAULT),
-                            key='dfm_enable_first_stage_parallel_input',
-                            help="分行业训练时并行执行，提升训练速度"
-                        )
-                        _state.set('dfm_enable_first_stage_parallel', enable_first_parallel)
-
-                    with parallel_col2:
-                        if enable_first_parallel:
-                            current_n_jobs = _state.get('dfm_first_stage_n_jobs', UIConfig.FIRST_STAGE_N_JOBS_DEFAULT)
-                            n_jobs_options = list(UIConfig.FIRST_STAGE_N_JOBS_OPTIONS.keys())
-                            if current_n_jobs not in n_jobs_options:
-                                raise ValueError(f"无效的并行任务数: {current_n_jobs}，有效值: {n_jobs_options}")
-                            n_jobs_value = st_instance.selectbox(
-                                "并行任务数",
-                                options=n_jobs_options,
-                                format_func=lambda x: UIConfig.FIRST_STAGE_N_JOBS_OPTIONS[x],
-                                index=n_jobs_options.index(current_n_jobs),
-                                key='dfm_first_stage_n_jobs_input',
-                                help="-1表示使用所有CPU核心"
-                            )
-                            _state.set('dfm_first_stage_n_jobs', n_jobs_value)
+                    # 默认启用第一阶段并行训练，使用所有核心
+                    _state.set('dfm_enable_first_stage_parallel', True)
+                    _state.set('dfm_first_stage_n_jobs', -1)
                 else:
                     st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
             else:
@@ -900,7 +873,6 @@ def render_dfm_model_training_page(st_instance):
     st_instance.subheader("变量选择")
 
     # 1. 目标变量选择/识别
-    st_instance.markdown("**目标变量**")
 
     # 获取当前估计方法
     current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
@@ -955,20 +927,15 @@ def render_dfm_model_training_page(st_instance):
         if first_stage_targets or second_stage_targets:
 
             if first_stage_targets:
-                with st_instance.expander("一阶段目标变量（各行业）", expanded=False):
+                with st_instance.expander("一阶段预测目标", expanded=False):
+                    # 显示自动全选提示（expander第一行）
+                    st_instance.success(f"已自动选择 {len(first_stage_targets)} 个一阶段目标变量用于训练")
                     for idx, target in enumerate(first_stage_targets, 1):
                         st_instance.text(f"{idx}. {target}")
-                # 显示自动全选提示
-                st_instance.success(f"已自动选择 {len(first_stage_targets)} 个一阶段目标变量用于训练")
             else:
                 st_instance.warning("未识别到一阶段目标变量（请检查映射文件'一阶段目标'列）")
 
             if second_stage_targets:
-                # 二阶段目标只有一个，直接显示不使用expander
-                st_instance.info(f"二阶段目标变量（总量）：**{second_stage_targets[0]}**")
-                # 显示自动选择提示
-                st_instance.success(f"已自动选择二阶段目标变量用于最终预测")
-
                 # 将二阶段目标变量保存到全局状态（用于后续训练逻辑）
                 _state.set('dfm_target_variable', second_stage_targets[0] if second_stage_targets else None)
                 _state.set('dfm_first_stage_target_variables', first_stage_targets)
@@ -1040,6 +1007,11 @@ def render_dfm_model_training_page(st_instance):
     with st_instance.expander("选择预测指标", expanded=False):
         # 获取当前估计方法，用于状态键命名
         current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
+
+        # 二次估计法时显示第一阶段标题
+        if current_estimation_method == 'two_stage':
+            st_instance.markdown("**第一阶段预测指标**")
+
         indicators_state_key = f'dfm_selected_indicators_per_industry_{current_estimation_method}'
 
         # 初始化指标选择状态（按估计方法分别存储）
@@ -1227,7 +1199,7 @@ def render_dfm_model_training_page(st_instance):
         # === 第二阶段变量选择（仅二次估计法）===
         if current_estimation_method == 'two_stage':
             st_instance.divider()
-            st_instance.markdown("**第二阶段：额外预测变量**")
+            st_instance.markdown("**第二阶段预测指标**")
 
             if input_df is not None:
                 # 获取需要排除的变量
@@ -1306,10 +1278,11 @@ def render_dfm_model_training_page(st_instance):
                     st.session_state[stage2_key] = default_extra_vars
 
                 extra_predictors = st_instance.multiselect(
-                    "第二阶段额外预测变量（可选）",
+                    "选择指标",
                     options=available_extra_vars,
                     key=stage2_key,
-                    help="在分行业因子之外添加的宏观指标"
+                    help="在分行业因子之外添加的宏观指标",
+                    label_visibility="collapsed"
                 )
 
                 _state.set('dfm_second_stage_extra_predictors', extra_predictors)

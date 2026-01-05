@@ -200,8 +200,6 @@ class IndustryDataProcessor:
             exclude_target=True,
             exclude_zonghe=exclude_zonghe
         )
-        if len(predictors) < min_predictors:
-            return False, f"行业 {industry} 预测变量数量不足（需要至少{min_predictors}个，实际{len(predictors)}个）"
 
         missing_predictors = [p for p in predictors if p not in self.prepared_data.columns]
         if missing_predictors:
