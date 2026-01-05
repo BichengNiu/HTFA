@@ -143,11 +143,11 @@ def build_exclude_targets_list(
     first_stage_targets: List[str] = None
 ) -> List[str]:
     """
-    构建排除目标变量列表（二阶段目标 + 一阶段目标）
+    构建排除目标变量列表
 
     Args:
-        current_target_var: 当前目标变量（二阶段目标）
-        first_stage_targets: 一阶段目标变量列表
+        current_target_var: 当前目标变量
+        first_stage_targets: 其他需要排除的目标变量列表
 
     Returns:
         完整的排除目标列表
@@ -170,25 +170,19 @@ def get_valid_indicators_for_industry(
     all_indicators: List[str],
     exclude_targets: List[str],
     var_industry_map: Dict[str, str],
-    is_two_stage: bool
 ) -> List[str]:
     """
-    获取行业的有效预测指标（排除目标变量和综合变量）
+    获取行业的有效预测指标（排除目标变量）
 
     Args:
         all_indicators: 该行业的所有指标
         exclude_targets: 要排除的目标变量列表
         var_industry_map: 变量名(标准化) -> 行业名的映射
-        is_two_stage: 是否为二次估计法
 
     Returns:
         有效的预测指标列表
     """
     # 排除目标变量
     indicators = filter_exclude_targets(all_indicators, exclude_targets)
-
-    # 二次估计法：排除"综合"类变量
-    if is_two_stage:
-        indicators = filter_exclude_zonghe(indicators, var_industry_map)
 
     return indicators

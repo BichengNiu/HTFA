@@ -134,23 +134,10 @@ class TrainingConfigBuilder:
         # 5. 获取因子选择配置
         factor_selection_method, factor_params = self._get_factor_selection_params()
 
-        # 6. 获取估计方法配置
-        estimation_method = self._get_required('dfm_estimation_method')
-
-        # 7. 二次估计法特定配置
-        industry_k_factors_dict = {}
-        second_stage_extra_predictors = []
-        first_stage_target_map = {}
-
-        if estimation_method == 'two_stage':
-            industry_k_factors_dict = self._get_required('dfm_industry_k_factors')
-            second_stage_extra_predictors = self.state.get('dfm_second_stage_extra_predictors') or []  # 可选参数，允许为空
-            first_stage_target_map = self._get_required('dfm_first_stage_target_map')
-
-        # 7.5 获取目标变量配对模式（2025-12新增）
+        # 6. 获取目标变量配对模式（2025-12新增）
         target_alignment_mode = self._get_required('dfm_target_alignment_mode')
 
-        # 7.6 获取筛选策略配置（2025-12-20新增）
+        # 7. 获取筛选策略配置（2025-12-20新增）
         selection_criterion = 'hybrid'
         prioritize_win_rate = True
         training_weight = 0.5
@@ -212,19 +199,6 @@ class TrainingConfigBuilder:
             'n_jobs': -1,
             'parallel_backend': 'loky',
             'min_variables_for_parallel': 5,
-
-            # 行业映射
-            'industry_map': var_industry_map,
-
-            # 二次估计法配置
-            'estimation_method': estimation_method,
-            'industry_k_factors': industry_k_factors_dict,
-            'second_stage_extra_predictors': second_stage_extra_predictors,
-            'first_stage_target_map': first_stage_target_map,
-
-            # 第一阶段并行配置（2026-01新增）
-            'enable_first_stage_parallel': self._get_required('dfm_enable_first_stage_parallel') if estimation_method == 'two_stage' else False,
-            'first_stage_n_jobs': self._get_required('dfm_first_stage_n_jobs') if estimation_method == 'two_stage' else 1,
 
             # 目标变量配对模式（2025-12新增）
             'target_alignment_mode': target_alignment_mode,

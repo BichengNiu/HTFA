@@ -145,8 +145,7 @@ class DFMTrainer:
                 validation_samples=len(val_data),
                 initial_vars=len(predictor_vars),
                 k_factors=self.config.k_factors,
-                is_ddfm=(self.config.algorithm == 'deep_learning' or
-                         self.config.estimation_method == 'two_stage')
+                is_ddfm=(self.config.algorithm == 'deep_learning')
             )
 
             logger.info(config_summary)
@@ -324,8 +323,7 @@ class DFMTrainer:
             # ========== 公共部分：评估和结果构建 ==========
 
             # 步骤5: 模型评估（直接调用）
-            is_ddfm = (self.config.algorithm == 'deep_learning' or
-                       self.config.estimation_method == 'two_stage')
+            is_ddfm = (self.config.algorithm == 'deep_learning')
 
             metrics = evaluate_model_performance(
                 model_result=model_result,

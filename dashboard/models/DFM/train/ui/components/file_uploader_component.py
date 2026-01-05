@@ -99,12 +99,8 @@ class FileUploaderComponent:
         variable_selection_keys = [
             'dfm_selected_indicators',
             'dfm_selected_industries',
-            'dfm_selected_indicators_per_industry_single_stage',
-            'dfm_selected_indicators_per_industry_two_stage',
+            'dfm_selected_indicators_per_industry',
             'dfm_target_variable',
-            'dfm_first_stage_target_variables',
-            'dfm_second_stage_target_variable',
-            'dfm_second_stage_extra_predictors',
             'dfm_default_variables_map',
             'dfm_industry_map_filtered',
         ]
@@ -132,13 +128,10 @@ class FileUploaderComponent:
             'dfm_observation_start_date',
         ]
 
-        # 4. 行业因子数设置
-        industry_factor_keys = [
-            'dfm_industry_k_factors',
-        ]
+        # 5. 清空（无额外状态需要清除）
 
         # 清除StateManager命名空间内的状态
-        all_keys = variable_selection_keys + training_state_keys + date_keys + industry_factor_keys
+        all_keys = variable_selection_keys + training_state_keys + date_keys
         cleared_count = 0
         for key in all_keys:
             if self.state.exists(key):
@@ -149,8 +142,6 @@ class FileUploaderComponent:
         widget_prefixes = [
             'dfm_indicators_multiselect_',
             'dfm_select_all_',
-            'dfm_second_stage_extra_predictors_',
-            'industry_k_',
         ]
 
         # 6. 清除日期输入等widget的key（这些widget key直接存储在st.session_state中）
@@ -165,7 +156,6 @@ class FileUploaderComponent:
             'dfm_cumulative_variance_threshold_input',
             'dfm_kaiser_threshold_input',
             'dfm_factor_ar_order_input',
-            'temp_estimation_method_selector',
         ]
 
         widget_cleared_count = 0
@@ -216,7 +206,7 @@ class FileUploaderComponent:
         cached_file_id = self.state.get('cached_excel_file_id', None)
         cached_df = self.state.get('dfm_prepared_data_df', None)
         cached_industry_map = self.state.get('dfm_industry_map_obj', None)
-        cached_single_stage_map = self.state.get('dfm_default_single_stage_map', None)
+        cached_default_map = self.state.get('dfm_default_map', None)
         cached_frequency_map = self.state.get('dfm_frequency_map_obj', None)
         cached_unit_map = self.state.get('dfm_unit_map_obj', None)
 
@@ -224,7 +214,13 @@ class FileUploaderComponent:
         if (cached_df is not None and cached_industry_map is not None
             and cached_frequency_map and cached_unit_map and current_file_id == cached_file_id):
             print(f"[模型训练] 使用缓存的Excel数据: 数据={cached_df.shape}, 映射={len(cached_industry_map)}个变量, 频率={len(cached_frequency_map)}个变量, 单位={len(cached_unit_map)}个变量")
-            return cached_df, cached_industry_map, cached_single_stage_map or {}, cached_frequency_map, cached_unit_map
+
+            # 验证所有必需的缓存数据都存在
+            if cached_default_map is None:
+                print("[模型训练] 警告: 缓存的默认变量映射为空，将重新加载")
+                # 不使用缓存，强制重新加载
+            else:
+                return cached_df, cached_industry_map, cached_default_map, cached_frequency_map, cached_unit_map
 
         # 检测到新文件上传，清除所有依赖旧数据的状态
         is_new_file = cached_file_id is not None and current_file_id != cached_file_id
@@ -275,70 +271,44 @@ class FileUploaderComponent:
                 st_instance.error("行业映射为空，请检查Excel文件的'映射'sheet")
                 return None, {}, {}, {}, {}
 
-            # 解析默认变量配置（支持四列）
-            dfm_default_single_stage = {}
-            dfm_first_stage_pred = {}
-            dfm_first_stage_target = {}
-            dfm_second_stage_target = {}
+            # 解析默认变量配置
+            dfm_default_vars = {}
+            target_map = {}
 
-            if '一次估计' in industry_map_df.columns:
-                dfm_default_single_stage = {
+            if '预测变量' in industry_map_df.columns:
+                dfm_default_vars = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['一次估计'])
+                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['预测变量'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
-                print(f"[模型训练] 一次估计默认变量: {len(dfm_default_single_stage)}个")
+                print(f"[模型训练] 预测变量: {len(dfm_default_vars)}个")
 
-            # 一阶段预测：直接从原始DFM预处理数据.xlsx读取，确保使用完整的映射表
-            # 修改于2026-01-04：用户要求以原始映射表为准，不受数据准备过滤影响
-            try:
-                import os
-                original_excel_path = r'c:\Users\NIU\Desktop\HTFA\data\DFM预处理数据.xlsx'
-                if os.path.exists(original_excel_path):
-                    original_map_df = pd.read_excel(original_excel_path, sheet_name='映射')
-                    if '一阶段预测' in original_map_df.columns:
-                        dfm_first_stage_pred = {
-                            unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                            for k, v in zip(original_map_df['指标名称'], original_map_df['一阶段预测'])
-                            if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
-                        }
-                        print(f"[模型训练] 一阶段预测默认变量(从原始映射表): {len(dfm_first_stage_pred)}个")
-                    else:
-                        print("[模型训练] 原始映射表中没有'一阶段预测'列")
-                else:
-                    # 回退到上传的Excel
-                    if '一阶段预测' in industry_map_df.columns:
-                        dfm_first_stage_pred = {
-                            unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                            for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段预测'])
-                            if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
-                        }
-                        print(f"[模型训练] 一阶段预测默认变量(从上传文件): {len(dfm_first_stage_pred)}个")
-            except Exception as e:
-                print(f"[模型训练] 读取原始映射表失败: {e}，使用上传的Excel")
-                if '一阶段预测' in industry_map_df.columns:
-                    dfm_first_stage_pred = {
-                        unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                        for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段预测'])
-                        if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
-                    }
-                    print(f"[模型训练] 一阶段预测默认变量: {len(dfm_first_stage_pred)}个")
-
-            if '一阶段目标' in industry_map_df.columns:
-                dfm_first_stage_target = {
+            if '目标变量' in industry_map_df.columns:
+                target_map = {
                     unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['一阶段目标'])
+                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['目标变量'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
-                print(f"[模型训练] 一阶段目标默认变量: {len(dfm_first_stage_target)}个")
+                print(f"[模型训练] 目标变量标记: {len(target_map)}个")
 
-            if '二阶段目标' in industry_map_df.columns:
-                dfm_second_stage_target = {
-                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
-                    for k, v in zip(industry_map_df['指标名称'], industry_map_df['二阶段目标'])
-                    if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
-                }
-                print(f"[模型训练] 二阶段目标默认变量: {len(dfm_second_stage_target)}个")
+                if len(target_map) == 0:
+                    st_instance.error("映射表'目标变量'列中未标记任何变量。请在'目标变量'列中标记至少一个变量为'是'。")
+                    return None, {}, {}, {}, {}
+            else:
+                st_instance.error("映射表格式错误：缺少'目标变量'列。请重新运行数据准备模块导出最新版本的Excel文件。")
+                with st_instance.expander("查看解决方法"):
+                    st_instance.markdown("""
+                    **解决步骤：**
+                    1. 切换到"数据准备"页面
+                    2. 重新上传原始数据文件并运行数据处理
+                    3. 导出新的Excel文件（将包含'目标变量'列）
+                    4. 返回此页面，上传新导出的Excel文件
+
+                    **说明：**
+                    - '目标变量'列用于标记DFM模型的预测目标
+                    - 不再支持旧的'二阶段目标'列名，请使用最新格式
+                    """)
+                return None, {}, {}, {}, {}
 
             # 解析频率映射（必需）
             if '频率' not in industry_map_df.columns:
@@ -411,17 +381,15 @@ class FileUploaderComponent:
             # 缓存数据
             self.state.set('dfm_prepared_data_df', input_df)
             self.state.set('dfm_industry_map_obj', var_industry_map)
-            self.state.set('dfm_default_single_stage_map', dfm_default_single_stage)
-            self.state.set('dfm_first_stage_pred_map', dfm_first_stage_pred)
-            self.state.set('dfm_first_stage_target_map', dfm_first_stage_target)
-            self.state.set('dfm_second_stage_target_map', dfm_second_stage_target)
+            self.state.set('dfm_default_map', dfm_default_vars)
+            self.state.set('dfm_target_map', target_map)
             self.state.set('dfm_frequency_map_obj', var_frequency_map)
             self.state.set('dfm_unit_map_obj', var_unit_map)
             self.state.set('cached_excel_file_id', current_file_id)
 
             print("[模型训练] Excel文件加载成功并已缓存")
 
-            return input_df, var_industry_map, dfm_default_single_stage, var_frequency_map, var_unit_map
+            return input_df, var_industry_map, dfm_default_vars, var_frequency_map, var_unit_map
 
         except ValueError as e:
             if "Worksheet named" in str(e):

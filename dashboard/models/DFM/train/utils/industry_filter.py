@@ -22,18 +22,6 @@ def filter_industries_by_target(
 
     Returns:
         过滤后的行业列表（至少包含一个非目标变量）
-
-    Example:
-        >>> industries = ['工业', '金融', '消费']
-        >>> industry_map = {
-        >>>     '工业': ['工业增加值', '工业利润'],
-        >>>     '金融': ['工业增加值'],  # 只有目标变量
-        >>>     '消费': ['社会消费', '零售额']
-        >>> }
-        >>> result = filter_industries_by_target(
-        >>>     industries, industry_map, '工业增加值'
-        >>> )
-        >>> # result = ['工业', '消费']
     """
     if not target_var:
         return industries
@@ -41,9 +29,7 @@ def filter_industries_by_target(
     filtered = []
     for industry in industries:
         vars_in_industry = industry_to_vars.get(industry, [])
-
         non_target_vars = [v for v in vars_in_industry if v != target_var]
-
         if non_target_vars:
             filtered.append(industry)
 

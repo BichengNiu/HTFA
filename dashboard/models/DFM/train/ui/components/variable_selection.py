@@ -368,7 +368,7 @@ class VariableSelectionComponent(DFMComponent):
                     new_state = st_obj.checkbox(
                         industry_name,
                         value=current_value,
-                        key=f"dfm_legacy_industry_checkbox_{industry_name}"
+                        key=f"dfm_industry_checkbox_{industry_name}"
                     )
                     current_checkbox_states[industry_name] = new_state
                 col_idx += 1
@@ -521,7 +521,7 @@ class VariableSelectionComponent(DFMComponent):
 
                     deselect_all_checked = st_obj.checkbox(
                         "取消全选",
-                        key=f"dfm_legacy_deselect_all_{industry_name}",
+                        key=f"dfm_deselect_all_{industry_name}",
                         help=f"取消所有 '{industry_name}' 的指标"
                     )
 

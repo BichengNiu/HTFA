@@ -169,9 +169,8 @@ def estimate_transition_matrix(
                 A[n_factors:, :-n_factors] = np.eye(n_factors * (max_lags - 1))
 
     except Exception as e:
-        logger.warning(f"A矩阵估计失败: {e}，使用单位矩阵")
-        n_states = n_factors * max_lags
-        A = np.eye(n_states) * DEFAULT_AR1_COEFFICIENT
+        logger.error(f"A矩阵估计失败: {e}")
+        raise ValueError(f"状态转移矩阵估计失败: {e}。请检查因子数据是否有效。") from e
 
     return A
 

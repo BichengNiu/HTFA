@@ -55,11 +55,9 @@ def load_mappings_once(
             'mappings': {               # 映射字典（仅成功时）
                 'var_type_map': Dict[str, str],           # 变量类型映射
                 'var_industry_map': Dict[str, str],       # 变量-行业映射 ★核心★
-                'var_frequency_map': Dict[str, str],      # 变量-频率映射 ★新增★
-                'single_stage_map': Dict[str, str],       # 一次估计映射
-                'first_stage_pred_map': Dict[str, str],   # 一阶段预测映射
-                'first_stage_target_map': Dict[str, str], # 一阶段目标映射
-                'second_stage_target_map': Dict[str, str] # 二阶段目标映射
+                'var_frequency_map': Dict[str, str],      # 变量-频率映射
+                'single_stage_map': Dict[str, str],       # 预测变量映射
+                'second_stage_target_map': Dict[str, str] # 目标变量映射
             }
         }
     """
@@ -124,39 +122,23 @@ def load_mappings_once(
         else:
             mappings['var_nature_map'] = {}
 
-        # 6. 一次估计映射（可选）
-        if '一次估计' in df.columns:
+        # 6. 预测变量映射（可选）
+        if '预测变量' in df.columns:
             mappings['single_stage_map'] = _extract_mapping(
-                df, reference_column_name, '一次估计', value_filter='是'
+                df, reference_column_name, '预测变量', value_filter='是'
             )
         else:
             mappings['single_stage_map'] = {}
 
-        # 6. 一阶段预测映射（可选）
-        if '一阶段预测' in df.columns:
-            mappings['first_stage_pred_map'] = _extract_mapping(
-                df, reference_column_name, '一阶段预测', value_filter='是'
-            )
-        else:
-            mappings['first_stage_pred_map'] = {}
-
-        # 7. 一阶段目标映射（可选）
-        if '一阶段目标' in df.columns:
-            mappings['first_stage_target_map'] = _extract_mapping(
-                df, reference_column_name, '一阶段目标', value_filter='是'
-            )
-        else:
-            mappings['first_stage_target_map'] = {}
-
-        # 8. 二阶段目标映射（可选）
-        if '二阶段目标' in df.columns:
+        # 7. 目标变量映射（可选）
+        if '目标变量' in df.columns:
             mappings['second_stage_target_map'] = _extract_mapping(
-                df, reference_column_name, '二阶段目标', value_filter='是'
+                df, reference_column_name, '目标变量', value_filter='是'
             )
         else:
             mappings['second_stage_target_map'] = {}
 
-        # 9. 变量-发布日期滞后映射（新增：用于发布日期校准）
+        # 8. 变量-发布日期滞后映射（新增：用于发布日期校准）
         if '发布日期' in df.columns:
             mappings['var_publication_lag_map'] = _extract_numeric_mapping(
                 df, reference_column_name, '发布日期'
@@ -172,10 +154,8 @@ def load_mappings_once(
         logger.info(f"    变量-单位: {len(mappings['var_unit_map'])}个")
         logger.info(f"    变量-性质: {len(mappings['var_nature_map'])}个")
         logger.info(f"    发布日期滞后: {len(mappings['var_publication_lag_map'])}个")
-        logger.info(f"    一次估计: {len(mappings['single_stage_map'])}个")
-        logger.info(f"    一阶段预测: {len(mappings['first_stage_pred_map'])}个")
-        logger.info(f"    一阶段目标: {len(mappings['first_stage_target_map'])}个")
-        logger.info(f"    二阶段目标: {len(mappings['second_stage_target_map'])}个")
+        logger.info(f"    预测变量: {len(mappings['single_stage_map'])}个")
+        logger.info(f"    目标变量: {len(mappings['second_stage_target_map'])}个")
 
         # 更新缓存
         if use_cache:

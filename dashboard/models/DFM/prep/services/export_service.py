@@ -22,13 +22,13 @@ class ExportService:
         stationarity_check_results: Dict[str, Dict]
     ) -> Dict[str, Any]:
         """
-        清除不平稳变量的"一次估计"和"一阶段预测"标记
+        清除不平稳变量的"预测变量"标记
 
-        对于标记为"一次估计=是"或"一阶段预测=是"但不平稳的变量，
+        对于标记为"预测变量=是"但不平稳的变量，
         将其标记替换为空值。
 
         Args:
-            mappings: 映射字典（包含single_stage_map和first_stage_pred_map）
+            mappings: 映射字典（包含single_stage_map）
             stationarity_check_results: 平稳性检验结果
 
         Returns:
@@ -38,42 +38,28 @@ class ExportService:
         updated_mappings = copy.deepcopy(mappings)
 
         single_stage_map = updated_mappings.get('single_stage_map', {})
-        first_stage_pred_map = updated_mappings.get('first_stage_pred_map', {})
 
         # 添加详细日志
         logger.info(f"[平稳性过滤] 开始处理")
-        logger.info(f"[平稳性过滤] 一次估计标记数: {len(single_stage_map)}")
-        logger.info(f"[平稳性过滤] 一阶段预测标记数: {len(first_stage_pred_map)}")
+        logger.info(f"[平稳性过滤] 预测变量标记数: {len(single_stage_map)}")
         logger.info(f"[平稳性过滤] 平稳性检验结果数: {len(stationarity_check_results)}")
 
-        cleared_vars_single = []
-        cleared_vars_first = []
+        cleared_vars = []
 
         # 检查所有标记为"是"的变量
-        all_marked_vars = set(single_stage_map.keys()) | set(first_stage_pred_map.keys())
-        logger.info(f"[平稳性过滤] 合计标记变量数: {len(all_marked_vars)}")
-
-        for var in all_marked_vars:
+        for var in list(single_stage_map.keys()):
             stat_result = stationarity_check_results.get(var, {})
             # 默认值改为False：找不到检验结果的变量视为不平稳，清除其标记
             is_stationary = stat_result.get('is_stationary', False)
 
             if not is_stationary:
                 # 清除标记
-                if var in single_stage_map:
-                    single_stage_map[var] = ''
-                    cleared_vars_single.append(var)
-                if var in first_stage_pred_map:
-                    first_stage_pred_map[var] = ''
-                    cleared_vars_first.append(var)
+                single_stage_map[var] = ''
+                cleared_vars.append(var)
 
-        logger.info(f"[平稳性过滤] 清除一次估计标记: {len(cleared_vars_single)}个")
-        logger.info(f"[平稳性过滤] 清除一阶段预测标记: {len(cleared_vars_first)}个")
-        if cleared_vars_first:
-            logger.info(f"[平稳性过滤] 清除的一阶段预测变量: {cleared_vars_first[:10]}..."  if len(cleared_vars_first) > 10 else f"[平稳性过滤] 清除的一阶段预测变量: {cleared_vars_first}")
+        logger.info(f"[平稳性过滤] 清除预测变量标记: {len(cleared_vars)}个")
 
         updated_mappings['single_stage_map'] = single_stage_map
-        updated_mappings['first_stage_pred_map'] = first_stage_pred_map
 
         return updated_mappings
 
@@ -287,10 +273,8 @@ class ExportService:
                 '频率': var_frequency_map.get(indicator, ''),
                 '单位': var_unit_map.get(indicator, ''),
                 '性质': var_nature_map.get(indicator, ''),
-                '一次估计': dfm_single_stage_map.get(indicator, ''),
-                '一阶段预测': dfm_first_stage_pred_map.get(indicator, ''),
-                '一阶段目标': dfm_first_stage_target_map.get(indicator, ''),
-                '二阶段目标': dfm_second_stage_target_map.get(indicator, ''),
+                '预测变量': dfm_single_stage_map.get(indicator, ''),
+                '目标变量': dfm_second_stage_target_map.get(indicator, ''),
                 '处理详情': log_info.get('处理详情', ''),
                 'P值': log_info.get('P值', ''),
                 '平稳性检验（0.05）': log_info.get('平稳性检验（0.05）', '')
@@ -299,7 +283,7 @@ class ExportService:
         df_unified_map = pd.DataFrame(
             unified_mapping_data,
             columns=['指标名称', '行业', '频率', '单位', '性质',
-                     '一次估计', '一阶段预测', '一阶段目标', '二阶段目标',
+                     '预测变量', '目标变量',
                      '处理详情', 'P值', '平稳性检验（0.05）']
         )
 

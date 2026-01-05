@@ -227,105 +227,6 @@ class TrainingResult:
         )
 
 
-@dataclass
-class TwoStageTrainingResult:
-    """二次估计法训练结果
-
-    包含第一阶段（分行业模型）和第二阶段（总量模型）的完整结果
-    """
-    # 第一阶段结果：各行业模型训练结果
-    first_stage_results: Dict[str, TrainingResult] = field(default_factory=dict)
-
-    # 第二阶段结果：总量模型训练结果
-    second_stage_result: Optional[TrainingResult] = None
-
-    # 分行业nowcasting序列（用于第二阶段输入）
-    industry_nowcast_df: Optional[pd.DataFrame] = None
-
-    # 各行业实际使用的因子数
-    industry_k_factors_used: Dict[str, int] = field(default_factory=dict)
-
-    # 估计方法标记
-    estimation_method: str = 'two_stage'
-
-    # 训练统计
-    total_training_time: float = 0.0
-    first_stage_time: float = 0.0
-    second_stage_time: float = 0.0
-
-    # 导出文件路径
-    export_files: Optional[Dict[str, str]] = None
-
-    # 输出路径
-    output_dir: Optional[str] = None
-
-    @classmethod
-    def build(
-        cls,
-        first_stage_results: Dict[str, TrainingResult],
-        second_stage_result: TrainingResult,
-        industry_nowcast_df: pd.DataFrame,
-        industry_k_factors_used: Dict[str, int],
-        first_stage_time: float,
-        second_stage_time: float,
-        output_dir: Optional[str] = None
-    ) -> 'TwoStageTrainingResult':
-        """
-        构建二次估计法训练结果对象
-
-        Args:
-            first_stage_results: 各行业训练结果字典
-            second_stage_result: 第二阶段总量模型结果
-            industry_nowcast_df: 分行业nowcasting序列
-            industry_k_factors_used: 各行业使用的因子数
-            first_stage_time: 第一阶段训练时间（秒）
-            second_stage_time: 第二阶段训练时间（秒）
-            output_dir: 输出目录
-
-        Returns:
-            TwoStageTrainingResult: 二次估计法训练结果对象
-        """
-        total_time = first_stage_time + second_stage_time
-
-        return cls(
-            first_stage_results=first_stage_results,
-            second_stage_result=second_stage_result,
-            industry_nowcast_df=industry_nowcast_df,
-            industry_k_factors_used=industry_k_factors_used,
-            total_training_time=total_time,
-            first_stage_time=first_stage_time,
-            second_stage_time=second_stage_time,
-            output_dir=output_dir
-        )
-
-    def get_first_stage_summary(self) -> pd.DataFrame:
-        """
-        获取第一阶段训练结果摘要
-
-        Returns:
-            包含各行业训练指标的DataFrame
-        """
-        summary_data = []
-
-        for industry, result in self.first_stage_results.items():
-            # 处理Win Rate可能为NaN的情况
-            is_wr = result.metrics.is_win_rate if result.metrics else np.nan
-            oos_wr = result.metrics.oos_win_rate if result.metrics else np.nan
-
-            summary_data.append({
-                '行业': industry,
-                '因子数': self.industry_k_factors_used.get(industry, 0),
-                '变量数': len(result.selected_variables),
-                '训练期RMSE': result.metrics.is_rmse if result.metrics else np.nan,
-                '观察期RMSE': result.metrics.oos_rmse if result.metrics else np.nan,
-                '训练期胜率': is_wr,
-                '观察期胜率': oos_wr,
-                '训练时间(秒)': result.training_time
-            })
-
-        return pd.DataFrame(summary_data)
-
-
 # ==================== 导出所有模型 ====================
 
 __all__ = [
@@ -345,5 +246,4 @@ __all__ = [
 
     # 训练结果
     'TrainingResult',
-    'TwoStageTrainingResult',
 ]

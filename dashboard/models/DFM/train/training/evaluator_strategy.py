@@ -231,7 +231,7 @@ def _evaluate_variable_selection_model(
         return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, True, None, None)
 
 
-# ========== 兼容性包装器（返回可调用对象） ==========
+# ========== 工厂函数（返回可调用对象） ==========
 
 def create_dfm_evaluator(config: 'TrainingConfig') -> Callable:
     """

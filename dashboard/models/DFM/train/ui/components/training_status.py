@@ -429,7 +429,7 @@ class TrainingStatusComponent(DFMComponent):
                 enable_export=True
             )
 
-            # 转换结果为路径字典格式（保持向后兼容）
+            # 提取导出文件路径字典
             if result and result.export_paths:
                 return result.export_paths
 

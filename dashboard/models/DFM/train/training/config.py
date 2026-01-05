@@ -58,22 +58,6 @@ class TrainingConfig:
     # 输出配置
     output_dir: Optional[str] = None
 
-    # 行业映射（变量名 -> 行业名）
-    industry_map: Optional[Dict[str, str]] = field(default_factory=dict)
-
-    # 二次估计法配置（2025-11-09新增）
-    estimation_method: str = 'single_stage'  # 估计方法: single_stage(一次估计) 或 two_stage(二次估计)
-    industry_k_factors: Dict[str, int] = field(default_factory=dict)  # 二次估计法中各行业因子数映射
-    second_stage_extra_predictors: List[str] = field(default_factory=list)  # 二次估计法第二阶段额外预测变量
-
-    # 第一阶段并行配置（2025-11-12新增）
-    enable_first_stage_parallel: bool = True  # 是否启用第一阶段（分行业训练）并行计算
-    first_stage_n_jobs: int = -1  # 第一阶段并行任务数（-1=所有核心，1=串行）
-    min_industries_for_parallel: int = 3  # 启用第一阶段并行的最小行业数
-
-    # 一阶段目标变量映射（2025-12新增）
-    first_stage_target_map: Dict[str, str] = field(default_factory=dict)  # 变量名(normalized) -> "是"
-
     # 目标变量配对模式（2025-12新增）
     target_alignment_mode: str = 'next_month'  # 'current_month'(本月) 或 'next_month'(下月)
 
@@ -167,42 +151,6 @@ class TrainingConfig:
                 f"parallel_backend必须是{valid_backends}之一,"
                 f"当前值: {self.parallel_backend}"
             )
-
-        # 验证二次估计法配置（2025-11-09）
-        valid_estimation_methods = ['single_stage', 'two_stage']
-        if self.estimation_method not in valid_estimation_methods:
-            raise ValueError(
-                f"estimation_method必须是{valid_estimation_methods}之一,"
-                f"当前值: {self.estimation_method}"
-            )
-
-        if self.estimation_method == 'two_stage':
-            if not self.industry_k_factors:
-                raise ValueError("二次估计法需要设置各行业因子数（industry_k_factors不能为空）")
-
-            if not self.first_stage_target_map:
-                raise ValueError(
-                    "二次估计法需要提供一阶段目标映射（first_stage_target_map不能为空）。"
-                    "请确保指标体系表的'一阶段目标'列中至少有一个变量标记为'是'"
-                )
-
-            # 验证first_stage_target_map中是否有变量标记为'是'
-            has_valid_target = any(v == '是' for v in self.first_stage_target_map.values())
-            if not has_valid_target:
-                raise ValueError(
-                    "first_stage_target_map中没有任何变量标记为'是'。"
-                    "请确保指标体系表的'一阶段目标'列中至少有一个变量标记为'是'"
-                )
-
-            for industry, k in self.industry_k_factors.items():
-                if not isinstance(k, int) or k <= 0:
-                    raise ValueError(f"行业 {industry} 的因子数必须为正整数，当前值: {k}")
-
-        # 验证第一阶段并行配置（2025-11-12）
-        if self.first_stage_n_jobs == 0:
-            raise ValueError("first_stage_n_jobs不能为0，使用-1表示所有核心，1表示串行")
-        if self.min_industries_for_parallel < 1:
-            raise ValueError(f"min_industries_for_parallel必须>=1，当前值: {self.min_industries_for_parallel}")
 
         # 验证目标配对模式（2025-12）
         valid_alignment_modes = ['current_month', 'next_month']

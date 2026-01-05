@@ -390,50 +390,23 @@ def render_dfm_model_training_page(st_instance):
     # 深度学习模式标志（复用上面的algorithm_value）
     is_deep_learning = (algorithm_value == 'deep_learning')
 
-    # 估计方法回调函数
-    def on_estimation_method_change():
-        new_method = st_instance.session_state.get('temp_estimation_method_selector', 'single_stage')
-        _state.set('dfm_estimation_method', new_method)
+    # 目标对齐方式（单列显示）
+    current_alignment = _state.get('dfm_target_alignment_mode', UIConfig.DEFAULT_TARGET_ALIGNMENT)
+    # 验证有效性
+    if current_alignment not in UIConfig.TARGET_ALIGNMENT_OPTIONS:
+        raise ValueError(f"无效的目标对齐方式: {current_alignment}，有效值: {list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys())}")
 
-    # 第一行: 估计方法 + 目标对齐方式
-    col_core1, col_core2 = st_instance.columns(2)
-
-    with col_core1:
-        current_method = _state.get('dfm_estimation_method', UIConfig.DEFAULT_ESTIMATION_METHOD)
-        # 验证方法有效性
-        if current_method not in UIConfig.ESTIMATION_METHODS:
-            raise ValueError(f"无效的估计方法: {current_method}，有效值: {list(UIConfig.ESTIMATION_METHODS.keys())}")
-
-        estimation_method = st_instance.selectbox(
-            "估计方法",
-            options=list(UIConfig.ESTIMATION_METHODS.keys()),
-            format_func=lambda x: UIConfig.ESTIMATION_METHODS[x],
-            index=UIConfig.get_safe_option_index(
-                UIConfig.ESTIMATION_METHODS, current_method, UIConfig.DEFAULT_ESTIMATION_METHOD
-            ),
-            key='temp_estimation_method_selector',
-            on_change=on_estimation_method_change,
-            help="一次估计法：直接预测总量指标；二次估计法：先预测各行业，再加总"
-        )
-        _state.set('dfm_estimation_method', estimation_method)
-
-    with col_core2:
-        current_alignment = _state.get('dfm_target_alignment_mode', UIConfig.DEFAULT_TARGET_ALIGNMENT)
-        # 验证有效性
-        if current_alignment not in UIConfig.TARGET_ALIGNMENT_OPTIONS:
-            raise ValueError(f"无效的目标对齐方式: {current_alignment}，有效值: {list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys())}")
-
-        alignment_value = st_instance.selectbox(
-            "目标值",
-            options=list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys()),
-            format_func=lambda x: UIConfig.TARGET_ALIGNMENT_OPTIONS[x],
-            index=UIConfig.get_safe_option_index(
-                UIConfig.TARGET_ALIGNMENT_OPTIONS, current_alignment, UIConfig.DEFAULT_TARGET_ALIGNMENT
-            ),
-            key='dfm_target_alignment_mode_input',
-            help="nowcast预测值与目标变量实际值的配对方式"
-        )
-        _state.set('dfm_target_alignment_mode', alignment_value)
+    alignment_value = st_instance.selectbox(
+        "目标值",
+        options=list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys()),
+        format_func=lambda x: UIConfig.TARGET_ALIGNMENT_OPTIONS[x],
+        index=UIConfig.get_safe_option_index(
+            UIConfig.TARGET_ALIGNMENT_OPTIONS, current_alignment, UIConfig.DEFAULT_TARGET_ALIGNMENT
+        ),
+        key='dfm_target_alignment_mode_input',
+        help="nowcast预测值与目标变量实际值的配对方式"
+    )
+    _state.set('dfm_target_alignment_mode', alignment_value)
 
     # 第二行: 变量筛选方法 + 因子选择策略（仅经典算法显示）
     if not is_deep_learning:
@@ -726,51 +699,6 @@ def render_dfm_model_training_page(st_instance):
                     )
                     _state.set('dfm_min_variables_after_selection', min_vars_value)
 
-        # === 第一阶段分行业因子数（仅二次估计法）===
-        if estimation_method == 'two_stage':
-            st_instance.divider()
-            st_instance.markdown("**第一阶段：分行业因子数**")
-
-            if input_df is not None:
-                from dashboard.models.DFM.train.utils.industry_data_processor import extract_industry_list
-
-                industry_list = extract_industry_list(input_df)
-
-                if industry_list:
-                    st_instance.info(f"共识别到 {len(industry_list)} 个行业，请设定各行业因子数（默认值为1）")
-
-                    # 使用列布局优化显示（每行3个）
-                    cols_per_row = 3
-                    industry_k_factors = {}
-
-                    for i in range(0, len(industry_list), cols_per_row):
-                        cols = st_instance.columns(cols_per_row)
-                        for j, col in enumerate(cols):
-                            idx = i + j
-                            if idx < len(industry_list):
-                                industry = industry_list[idx]
-                                with col:
-                                    k_val = st_instance.number_input(
-                                        f"{industry}",
-                                        min_value=1,
-                                        max_value=5,
-                                        value=_state.get(f'industry_k_{industry}', 1),
-                                        step=1,
-                                        key=f'industry_k_{industry}'
-                                    )
-                                    industry_k_factors[industry] = k_val
-
-                    # 存储到session_state
-                    _state.set('dfm_industry_k_factors', industry_k_factors)
-
-                    # 默认启用第一阶段并行训练，使用所有核心
-                    _state.set('dfm_enable_first_stage_parallel', True)
-                    _state.set('dfm_first_stage_n_jobs', -1)
-                else:
-                    st_instance.warning("未能从数据中识别到任何行业信息，请检查数据格式")
-            else:
-                st_instance.warning("请先上传预处理后的数据文件")
-
         # 筛选策略和混合优先级（筛选启用时显示）- 两列布局
         if enable_var_selection:
             st_instance.divider()
@@ -873,91 +801,34 @@ def render_dfm_model_training_page(st_instance):
     st_instance.subheader("变量选择")
 
     # 1. 目标变量选择/识别
+    # 从映射文件自动识别目标变量
+    target_map = _state.get('dfm_target_map', {})
 
-    # 获取当前估计方法
-    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
+    # 将标准化的键转换回原始列名
+    target_candidates = []
 
-    if current_estimation_method == 'single_stage':
-        # 一次估计法：从映射文件自动识别目标变量
-        # 目标变量来自'二阶段目标'列（总量指标）
-        second_stage_target_map = _state.get('dfm_second_stage_target_map', {})
+    if input_df is not None:
+        for col in input_df.columns:
+            col_norm = normalize_text(col)
+            if col_norm in target_map:
+                target_candidates.append(col)
 
-        # 将标准化的键转换回原始列名
-        single_stage_targets = []
-
-        if input_df is not None:
-            for col in input_df.columns:
-                col_norm = normalize_text(col)
-                if col_norm in second_stage_target_map:
-                    single_stage_targets.append(col)
-
-
-        # 验证唯一性
-        if len(single_stage_targets) == 0:
-            st_instance.error("[ERROR] 映射文件'二阶段目标'列中未标记任何目标变量，一次估计法需要目标变量")
-            st_instance.info("提示：一次估计法的目标变量来自'二阶段目标'列（总量指标），预测变量默认来自'一次估计'列")
-            _state.set('dfm_target_variable', None)
-        elif len(single_stage_targets) > 1:
-            st_instance.error(f"[ERROR] 映射文件'二阶段目标'列中标记了多个目标变量，请确保只有一个目标变量标记为'是'")
-            st_instance.warning(f"当前识别到的目标变量：{', '.join(single_stage_targets)}")
-            _state.set('dfm_target_variable', None)
-        else:
-            # 唯一目标变量
-            target_var = single_stage_targets[0]
-            _state.set('dfm_target_variable', target_var)
+    # 验证唯一性
+    if len(target_candidates) == 0:
+        st_instance.error("[ERROR] 映射文件'目标变量'列中未标记任何目标变量")
+        st_instance.info("提示：目标变量通过映射文件'目标变量'列标记")
+        _state.set('dfm_target_variable', None)
+    elif len(target_candidates) > 1:
+        st_instance.error(f"[ERROR] 映射文件'目标变量'列中标记了多个目标变量，请确保只有一个目标变量标记为'是'")
+        st_instance.warning(f"当前识别到的目标变量：{', '.join(target_candidates)}")
+        _state.set('dfm_target_variable', None)
     else:
-        # 二次估计法：从映射文件自动识别目标变量
-        first_stage_target_map = _state.get('dfm_first_stage_target_map', {})
-        second_stage_target_map = _state.get('dfm_second_stage_target_map', {})
+        # 唯一目标变量
+        target_var = target_candidates[0]
+        _state.set('dfm_target_variable', target_var)
 
-        # 将标准化的键转换回原始列名
-        first_stage_targets = []
-        second_stage_targets = []
-
-        if input_df is not None:
-            for col in input_df.columns:
-                col_norm = normalize_text(col)
-                if col_norm in first_stage_target_map:
-                    first_stage_targets.append(col)
-                if col_norm in second_stage_target_map:
-                    second_stage_targets.append(col)
-
-
-        # 显示识别到的目标变量
-        if first_stage_targets or second_stage_targets:
-
-            if first_stage_targets:
-                with st_instance.expander("一阶段预测目标", expanded=False):
-                    # 显示自动全选提示（expander第一行）
-                    st_instance.success(f"已自动选择 {len(first_stage_targets)} 个一阶段目标变量用于训练")
-                    for idx, target in enumerate(first_stage_targets, 1):
-                        st_instance.text(f"{idx}. {target}")
-            else:
-                st_instance.warning("未识别到一阶段目标变量（请检查映射文件'一阶段目标'列）")
-
-            if second_stage_targets:
-                # 将二阶段目标变量保存到全局状态（用于后续训练逻辑）
-                _state.set('dfm_target_variable', second_stage_targets[0] if second_stage_targets else None)
-                _state.set('dfm_first_stage_target_variables', first_stage_targets)
-                _state.set('dfm_second_stage_target_variable', second_stage_targets[0] if second_stage_targets else None)
-            else:
-                st_instance.error("未识别到二阶段目标变量（请检查映射文件'二阶段目标'列）")
-                _state.set('dfm_target_variable', None)
-                _state.set('dfm_second_stage_target_variable', None)
-        else:
-            st_instance.error("[ERROR] 映射文件中未标记任何目标变量，请检查'一阶段目标'和'二阶段目标'列")
-            _state.set('dfm_target_variable', None)
-
-    # 根据估计方法选择正确的预测变量默认映射
-    if current_estimation_method == 'single_stage':
-        # 一次估计法：使用'一次估计'列作为预测变量默认选择
-        dfm_default_map = _state.get('dfm_default_single_stage_map', {})
-    else:
-        # 二次估计法：使用'一阶段预测'列作为预测变量默认选择
-        dfm_default_map = _state.get('dfm_first_stage_pred_map', {})
-
-    # 更新到状态，供后续使用
-    _state.set('dfm_default_variables_map', dfm_default_map)
+    # 根据映射文件选择预测变量默认配置
+    # dfm_default_map 已从 file_uploader.render() 加载（line 176）
 
     # 2. 过滤行业：移除仅包含目标变量的行业（使用工具函数）
     current_target_var = _state.get('dfm_target_variable', None)
@@ -968,14 +839,11 @@ def render_dfm_model_training_page(st_instance):
     )
 
     # 预计算各行业有效指标（DRY：只计算一次，后续复用）
-    first_stage_targets = _state.get('dfm_first_stage_target_variables', [])
-    exclude_targets = build_exclude_targets_list(current_target_var, first_stage_targets)
+    exclude_targets = build_exclude_targets_list(current_target_var, first_stage_targets=None)
 
-    var_industry_map = None
-    if current_estimation_method == 'two_stage':
-        var_industry_map = _state.get('dfm_industry_map_obj')
-        if not var_industry_map:
-            raise ValueError("行业映射数据未加载，请先上传并加载指标体系文件")
+    var_industry_map = _state.get('dfm_industry_map_obj')
+    if not var_industry_map:
+        raise ValueError("行业映射数据未加载，请先上传并加载指标体系文件")
 
     # 构建行业→有效指标映射缓存
     industry_available_indicators = {}
@@ -984,17 +852,10 @@ def render_dfm_model_training_page(st_instance):
         valid_indicators = get_valid_indicators_for_industry(
             all_indicators,
             exclude_targets,
-            var_industry_map or {},
-            is_two_stage=(current_estimation_method == 'two_stage')
+            var_industry_map,
         )
         if valid_indicators:
             industry_available_indicators[industry] = valid_indicators
-
-    # 二次估计法：根据预计算结果过滤行业
-    if current_estimation_method == 'two_stage':
-        original_count = len(filtered_industries)
-        filtered_industries = list(industry_available_indicators.keys())
-        logger.info(f"二次估计法行业过滤: 移除了 {original_count - len(filtered_industries)} 个无预测指标的行业")
 
     # 暂时存储过滤后的行业，以供后续步骤3中使用
     if not filtered_industries:
@@ -1005,16 +866,9 @@ def render_dfm_model_training_page(st_instance):
 
     # 3. 根据选定行业选择预测指标 (每个行业一个多选下拉菜单，默认全选)
     with st_instance.expander("选择预测指标", expanded=False):
-        # 获取当前估计方法，用于状态键命名
-        current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
+        indicators_state_key = 'dfm_selected_indicators_per_industry'
 
-        # 二次估计法时显示第一阶段标题
-        if current_estimation_method == 'two_stage':
-            st_instance.markdown("**第一阶段预测指标**")
-
-        indicators_state_key = f'dfm_selected_indicators_per_industry_{current_estimation_method}'
-
-        # 初始化指标选择状态（按估计方法分别存储）
+        # 初始化指标选择状态
         if _state.get(indicators_state_key, None) is None:
             _state.set(indicators_state_key, {})
 
@@ -1031,22 +885,22 @@ def render_dfm_model_training_page(st_instance):
             with global_control_col1:
                 global_select_all = st_instance.button(
                     "全选所有指标",
-                    key=f"dfm_global_select_all_{current_estimation_method}",
+                    key="dfm_global_select_all",
                     width='stretch'
                 )
 
             with global_control_col2:
                 global_deselect_all = st_instance.button(
                     "取消全选所有指标",
-                    key=f"dfm_global_deselect_all_{current_estimation_method}",
+                    key="dfm_global_deselect_all",
                     width='stretch'
                 )
 
             # 处理全局全选
             if global_select_all:
                 for industry_name, available_indicators in industry_available_indicators.items():
-                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}_{current_estimation_method}"
-                    select_all_key = f"dfm_select_all_{industry_name}_{current_estimation_method}"
+                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}"
+                    select_all_key = f"dfm_select_all_{industry_name}"
 
                     # 更新multiselect状态
                     st.session_state[multiselect_key] = available_indicators
@@ -1060,8 +914,8 @@ def render_dfm_model_training_page(st_instance):
             # 处理全局取消全选
             if global_deselect_all:
                 for industry_name in industry_available_indicators.keys():
-                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}_{current_estimation_method}"
-                    select_all_key = f"dfm_select_all_{industry_name}_{current_estimation_method}"
+                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}"
+                    select_all_key = f"dfm_select_all_{industry_name}"
 
                     # 清空multiselect状态
                     st.session_state[multiselect_key] = []
@@ -1083,8 +937,8 @@ def render_dfm_model_training_page(st_instance):
             cols = st_instance.columns(num_cols)
             col_idx = 0
 
-            # 从预计算缓存获取默认映射
-            dfm_default_map = _state.get('dfm_default_variables_map', {})
+            # 从预计算缓存获取默认映射（使用 file_uploader 返回的值）
+            # dfm_default_map 来自 line 176
 
             for industry_name in current_selected_industries:
                 # 使用预计算的有效指标缓存（DRY：不重复计算）
@@ -1102,9 +956,6 @@ def render_dfm_model_training_page(st_instance):
                     # 只有在有指标被排除且仍有可用指标时才显示提示
                     excluded_count = len(all_indicators_for_industry) - len(indicators_for_this_industry)
 
-                    method_label = "一阶段预测" if current_estimation_method == 'two_stage' else "一次估计"
-
-
                     # 从状态管理器读取已选指标，或使用DFM默认选择
                     default_selection_for_industry = current_selection.get(industry_name, None)
 
@@ -1119,8 +970,8 @@ def render_dfm_model_training_page(st_instance):
                     # 确保默认值是实际可选列表的子集
                     valid_default = [item for item in default_selection_for_industry if item in indicators_for_this_industry]
 
-                    # 初始化multiselect（key中包含估计方法，确保切换方法时重新初始化）
-                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}_{current_estimation_method}"
+                    # 初始化multiselect
+                    multiselect_key = f"dfm_indicators_multiselect_{industry_name}"
                     if multiselect_key not in st.session_state:
                         st.session_state[multiselect_key] = valid_default
 
@@ -1140,7 +991,7 @@ def render_dfm_model_training_page(st_instance):
                         select_all_checked = st_instance.checkbox(
                             "全选",
                             value=should_check_select_all,
-                            key=f"dfm_select_all_{industry_name}_{current_estimation_method}"
+                            key=f"dfm_select_all_{industry_name}"
                         )
 
                     if excluded_count > 0:
@@ -1196,110 +1047,15 @@ def render_dfm_model_training_page(st_instance):
 
         _state.set('dfm_selected_industries', inferred_industries)
 
-        # === 第二阶段变量选择（仅二次估计法）===
-        if current_estimation_method == 'two_stage':
-            st_instance.divider()
-            st_instance.markdown("**第二阶段预测指标**")
-
-            if input_df is not None:
-                # 获取需要排除的变量
-                target_variable = _state.get('dfm_target_variable', None)
-                first_stage_selected_indicators = _state.get('dfm_selected_indicators', [])
-                var_industry_map = _state.get('dfm_industry_map_obj')
-                if not var_industry_map:
-                    raise ValueError("行业映射数据未加载，请先上传并加载指标体系文件")
-
-                # 构建排除集合（使用标准化名称）
-                excluded_vars = set()
-                excluded_vars_normalized = set()
-
-                # 排除第一阶段已选择的所有预测变量
-                if first_stage_selected_indicators:
-                    excluded_vars.update(first_stage_selected_indicators)
-                    for var in first_stage_selected_indicators:
-                        normalized_var = normalize_variable_name_no_space(var)
-                        excluded_vars_normalized.add(normalized_var)
-
-                # 遍历所有列，根据映射关系判断是否排除
-                for col in input_df.columns:
-                    normalized_col = normalize_variable_name(col)
-                    normalized_col_no_space = normalize_variable_name_no_space(col)
-
-                    # 检查变量的行业归属
-                    industry = None
-                    if var_industry_map and normalized_col in var_industry_map:
-                        industry = var_industry_map[normalized_col]
-
-                    # 排除逻辑：
-                    # 1. 排除所有非"综合"的行业级变量
-                    if industry and industry != '综合':
-                        excluded_vars.add(col)
-                        continue
-
-                    # 2. 如果是第一阶段选择的变量
-                    if normalized_col_no_space in excluded_vars_normalized:
-                        if industry == '综合':
-                            continue
-                        else:
-                            excluded_vars.add(col)
-                            continue
-
-                    # 3. 排除包含"工业增加值"的变量
-                    if '工业增加值' in col:
-                        excluded_vars.add(col)
-
-                # 排除第二阶段目标变量
-                if target_variable:
-                    excluded_vars.add(target_variable)
-
-                # 筛选可用的额外预测变量
-                available_extra_vars = [
-                    col for col in input_df.columns
-                    if col not in excluded_vars
-                ]
-
-                # 获取二阶段目标的默认变量
-                dfm_second_stage_target_map = _state.get('dfm_second_stage_target_map')
-                if dfm_second_stage_target_map is None:
-                    logger.warning("二阶段目标映射未加载，无法自动选择额外预测变量")
-                    dfm_second_stage_target_map = {}
-
-                # 计算默认选中的变量
-                default_extra_vars = [
-                    col for col in available_extra_vars
-                    if normalize_variable_name(col) in dfm_second_stage_target_map
-                ]
-
-                # multiselect key包含估计方法，确保切换时重新初始化
-                stage2_key = f'dfm_second_stage_extra_predictors_{current_estimation_method}'
-
-                # 初始化默认值
-                if stage2_key not in st.session_state:
-                    st.session_state[stage2_key] = default_extra_vars
-
-                extra_predictors = st_instance.multiselect(
-                    "选择指标",
-                    options=available_extra_vars,
-                    key=stage2_key,
-                    help="在分行业因子之外添加的宏观指标",
-                    label_visibility="collapsed"
-                )
-
-                _state.set('dfm_second_stage_extra_predictors', extra_predictors)
-
     # 变量选择完成
 
     # 显示变量选择汇总信息
     current_target_var = _state.get('dfm_target_variable', None)
     current_selected_indicators = _state.get('dfm_selected_indicators', [])
     current_selected_industries_for_display = _state.get('dfm_selected_industries', [])
-    current_estimation_method = _state.get('dfm_estimation_method', 'single_stage')
 
-    # 计算总预测变量数（包含第二阶段额外变量）
+    # 计算总预测变量数
     total_predictor_count = len(current_selected_indicators)
-    if current_estimation_method == 'two_stage':
-        second_stage_extra_predictors = _state.get('dfm_second_stage_extra_predictors', [])
-        total_predictor_count += len(second_stage_extra_predictors)
 
     st_instance.text(f" - 目标变量: {current_target_var if current_target_var else '未选择'}")
     st_instance.text(f" - 选定行业数: {len(current_selected_industries_for_display)}")
@@ -1409,74 +1165,34 @@ def render_dfm_model_training_page(st_instance):
                 _state.set('dfm_training_log', ['[TRAIN_REF] 开始训练...'])
 
                 # 根据估计方法选择训练器并训练（同步执行）
-                if estimation_method == 'single_stage':
-                    trainer = DFMTrainer(training_config)
-                    result = trainer.train(
-                        progress_callback=progress_callback,
-                        enable_export=True,
-                        export_dir=None
-                    )
-                else:  # two_stage
-                    from dashboard.models.DFM.train.training.two_stage_trainer import TwoStageTrainer
-                    st_instance.info("[LOADING] 正在训练模型（二次估计法），请稍候...")
-                    trainer = TwoStageTrainer(training_config)
-                    result = trainer.train(
-                        progress_callback=progress_callback,
-                        enable_export=True,
-                        export_dir=None
-                    )
+                # 执行训练（单阶段）
+                trainer = DFMTrainer(training_config)
+                result = trainer.train(
+                    progress_callback=progress_callback,
+                    enable_export=True,
+                    export_dir=None
+                )
 
                 # 处理训练结果并保存
-                from dashboard.models.DFM.train.core.models import TwoStageTrainingResult
+                result_summary = {
+                    'algorithm': algorithm_value,  # 保存算法类型
+                    'selected_variables': result.selected_variables,
+                    'k_factors': result.k_factors,
+                    'metrics': {
+                        'is_rmse': result.metrics.is_rmse if result.metrics else None,
+                        'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
+                        'obs_rmse': result.metrics.obs_rmse if result.metrics else None,
+                        'is_win_rate': result.metrics.is_win_rate if result.metrics else None,
+                        'oos_win_rate': result.metrics.oos_win_rate if result.metrics else None,
+                        'obs_win_rate': result.metrics.obs_win_rate if result.metrics else None
+                    },
+                    'training_time': result.training_time
+                }
 
-                # 判断结果类型并提取关键信息
-                if isinstance(result, TwoStageTrainingResult):
-                    # 二次估计法结果：从second_stage_result中提取
-                    final_result = result.second_stage_result
-                    result_summary = {
-                        'estimation_method': 'two_stage',
-                        'selected_variables': final_result.selected_variables,
-                        'k_factors': final_result.k_factors,
-                        'metrics': {
-                            'is_rmse': final_result.metrics.is_rmse if final_result.metrics else None,
-                            'oos_rmse': final_result.metrics.oos_rmse if final_result.metrics else None,
-                            'obs_rmse': final_result.metrics.obs_rmse if final_result.metrics else None,
-                            'is_win_rate': final_result.metrics.is_win_rate if final_result.metrics else None,
-                            'oos_win_rate': final_result.metrics.oos_win_rate if final_result.metrics else None,
-                            'obs_win_rate': final_result.metrics.obs_win_rate if final_result.metrics else None
-                        },
-                        'training_time': result.total_training_time,
-                        'first_stage_count': len(result.first_stage_results),
-                        'industry_k_factors': result.industry_k_factors_used
-                    }
-
-                    training_time_display = result.total_training_time
-                    selected_variables = final_result.selected_variables
-                    k_factors_display = final_result.k_factors
-                    metrics_obj = final_result.metrics
-
-                else:
-                    # 一次估计法结果
-                    result_summary = {
-                        'estimation_method': 'single_stage',
-                        'algorithm': algorithm_value,  # 保存算法类型
-                        'selected_variables': result.selected_variables,
-                        'k_factors': result.k_factors,
-                        'metrics': {
-                            'is_rmse': result.metrics.is_rmse if result.metrics else None,
-                            'oos_rmse': result.metrics.oos_rmse if result.metrics else None,
-                            'obs_rmse': result.metrics.obs_rmse if result.metrics else None,
-                            'is_win_rate': result.metrics.is_win_rate if result.metrics else None,
-                            'oos_win_rate': result.metrics.oos_win_rate if result.metrics else None,
-                            'obs_win_rate': result.metrics.obs_win_rate if result.metrics else None
-                        },
-                        'training_time': result.training_time
-                    }
-
-                    training_time_display = result.training_time
-                    selected_variables = result.selected_variables
-                    k_factors_display = result.k_factors
-                    metrics_obj = result.metrics
+                training_time_display = result.training_time
+                selected_variables = result.selected_variables
+                k_factors_display = result.k_factors
+                metrics_obj = result.metrics
 
                 # 保存到状态管理器
                 _state.set('dfm_training_result', result_summary)
@@ -1486,12 +1202,7 @@ def render_dfm_model_training_page(st_instance):
 
                 # 添加完成日志
                 training_log = _state.get('dfm_training_log', [])
-
-                if isinstance(result, TwoStageTrainingResult):
-                    training_log.append(f"[SUCCESS] 二次估计法训练完成！总耗时: {training_time_display:.2f}秒")
-                    training_log.append(f"[STAGE1] 成功训练 {len(result.first_stage_results)} 个行业模型")
-                    training_log.append(f"[STAGE2] 总量模型训练完成")
-
+                training_log.append(f"[SUCCESS] 训练完成！总耗时: {training_time_display:.2f}秒")
                 training_log.append(f"[RESULT] 选中变量数: {len(selected_variables)}")
                 training_log.append(f"[RESULT] 因子数: {k_factors_display}")
 

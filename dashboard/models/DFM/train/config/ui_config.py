@@ -17,13 +17,6 @@ class UIConfig:
     DEFAULT_VALIDATION_START = date(2025, 4, 1)  # 验证期开始日期，至少在观察期开始前3个月
     DEFAULT_OBSERVATION_START = date(2025, 7, 1)  # 观察期开始日期（DDFM模式使用）
 
-    # 估计方法选项
-    ESTIMATION_METHODS = {
-        'single_stage': '一次估计法',
-        'two_stage': '二次估计法'
-    }
-    DEFAULT_ESTIMATION_METHOD = 'single_stage'
-
     # 目标值选项
     TARGET_ALIGNMENT_OPTIONS = {
         'next_month': "下月值",
@@ -68,17 +61,6 @@ class UIConfig:
     MIN_VARIABLES_AFTER_SELECTION_DEFAULT = 5  # 默认最少保留变量数
     MIN_VARIABLES_AFTER_SELECTION_MIN = 3
     MIN_VARIABLES_AFTER_SELECTION_MAX = 20
-
-    # 第一阶段并行配置 (2026-01新增)
-    FIRST_STAGE_PARALLEL_DEFAULT = True  # 默认启用第一阶段并行
-    FIRST_STAGE_N_JOBS_OPTIONS = {
-        -1: "所有核心",
-        1: "1个核心 (串行)",
-        2: "2个核心",
-        4: "4个核心",
-        8: "8个核心"
-    }
-    FIRST_STAGE_N_JOBS_DEFAULT = -1
 
     # 筛选策略选项
     SELECTION_CRITERIA = {
