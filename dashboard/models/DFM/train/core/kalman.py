@@ -117,7 +117,7 @@ class KalmanFilter:
             # 先执行预测步（使用t-1时刻的滤波结果）
             x_pred[t, :] = self.A @ x_filt[t-1, :] + self.B @ U[t, :]
             P_pred_raw = self.A @ P_filt[t-1] @ self.A.T + self.Q
-            # 添加jitter保证数值稳定性
+            # 添加小jitter(1e-6)保证P矩阵数值稳定性
             p_jitter = np.eye(self.n_states) * R_MATRIX_MIN_VARIANCE
             P_pred[t] = P_pred_raw + p_jitter
 
@@ -139,16 +139,18 @@ class KalmanFilter:
             innovation[t, ix] = innov_t
 
             S_t = H_t @ P_pred[t] @ H_t.T + R_t
-            # 添加jitter保证数值稳定性
+            # 添加较大jitter(1e-4)保证S_t矩阵数值稳定性（S_t通常有更大的数值范围）
             jitter = np.eye(S_t.shape[0]) * INNOVATION_COVARIANCE_JITTER
 
             try:
                 # 使用scipy.linalg.solve提高数值稳定性
                 # K_t = P_pred[t] @ H_t.T @ inv(S_t + jitter)
                 K_t = scipy.linalg.solve((S_t + jitter).T, (P_pred[t] @ H_t.T).T, assume_a='pos').T
-            except np.linalg.LinAlgError:
-                logger.warning(f"时间步{t}: 新息协方差矩阵奇异，使用伪逆")
-                K_t = P_pred[t] @ H_t.T @ np.linalg.pinv(S_t + jitter)
+            except np.linalg.LinAlgError as e:
+                raise np.linalg.LinAlgError(
+                    f"卡尔曼滤波失败(时刻{t}): 新息协方差矩阵奇异。"
+                    f"可能原因：数据质量不足或模型参数不合理。原始错误: {e}"
+                )
 
             # 保存完整的卡尔曼增益矩阵（扩展到所有观测变量维度）
             K_t_full = np.zeros((self.n_states, self.n_obs))
@@ -179,14 +181,19 @@ class KalmanFilter:
         P_pred_array = np.transpose(P_pred_array, (1, 2, 0))
 
         # 验证卡尔曼增益历史有效性（早期验证，避免导出时才发现问题）
-        if kalman_gains_history:
-            valid_gains = [g for g in kalman_gains_history[1:] if g is not None]
-            if not valid_gains:
-                raise ValueError(
-                    "Kalman滤波未能生成有效的卡尔曼增益历史。"
-                    "可能原因：所有观测数据都是NaN或数据质量严重不足。"
-                    "请检查输入数据并确保至少有部分有效观测值。"
-                )
+        if not kalman_gains_history:
+            raise ValueError(
+                "Kalman滤波未生成卡尔曼增益历史（列表为空）。"
+                "可能原因：输入数据为空或时间序列长度不足。"
+            )
+
+        valid_gains = [g for g in kalman_gains_history[1:] if g is not None]
+        if not valid_gains:
+            raise ValueError(
+                "Kalman滤波未能生成有效的卡尔曼增益历史。"
+                "可能原因：所有观测数据都是NaN或数据质量严重不足。"
+                "请检查输入数据并确保至少有部分有效观测值。"
+            )
 
         return KalmanFilterResult(
             x_filtered=x_filt,

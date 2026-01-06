@@ -55,6 +55,8 @@ def _adf_check_single_column(
 
         # Level ADF检验
         adf_result_level = adfuller(series_dropna)
+        if adf_result_level[1] is None or pd.isna(adf_result_level[1]):
+            raise ValueError(f"ADF检验返回无效p值: {adf_result_level[1]}")
         original_pval = float(adf_result_level[1])
 
         if original_pval < adf_p_threshold:
@@ -66,12 +68,8 @@ def _adf_check_single_column(
 
         # 尝试转换
         if (series_dropna > 0).all():
-            try:
-                series_transformed = np.log(series).diff(1)
-                transform_type = 'log_diff'
-            except Exception:
-                series_transformed = series.diff(1)
-                transform_type = 'diff'
+            series_transformed = np.log(series).diff(1)
+            transform_type = 'log_diff'
         else:
             series_transformed = series.diff(1)
             transform_type = 'diff'
@@ -115,9 +113,12 @@ def _adf_check_single_column(
                 'error': str(e)
             })
 
-    except Exception as e:
-        logger.error(f"[ADF并行] 列 '{col_name}' 检验失败: {e}")
-        return (col_name, None, None, {'status': 'error', 'error': str(e)})
+    except (ValueError, np.linalg.LinAlgError) as e:
+        logger.error(f"[ADF并行] 列 '{col_name}' 检验失败 (数值错误): {e}")
+        raise RuntimeError(f"ADF检验失败 ({col_name}): {e}") from e
+    except ImportError as e:
+        logger.error(f"[ADF并行] statsmodels导入失败: {e}")
+        raise
 
 
 def parallel_adf_check(

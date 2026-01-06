@@ -86,7 +86,7 @@ class StatsService:
                                 if len(valid_dates) > len(df_raw) * 0.5:
                                     date_values = valid_dates
                                     break
-                            except:
+                            except (ValueError, TypeError):
                                 continue
 
                     if len(date_values) > 0:
@@ -190,7 +190,7 @@ class StatsService:
                             if test_dates.notna().sum() > len(df) * 0.5:
                                 date_col_idx = col_idx
                                 break
-                        except:
+                        except (ValueError, TypeError):
                             continue
 
                     if date_col_idx is None:
@@ -240,7 +240,10 @@ class StatsService:
                 end_date = max(valid_dates)
 
                 days_span = (end_date - start_date).days + 1
-                freq_days = FREQ_DAYS_MAP.get(freq.lower() if freq else '', 7)
+                freq_lower = freq.lower() if freq else ''
+                if freq_lower not in FREQ_DAYS_MAP:
+                    raise ValueError(f"未知频率: {freq}")
+                freq_days = FREQ_DAYS_MAP[freq_lower]
                 theoretical_count = max(1, math.ceil(days_span / freq_days))
 
                 valid_count = len(valid_points)

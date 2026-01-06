@@ -17,6 +17,42 @@ class ExportService:
     """导出服务类"""
 
     @staticmethod
+    def _format_stationarity_result(
+        stat_result: Optional[Dict],
+        var_name: str = ""
+    ) -> tuple:
+        """
+        格式化平稳性检验结果（通用方法）
+
+        Args:
+            stat_result: 平稳性检验结果字典
+            var_name: 变量名（用于日志）
+
+        Returns:
+            tuple: (p_value_str, stationarity_str)
+        """
+        if stat_result is None:
+            if var_name:
+                logger.warning(f"变量 '{var_name}' 没有检验结果")
+            return '-', '未检验'
+
+        p_value = stat_result.get('p_value')
+        status = stat_result.get('status', '未检验')
+
+        p_value_str = f"{p_value:.3f}" if isinstance(p_value, (int, float)) else '-'
+
+        if status == '是':
+            stationarity_str = '平稳'
+        elif status == '数据不足':
+            stationarity_str = '数据不足'
+        elif status.startswith('计算失败'):
+            stationarity_str = status
+        else:
+            stationarity_str = '非平稳'
+
+        return p_value_str, stationarity_str
+
+    @staticmethod
     def clear_non_stationary_markers(
         mappings: Dict[str, Any],
         stationarity_check_results: Dict[str, Dict]
@@ -48,8 +84,10 @@ class ExportService:
 
         # 检查所有标记为"是"的变量
         for var in list(single_stage_map.keys()):
-            stat_result = stationarity_check_results.get(var, {})
-            # 默认值改为False：找不到检验结果的变量视为不平稳，清除其标记
+            stat_result = stationarity_check_results.get(var)
+            if stat_result is None:
+                logger.warning(f"变量 '{var}' 没有平稳性检验结果，跳过")
+                continue
             is_stationary = stat_result.get('is_stationary', False)
 
             if not is_stationary:
@@ -115,28 +153,10 @@ class ExportService:
             var_name = h.get('variable', '')
             var_name_norm = normalize_text(var_name)
 
-            # 优先使用检验结果，如果没有检验结果则显示"未检验"
-            if var_name_norm in stationarity_check_results:
-                stat_result = stationarity_check_results[var_name_norm]
-                p_value = stat_result.get('p_value')
-                status = stat_result.get('status', '未检验')
-
-                # P值列：显示具体数值
-                p_value_str = f"{p_value:.3f}" if p_value is not None else '-'
-
-                # 平稳性检验列：显示平稳/非平稳/数据不足
-                if status == '是':
-                    stationarity_str = '平稳'
-                elif status == '数据不足':
-                    stationarity_str = '数据不足'
-                elif status.startswith('计算失败'):
-                    stationarity_str = status
-                else:
-                    stationarity_str = '非平稳'
-            else:
-                logger.warning(f"值替换变量 '{var_name_norm}' 没有检验结果，可能未在prepared_data中")
-                p_value_str = '-'
-                stationarity_str = '未检验'
+            stat_result = stationarity_check_results.get(var_name_norm)
+            p_value_str, stationarity_str = ExportService._format_stationarity_result(
+                stat_result, var_name_norm if stat_result is None else ""
+            )
 
             log_data.append({
                 '变量名': var_name_norm,
@@ -158,44 +178,10 @@ class ExportService:
                 else:
                     ops_str = '不处理'
 
-                # 获取平稳性检验结果（多级fallback查找）
-                stat_result = None
-
-                # 尝试1: 规范化键精确匹配
-                if col_norm in stationarity_check_results:
-                    stat_result = stationarity_check_results[col_norm]
-
-                # 尝试2: 原始列名匹配
-                if stat_result is None and col in stationarity_check_results:
-                    stat_result = stationarity_check_results[col]
-
-                # 尝试3: 模糊匹配（规范化后比较）
-                if stat_result is None:
-                    for key in stationarity_check_results.keys():
-                        if normalize_text(key) == col_norm:
-                            stat_result = stationarity_check_results[key]
-                            break
-
-                if stat_result is not None:
-                    p_value = stat_result.get('p_value')
-                    status = stat_result.get('status', '未检验')
-
-                    # P值列：显示具体数值
-                    p_value_str = f"{p_value:.3f}" if p_value is not None else '-'
-
-                    # 平稳性检验列：显示平稳/非平稳/数据不足
-                    if status == '是':
-                        stationarity_str = '平稳'
-                    elif status == '数据不足':
-                        stationarity_str = '数据不足'
-                    elif status.startswith('计算失败'):
-                        stationarity_str = status
-                    else:
-                        stationarity_str = '非平稳'
-                else:
-                    logger.warning(f"保留变量 '{col}' 没有检验结果，可能检验失败或被跳过")
-                    p_value_str = '-'
-                    stationarity_str = '未检验'
+                stat_result = stationarity_check_results.get(col_norm)
+                p_value_str, stationarity_str = ExportService._format_stationarity_result(
+                    stat_result, col if stat_result is None else ""
+                )
 
                 log_data.append({
                     '变量名': col_norm,

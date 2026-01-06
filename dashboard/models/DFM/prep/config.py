@@ -20,22 +20,8 @@ def get_cpu_count() -> int:
     Returns:
         int: CPU核心数，检测失败时返回默认值4
     """
-    try:
-        count = os.cpu_count()
-        if count is not None and count > 0:
-            return count
-    except AttributeError:
-        pass
-
-    try:
-        count = multiprocessing.cpu_count()
-        if count > 0:
-            return count
-    except (NotImplementedError, AttributeError):
-        pass
-
-    logger.warning("无法检测CPU核心数，使用默认值4")
-    return 4
+    count = os.cpu_count()
+    return count if count is not None and count > 0 else 4
 
 
 @dataclass

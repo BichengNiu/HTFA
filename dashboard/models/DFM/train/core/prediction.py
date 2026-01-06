@@ -7,12 +7,21 @@
 
 import numpy as np
 import pandas as pd
-from typing import Optional, Tuple
+from typing import Optional
 from dashboard.models.DFM.train.core.models import DFMModelResult
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.constants import ZERO_STD_REPLACEMENT
 
 logger = get_logger(__name__)
+
+
+def _filter_by_date_range(
+    data: pd.Series,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp
+) -> pd.Series:
+    """按日期范围过滤数据（使用布尔索引，兼容升序和降序索引）"""
+    return data[(data.index >= start_date) & (data.index <= end_date)]
 
 
 def generate_target_forecast(
@@ -23,8 +32,7 @@ def generate_target_forecast(
     validation_start: str,
     validation_end: str,
     observation_end: Optional[str] = None,
-    is_ddfm: bool = False,
-    progress_callback: Optional[callable] = None
+    is_ddfm: bool = False
 ) -> DFMModelResult:
     """
     生成目标变量的预测值
@@ -56,22 +64,22 @@ def generate_target_forecast(
         # 步骤1: 计算目标变量的训练期统计量（用于标准化和反标准化）
         training_start_date = pd.to_datetime(training_start)
         train_end_date = pd.to_datetime(train_end)
-        # 使用布尔索引（与索引顺序无关，兼容升序和降序索引）
-        target_train = target_data[
-            (target_data.index >= training_start_date) &
-            (target_data.index <= train_end_date)
-        ]
+        target_train = _filter_by_date_range(target_data, training_start_date, train_end_date)
 
         target_mean = target_train.mean()
         target_std = target_train.std()
 
-        # 处理零标准差
+        # 验证标准差和均值
         if target_std == 0 or pd.isna(target_std):
-            logger.warning(f"目标变量训练期标准差为0或NaN，设置为{ZERO_STD_REPLACEMENT}")
-            target_std = ZERO_STD_REPLACEMENT
+            raise ValueError(
+                f"目标变量训练期标准差为0或NaN，无法进行标准化。"
+                f"请检查目标变量数据质量。"
+            )
         if pd.isna(target_mean):
-            logger.warning("目标变量训练期均值为NaN，设置为0.0")
-            target_mean = 0.0
+            raise ValueError(
+                f"目标变量训练期均值为NaN，无法进行标准化。"
+                f"请检查目标变量数据质量。"
+            )
 
         logger.debug(f"目标变量标准化参数: mean={target_mean:.4f}, std={target_std:.4f}")
 
@@ -127,10 +135,7 @@ def generate_target_forecast(
         logger.debug("预测值已反标准化到原始尺度")
 
         # 步骤8: 分割训练期预测
-        train_data_filtered = target_data[
-            (target_data.index >= training_start_date) &
-            (target_data.index <= train_end_date)
-        ]
+        train_data_filtered = _filter_by_date_range(target_data, training_start_date, train_end_date)
         train_end_idx = len(train_data_filtered) - 1
 
         # 训练期预测
@@ -140,18 +145,18 @@ def generate_target_forecast(
         val_start_date = pd.to_datetime(validation_start)
         val_end_date = pd.to_datetime(validation_end)
 
-        val_data_filtered = target_data[
-            (target_data.index >= val_start_date) &
-            (target_data.index <= val_end_date)
-        ]
+        val_data_filtered = _filter_by_date_range(target_data, val_start_date, val_end_date)
         if len(val_data_filtered) > 0:
             val_start_idx = target_data.index.get_loc(val_data_filtered.index[0])
             val_end_idx = target_data.index.get_loc(val_data_filtered.index[-1])
 
-            if val_start_idx < len(forecast_full) and val_end_idx < len(forecast_full):
-                val_forecast = forecast_full[val_start_idx:val_end_idx + 1]
-            else:
-                val_forecast = None
+            if val_start_idx >= len(forecast_full) or val_end_idx >= len(forecast_full):
+                raise ValueError(
+                    f"验证期索引超出预测范围: val_start_idx={val_start_idx}, "
+                    f"val_end_idx={val_end_idx}, forecast_len={len(forecast_full)}。"
+                    f"请检查日期范围设置。"
+                )
+            val_forecast = forecast_full[val_start_idx:val_end_idx + 1]
         else:
             val_forecast = None
 
@@ -171,22 +176,21 @@ def generate_target_forecast(
 
                 if obs_end_date > val_end_date:
                     obs_start_date = val_end_date + pd.DateOffset(weeks=1)
-                    obs_data_filtered = target_data[
-                        (target_data.index >= obs_start_date) &
-                        (target_data.index <= obs_end_date)
-                    ]
+                    obs_data_filtered = _filter_by_date_range(target_data, obs_start_date, obs_end_date)
 
                     if len(obs_data_filtered) > 0:
                         obs_start_idx = target_data.index.get_loc(obs_data_filtered.index[0])
                         obs_end_idx = target_data.index.get_loc(obs_data_filtered.index[-1])
 
-                        if obs_start_idx < len(forecast_full) and obs_end_idx < len(forecast_full):
-                            forecast_obs = forecast_full[obs_start_idx:obs_end_idx + 1]
-                            model_result.forecast_obs = forecast_obs
-                            logger.debug(f"观察期预测已生成: {len(forecast_obs)} 个数据点")
-                        else:
-                            logger.warning("观察期索引超出预测范围")
-                            model_result.forecast_obs = None
+                        if obs_start_idx >= len(forecast_full) or obs_end_idx >= len(forecast_full):
+                            raise ValueError(
+                                f"观察期索引超出预测范围: obs_start_idx={obs_start_idx}, "
+                                f"obs_end_idx={obs_end_idx}, forecast_len={len(forecast_full)}。"
+                                f"请检查observation_end日期设置。"
+                            )
+                        forecast_obs = forecast_full[obs_start_idx:obs_end_idx + 1]
+                        model_result.forecast_obs = forecast_obs
+                        logger.debug(f"观察期预测已生成: {len(forecast_obs)} 个数据点")
                     else:
                         logger.warning("观察期没有有效数据点")
                         model_result.forecast_obs = None
@@ -201,10 +205,8 @@ def generate_target_forecast(
         model_result.forecast_is = forecast_is
 
     except Exception as e:
-        logger.error(f"生成目标变量预测时出错: {e}")
-        import traceback
-        traceback.print_exc()
-        # 保持forecast为None
+        logger.exception(f"生成目标变量预测时出错: {e}")
+        raise
 
     return model_result
 

@@ -12,10 +12,12 @@ from typing import Dict, Tuple, Optional, Set, Any
 from collections import defaultdict, Counter
 from statsmodels.tsa.stattools import adfuller
 
-from dashboard.models.DFM.prep.modules.config_constants import ADF_P_THRESHOLD
 from dashboard.models.DFM.utils.text_utils import normalize_text
 
 logger = logging.getLogger(__name__)
+
+# ADF检验默认p值阈值
+ADF_P_THRESHOLD = 0.05
 
 def ensure_stationarity(
     df: pd.DataFrame,
@@ -84,82 +86,65 @@ def ensure_stationarity(
         # 进行平稳性检查和转换
         original_pval = np.nan
         diff_pval = np.nan
-        
-        try:
-            # Level ADF检验
-            adf_result_level = adfuller(series_dropna)
-            original_pval = adf_result_level[1]
 
-            if original_pval < adf_p_threshold:
-                # Level已经平稳
-                transformed_data[col] = series
-                transform_log[col] = {'status': 'level', 'original_pval': original_pval}
-            else:
-                # Level不平稳，尝试转换
-                series_orig = series
-                series_transformed = None
-                transform_type = 'diff'  # 默认为普通差分
+        # Level ADF检验
+        adf_result_level = adfuller(series_dropna)
+        original_pval = adf_result_level[1]
 
-                # 检查是否可以进行对数差分（所有值为正）
-                if (series_dropna > 0).all():
-                    try:
-                        series_transformed = np.log(series_orig).diff(1)
-                        transform_type = 'log_diff'
-                    except Exception as e_log:
-                         logger.warning("    - %s: 对数差分出错: %s. 回退到普通差分", col, e_log)
-                         series_transformed = series_orig.diff(1)
-                         transform_type = 'diff'
-                else:
-                    # 包含非正值，使用普通一阶差分
-                    series_transformed = series_orig.diff(1)
-                    transform_type = 'diff'
-
-                series_transformed_dropna = series_transformed.dropna()
-
-                # 检查转换后的序列
-                if series_transformed_dropna.empty:
-                     transform_log[col] = {'status': f'skipped_{transform_type}_empty', 'original_pval': original_pval}
-                     removed_cols_info[f'skipped_{transform_type}_empty'].append(col)
-                     logger.debug("    - %s: %s 后为空，已移除", col, transform_type.capitalize())
-                     continue
-                     
-                if series_transformed_dropna.nunique() == 1:
-                     transform_log[col] = {'status': f'skipped_{transform_type}_constant', 'original_pval': original_pval}
-                     removed_cols_info[f'skipped_{transform_type}_constant'].append(col)
-                     logger.debug("    - %s: %s 后为常量，已移除", col, transform_type.capitalize())
-                     continue
-
-                # 对转换后的序列进行ADF检验
-                try:
-                    adf_result_transformed = adfuller(series_transformed_dropna)
-                    diff_pval = adf_result_transformed[1]
-
-                    transformed_data[col] = series_transformed
-
-                    if diff_pval < adf_p_threshold:
-                        transform_log[col] = {'status': transform_type, 'original_pval': original_pval, 'diff_pval': diff_pval}
-                        logger.debug("    - %s: %s 后平稳 (p=%.3f), 使用 %s", col, transform_type.capitalize(), diff_pval, transform_type.capitalize())
-                    else:
-                        transform_log[col] = {'status': f'{transform_type}_still_nonstat', 'original_pval': original_pval, 'diff_pval': diff_pval}
-                        logger.debug("    - %s: %s 后仍不平稳 (p=%.3f), 使用 %s", col, transform_type.capitalize(), diff_pval, transform_type.capitalize())
-
-                except Exception as e_diff:
-                    logger.warning("    - %s: 对 %s 序列 ADF 检验出错: %s. 保留 %s 序列", col, transform_type.capitalize(), e_diff, transform_type.capitalize())
-                    transformed_data[col] = series_transformed
-                    transform_log[col] = {'status': f'{transform_type}_test_error', 'original_pval': original_pval}
-
-        except Exception as e_level:
-            logger.warning("    - %s: Level ADF 检验或处理时出错: %s. 保留 Level (不推荐)", col, e_level)
+        if original_pval < adf_p_threshold:
+            # Level已经平稳
             transformed_data[col] = series
-            transform_log[col] = {'status': 'level_test_error'}
+            transform_log[col] = {'status': 'level', 'original_pval': original_pval}
+        else:
+            # Level不平稳，尝试转换
+            series_orig = series
+            series_transformed = None
+            transform_type = 'diff'  # 默认为普通差分
+
+            # 检查是否可以进行对数差分（所有值为正）
+            if (series_dropna > 0).all():
+                series_transformed = np.log(series_orig).diff(1)
+                transform_type = 'log_diff'
+            else:
+                # 包含非正值，使用普通一阶差分
+                series_transformed = series_orig.diff(1)
+                transform_type = 'diff'
+
+            series_transformed_dropna = series_transformed.dropna()
+
+            # 检查转换后的序列
+            if series_transformed_dropna.empty:
+                transform_log[col] = {'status': f'skipped_{transform_type}_empty', 'original_pval': original_pval}
+                removed_cols_info[f'skipped_{transform_type}_empty'].append(col)
+                logger.debug("    - %s: %s 后为空，已移除", col, transform_type.capitalize())
+                continue
+
+            if series_transformed_dropna.nunique() == 1:
+                transform_log[col] = {'status': f'skipped_{transform_type}_constant', 'original_pval': original_pval}
+                removed_cols_info[f'skipped_{transform_type}_constant'].append(col)
+                logger.debug("    - %s: %s 后为常量，已移除", col, transform_type.capitalize())
+                continue
+
+            # 对转换后的序列进行ADF检验
+            adf_result_transformed = adfuller(series_transformed_dropna)
+            diff_pval = adf_result_transformed[1]
+
+            transformed_data[col] = series_transformed
+
+            if diff_pval < adf_p_threshold:
+                transform_log[col] = {'status': transform_type, 'original_pval': original_pval, 'diff_pval': diff_pval}
+                logger.debug("    - %s: %s 后平稳 (p=%.3f), 使用 %s", col, transform_type.capitalize(), diff_pval, transform_type.capitalize())
+            else:
+                transform_log[col] = {'status': f'{transform_type}_still_nonstat', 'original_pval': original_pval, 'diff_pval': diff_pval}
+                logger.debug("    - %s: %s 后仍不平稳 (p=%.3f), 使用 %s", col, transform_type.capitalize(), diff_pval, transform_type.capitalize())
 
     logger.info("[Stationarity Check] 检查和转换完成. 输出 Shape: %s", transformed_data.shape)
     total_removed = sum(len(v) for v in removed_cols_info.values())
     if total_removed > 0:
         logger.info("  [!] 共移除了 %d 个变量:", total_removed)
         for reason, cols in removed_cols_info.items():
-             if cols:
-                 logger.info("      - 因 '%s' 移除 (%d 个): %s%s", reason, len(cols), ', '.join(cols[:5]), '...' if len(cols)>5 else '')
+            if cols:
+                logger.info("      - 因 '%s' 移除 (%d 个): %s%s", reason, len(cols), ', '.join(cols[:5]), '...' if len(cols)>5 else '')
 
     return transformed_data, transform_log, removed_cols_info
 
@@ -184,7 +169,6 @@ def apply_stationarity_transforms(
     transformed_data = pd.DataFrame(index=data.index)
     applied_count = 0
     level_kept_count = 0
-    error_count = 0
 
     # 遍历输入数据的每一列
     for col in data.columns:
@@ -220,7 +204,6 @@ def apply_stationarity_transforms(
     logger.info("[Apply Stationarity V2] 转换应用完成")
     logger.info("    成功应用 'diff'/'log_diff': %d 个变量", applied_count)
     logger.info("    保留 Level (无规则或规则指示): %d 个变量", level_kept_count)
-    logger.info("    转换时出错/回退 (保留 Level 或应用 Diff): %d 个变量", error_count)
     logger.info("    输入 Shape: %s, 输出 Shape: %s", data.shape, transformed_data.shape)
 
     # 移除转换后全为NaN的列

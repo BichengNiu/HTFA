@@ -13,7 +13,7 @@
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 import logging
 
 logger = logging.getLogger(__name__)
@@ -65,6 +65,10 @@ class VariableTransformer:
         self.yoy_period = FREQUENCY_PERIOD_MAP.get(freq, 52)
         self.logger = logger or logging.getLogger(__name__)
         self._transform_details = {}
+
+    def get_transform_details(self) -> Dict[str, Any]:
+        """获取转换详情字典"""
+        return self._transform_details.copy()
 
     def get_recommended_operations(self, nature: str) -> Tuple[str, str]:
         """
@@ -269,7 +273,7 @@ class VariableTransformer:
     def transform_dataframe(
         self,
         df: pd.DataFrame,
-        transform_config: Dict[str, any]
+        transform_config: Dict[str, Any]
     ) -> Tuple[pd.DataFrame, Dict]:
         """
         对DataFrame应用变换配置

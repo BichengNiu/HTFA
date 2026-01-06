@@ -116,8 +116,7 @@ def train_dfm_with_forecast(
             train_end=train_end,
             validation_start=validation_start,
             validation_end=validation_end,
-            observation_end=observation_end,
-            progress_callback=progress_callback
+            observation_end=observation_end
         )
 
     except Exception as e:
@@ -279,8 +278,7 @@ def train_ddfm_with_forecast(
             validation_start=validation_start,
             validation_end=validation_end,
             observation_end=None,  # DDFM不使用观察期后的扩展数据
-            is_ddfm=True,  # DDFM模式：validation映射到obs
-            progress_callback=progress_callback
+            is_ddfm=True  # DDFM模式：validation映射到obs
         )
 
     except Exception as e:
@@ -398,9 +396,7 @@ def evaluate_model_performance(
                         logger.info(f"观察期评估完成: {len(obs_data)} 个数据点")
 
     except Exception as e:
-        logger.error(f"[ModelOps] 评估过程出错: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"[ModelOps] 评估过程出错: {e}")
 
     return metrics
 

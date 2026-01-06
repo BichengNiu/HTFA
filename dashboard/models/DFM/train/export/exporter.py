@@ -229,24 +229,27 @@ class TrainingResultExporter:
 
                     # 尝试从数据文件获取日期索引
                     date_index = None
-                    if hasattr(config, 'data_path') and config.data_path:
-                        try:
-                            data = self._read_data_file(config.data_path)
-                            if isinstance(data.index, pd.DatetimeIndex):
-                                date_index = data.index
-                            else:
-                                date_index = pd.to_datetime(data.index)
+                    if not config.data_path:
+                        raise ValueError("配置中缺少data_path字段")
+                    try:
+                        data = self._read_data_file(config.data_path)
+                        if data is None:
+                            raise ValueError(f"无法读取数据文件: {config.data_path}")
+                        if isinstance(data.index, pd.DatetimeIndex):
+                            date_index = data.index
+                        else:
+                            date_index = pd.to_datetime(data.index)
 
-                            # 确保长度匹配
-                            if len(date_index) != factors_transposed.shape[0]:
-                                raise ValueError(
-                                    f"日期索引长度({len(date_index)})与因子数据长度({factors_transposed.shape[0]})不匹配，"
-                                    "请检查训练数据和模型是否一致"
-                                )
-                        except ValueError:
-                            raise  # 重新抛出长度不匹配错误
-                        except Exception as e:
-                            raise ValueError(f"获取因子序列日期索引失败: {e}") from e
+                        # 确保长度匹配
+                        if len(date_index) != factors_transposed.shape[0]:
+                            raise ValueError(
+                                f"日期索引长度({len(date_index)})与因子数据长度({factors_transposed.shape[0]})不匹配，"
+                                "请检查训练数据和模型是否一致"
+                            )
+                    except ValueError:
+                        raise  # 重新抛出长度不匹配错误
+                    except Exception as e:
+                        raise ValueError(f"获取因子序列日期索引失败: {e}") from e
 
                     metadata['factor_series'] = pd.DataFrame(
                         factors_transposed,
@@ -264,28 +267,27 @@ class TrainingResultExporter:
 
         # 保存卡尔曼增益历史（用于新闻分解分析）
         # 注意：早期验证已在kalman.py的filter()方法中完成
-        # 这里仅作为安全检查，使用断言而非异常
-        assert result.model_result and hasattr(result.model_result, 'kalman_gains_history'), \
-            "内部错误：model_result缺少kalman_gains_history属性"
+        if not result.model_result or not hasattr(result.model_result, 'kalman_gains_history'):
+            raise ValueError("内部错误：model_result缺少kalman_gains_history属性")
         kalman_gains = result.model_result.kalman_gains_history
-        assert kalman_gains is not None, \
-            "内部错误：kalman_gains_history为None（应在滤波阶段验证）"
+        if kalman_gains is None:
+            raise ValueError("内部错误：kalman_gains_history为None（应在滤波阶段验证）")
         metadata['kalman_gains_history'] = kalman_gains
         logger.info(f"保存卡尔曼增益历史: {len(kalman_gains)} 个时间步")
 
         # 保存先验因子状态（用于新闻分解的expected_value计算）
         # 此字段为影响分解必需，与kalman_gains_history一样使用严格验证
-        assert result.model_result and hasattr(result.model_result, 'factor_states_predicted'), \
-            "内部错误：model_result缺少factor_states_predicted属性"
+        if not result.model_result or not hasattr(result.model_result, 'factor_states_predicted'):
+            raise ValueError("内部错误：model_result缺少factor_states_predicted属性")
         factor_states_pred = result.model_result.factor_states_predicted
-        assert factor_states_pred is not None, \
-            "内部错误：factor_states_predicted为None（应在训练阶段生成）"
-        assert isinstance(factor_states_pred, np.ndarray), \
-            f"内部错误：factor_states_predicted类型错误，应为ndarray，实际为{type(factor_states_pred)}"
-        assert len(factor_states_pred.shape) == 2, \
-            f"内部错误：factor_states_predicted应为2维数组，实际为{len(factor_states_pred.shape)}维"
-        assert factor_states_pred.shape[1] == result.k_factors, \
-            f"内部错误：factor_states_predicted因子数({factor_states_pred.shape[1]})与k_factors({result.k_factors})不一致"
+        if factor_states_pred is None:
+            raise ValueError("内部错误：factor_states_predicted为None（应在训练阶段生成）")
+        if not isinstance(factor_states_pred, np.ndarray):
+            raise TypeError(f"内部错误：factor_states_predicted类型错误，应为ndarray，实际为{type(factor_states_pred)}")
+        if len(factor_states_pred.shape) != 2:
+            raise ValueError(f"内部错误：factor_states_predicted应为2维数组，实际为{len(factor_states_pred.shape)}维")
+        if factor_states_pred.shape[1] != result.k_factors:
+            raise ValueError(f"内部错误：factor_states_predicted因子数({factor_states_pred.shape[1]})与k_factors({result.k_factors})不一致")
         metadata['factor_states_predicted'] = factor_states_pred
         logger.info(f"保存先验因子状态: 形状={factor_states_pred.shape}")
 
@@ -591,17 +593,14 @@ class TrainingResultExporter:
         forecast_obs = None
 
         if result.model_result:
-            if hasattr(result.model_result, 'forecast_is'):
-                forecast_is = result.model_result.forecast_is
-                logger.info(f"forecast_is类型: {type(forecast_is)}, 长度: {len(forecast_is) if forecast_is is not None else None}")
+            forecast_is = result.model_result.forecast_is
+            logger.info(f"forecast_is类型: {type(forecast_is)}, 长度: {len(forecast_is) if forecast_is is not None else None}")
 
-            if hasattr(result.model_result, 'forecast_oos'):
-                forecast_oos = result.model_result.forecast_oos
-                logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
+            forecast_oos = result.model_result.forecast_oos
+            logger.info(f"forecast_oos类型: {type(forecast_oos)}, 长度: {len(forecast_oos) if forecast_oos is not None else None}")
 
-            if hasattr(result.model_result, 'forecast_obs'):
-                forecast_obs = result.model_result.forecast_obs
-                logger.info(f"forecast_obs类型: {type(forecast_obs)}, 长度: {len(forecast_obs) if forecast_obs is not None else None}")
+            forecast_obs = result.model_result.forecast_obs
+            logger.info(f"forecast_obs类型: {type(forecast_obs)}, 长度: {len(forecast_obs) if forecast_obs is not None else None}")
 
         is_index = self._get_date_index(config, 'training_start', 'train_end', '训练期')
 
@@ -840,9 +839,8 @@ class TrainingResultExporter:
             if not isinstance(data.index, pd.DatetimeIndex):
                 try:
                     data.index = pd.to_datetime(data.index)
-                except Exception:
-                    logger.warning("无法将数据索引转换为DatetimeIndex")
-                    return None
+                except Exception as e:
+                    raise ValueError(f"无法将数据索引转换为DatetimeIndex: {e}") from e
 
             start_date = pd.to_datetime(getattr(config, start_field))
             end_date = pd.to_datetime(getattr(config, end_field))
@@ -884,9 +882,8 @@ class TrainingResultExporter:
             if not isinstance(data.index, pd.DatetimeIndex):
                 try:
                     data.index = pd.to_datetime(data.index)
-                except Exception:
-                    logger.warning("无法将数据索引转换为DatetimeIndex")
-                    return None
+                except Exception as e:
+                    raise ValueError(f"无法将数据索引转换为DatetimeIndex: {e}") from e
 
             # 计算观察期起始和结束日期
             val_end_dt = pd.to_datetime(config.validation_end)
@@ -956,9 +953,8 @@ class TrainingResultExporter:
         if not isinstance(data.index, pd.DatetimeIndex):
             try:
                 data.index = pd.to_datetime(data.index)
-            except Exception:
-                logger.warning("无法将数据索引转换为DatetimeIndex")
-                return None
+            except Exception as e:
+                raise ValueError(f"无法将数据索引转换为DatetimeIndex: {e}") from e
 
         if len(factors_df) != len(data):
             logger.warning(f"因子数据长度({len(factors_df)})与完整数据长度({len(data)})不匹配")
@@ -968,7 +964,9 @@ class TrainingResultExporter:
 
         factors_df.index = data.index
 
-        train_end = pd.to_datetime(config.train_end) if hasattr(config, 'train_end') else data.index.max()
+        if not config.train_end:
+            raise ValueError("配置中缺少train_end字段")
+        train_end = pd.to_datetime(config.train_end)
         train_data = data[data.index <= train_end]
         factors_train = factors_df[factors_df.index <= train_end]
 
@@ -1064,12 +1062,14 @@ class TrainingResultExporter:
                 rss = np.sum((Y_clean - Y_pred) ** 2)
                 tss = np.sum((Y_clean - np.mean(Y_clean, axis=0)) ** 2)
 
-                if tss > 0:
+                TSS_EPSILON = 1e-10
+                if tss > TSS_EPSILON:
                     r2_overall = 1 - rss / tss
                     industry_r2_results[industry] = float(r2_overall)
                     logger.debug(f"行业 '{industry}' 整体R²: {r2_overall:.4f}")
                 else:
                     industry_r2_results[industry] = 0.0
+                    logger.warning(f"行业 '{industry}' TSS过小({tss:.2e})，R²设为0")
             except Exception as e:
                 logger.warning(f"计算行业 '{industry}' 整体R²失败: {e}")
                 continue
@@ -1083,7 +1083,7 @@ class TrainingResultExporter:
 
                     rss_single = np.sum((Y_clean - Y_pred_single) ** 2)
 
-                    if tss > 0:
+                    if tss > TSS_EPSILON:
                         r2_single = 1 - rss_single / tss
                         factor_industry_r2_results[factor_name][industry] = float(r2_single)
                         logger.debug(f"行业 '{industry}' {factor_name} R²: {r2_single:.4f}")

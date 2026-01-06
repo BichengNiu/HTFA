@@ -32,8 +32,7 @@ def _evaluate_dfm_model(
     validation_start: str,
     validation_end: str,
     max_iterations: int,
-    tolerance: float,
-    **kwargs
+    tolerance: float
 ) -> Tuple[float, float, None, None, float, float, bool, None, None]:
     """
     顶层DFM评估函数（可序列化）
@@ -47,9 +46,8 @@ def _evaluate_dfm_model(
         train_end: 训练结束日期
         validation_start: 验证开始日期
         validation_end: 验证结束日期
-        max_iter: 最大迭代次数
+        max_iterations: 最大迭代次数
         tolerance: 容差
-        **kwargs: 其他参数
 
     Returns:
         9元组: (is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
@@ -94,9 +92,7 @@ def _evaluate_dfm_model(
         return metrics.to_tuple()
 
     except Exception as e:
-        logger.error(f"[Evaluator] 评估失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"[Evaluator] 评估失败: {e}")
         return (np.inf, np.inf, None, None, -np.inf, -np.inf, True, None, None)
 
 
@@ -114,8 +110,7 @@ def _evaluate_variable_selection_model(
     alignment_mode: str = 'next_month',
     factor_selection_method: str = 'fixed',
     pca_threshold: float = 0.9,
-    kaiser_threshold: float = 1.0,
-    **kwargs
+    kaiser_threshold: float = 1.0
 ) -> Tuple[float, float, float, float, float, float, bool, None, None]:
     """
     顶层变量选择评估函数（可序列化，支持动态因子数）
@@ -129,13 +124,12 @@ def _evaluate_variable_selection_model(
         train_end: 训练结束日期
         validation_start: 验证开始日期
         validation_end: 验证结束日期
-        max_iter: 最大迭代次数
+        max_iterations: 最大迭代次数
         tolerance: 容差
         alignment_mode: 目标配对模式 ('current_month' 或 'next_month')
         factor_selection_method: 因子选择方法 ('fixed', 'cumulative', 'kaiser')
         pca_threshold: PCA累积方差阈值（method='cumulative'时使用）
         kaiser_threshold: Kaiser特征值阈值（method='kaiser'时使用）
-        **kwargs: 其他参数
 
     Returns:
         9元组: (is_rmse, oos_rmse, None, None, is_win_rate, oos_win_rate, is_svd_error, None, None)
@@ -225,9 +219,7 @@ def _evaluate_variable_selection_model(
         return (is_rmse, oos_rmse, np.nan, np.nan, is_win_rate, oos_win_rate, False, None, None)
 
     except Exception as e:
-        logger.error(f"[VarSelectionEvaluator] 评估失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"[VarSelectionEvaluator] 评估失败: {e}")
         return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, True, None, None)
 
 
@@ -287,8 +279,7 @@ def create_dfm_evaluator(config: 'TrainingConfig') -> Callable:
             validation_start=config.validation_start,
             validation_end=config.validation_end,
             max_iterations=max_iterations,
-            tolerance=config.tolerance,
-            **kwargs
+            tolerance=config.tolerance
         )
 
     return evaluate

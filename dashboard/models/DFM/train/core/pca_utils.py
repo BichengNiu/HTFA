@@ -7,7 +7,7 @@ PCA工具模块
 
 import numpy as np
 import pandas as pd
-from typing import List, Tuple, Optional, Dict, Callable
+from typing import List, Tuple, Optional, Dict
 from sklearn.decomposition import PCA
 from dashboard.models.DFM.train.utils.logger import get_logger
 
@@ -22,8 +22,7 @@ def select_num_factors(
     pca_threshold: float = 0.9,
     elbow_threshold: float = 0.1,
     kaiser_threshold: float = 1.0,
-    train_end: Optional[str] = None,
-    progress_callback: Optional[Callable] = None
+    train_end: Optional[str] = None
 ) -> Tuple[int, Optional[Dict]]:
     """
     因子数选择
@@ -43,7 +42,6 @@ def select_num_factors(
         elbow_threshold: Elbow边际方差阈值（method='elbow'时使用，默认0.1）
         kaiser_threshold: Kaiser特征值阈值（method='kaiser'时使用，默认1.0）
         train_end: 训练集结束日期（用于标准化参数计算，避免数据泄露）
-        progress_callback: 进度回调函数
 
     Returns:
         (k_factors, pca_analysis):
@@ -87,10 +85,10 @@ def select_num_factors(
         except (KeyError, IndexError) as e:
             raise ValueError(f"无法提取训练集进行标准化: {e}，请检查train_end参数是否在数据索引范围内")
     else:
-        # 如果没有提供train_end，使用全部数据
-        global_mean = data_subset.mean(axis=0)
-        global_std = data_subset.std(axis=0)
-        logger.warning("未提供train_end参数，使用全部数据计算标准化参数（可能导致数据泄露）")
+        raise ValueError(
+            "train_end参数必须提供以避免数据泄露。"
+            "PCA分析必须仅使用训练期数据计算标准化参数。"
+        )
 
     # 处理标准差为0的列（避免除零错误）
     zero_std_cols = global_std[global_std == 0].index.tolist()
@@ -138,20 +136,27 @@ def select_num_factors(
         k = fixed_k
         # 验证fixed_k是否超过实际可用的主成分数量
         if k > max_components:
-            logger.warning(
-                f"固定因子数k={k}超过实际可提取的主成分数量{max_components}, "
-                f"自动调整为k={max_components}"
+            raise ValueError(
+                f"固定因子数k={k}超过实际可提取的主成分数量{max_components}。"
+                f"请减少k_factors或增加变量数量。"
             )
-            k = max_components
 
         logger.info(f"使用固定因子数: k={k}")
-        if k > 0:
+        if k > 0 and k <= len(cumsum_variance):
             logger.info(f"对应累积方差: {cumsum_variance[k-1]:.1%}")
         return k, pca_analysis
 
     # 方法2: 累积方差贡献率
     if method == 'cumulative':
-        k = np.argmax(cumsum_variance >= pca_threshold) + 1
+        indices = np.where(cumsum_variance >= pca_threshold)[0]
+        if len(indices) == 0:
+            raise ValueError(
+                f"PCA累积方差未达到阈值{pca_threshold:.1%}，"
+                f"最大累积方差为{cumsum_variance[-1]:.1%}。"
+                f"请降低pca_threshold或增加变量数量。"
+            )
+        else:
+            k = indices[0] + 1
         logger.info(
             f"PCA累积方差方法: 阈值={pca_threshold:.1%}, k={k}, "
             f"累积方差={cumsum_variance[k-1]:.1%}"
@@ -160,7 +165,14 @@ def select_num_factors(
     # 方法3: Elbow方法
     elif method == 'elbow':
         marginal_variance = np.diff(explained_variance)
-        k = np.argmax(marginal_variance < elbow_threshold) + 1
+        indices = np.where(marginal_variance < elbow_threshold)[0]
+        if len(indices) == 0:
+            raise ValueError(
+                f"Elbow方法未找到拐点(阈值={elbow_threshold:.1%})。"
+                f"请调整elbow_threshold或使用其他因子选择方法。"
+            )
+        else:
+            k = indices[0] + 1
         logger.info(f"Elbow方法: 阈值={elbow_threshold:.1%}, k={k}")
 
     # 方法4: Kaiser准则（特征值>阈值）
@@ -168,8 +180,10 @@ def select_num_factors(
         eigenvalues = pca.explained_variance_
         k = np.sum(eigenvalues > kaiser_threshold)
         if k == 0:
-            k = 1  # 至少选择1个因子
-            logger.warning(f"Kaiser准则: 没有特征值大于{kaiser_threshold}，默认使用k=1")
+            raise ValueError(
+                f"Kaiser准则: 没有特征值大于{kaiser_threshold}。"
+                f"请降低kaiser_threshold或使用其他因子选择方法。"
+            )
         else:
             logger.info(f"Kaiser准则: 阈值={kaiser_threshold}, k={k}")
             logger.info(f"特征值分布: {eigenvalues[:min(10, len(eigenvalues))]}")
@@ -256,8 +270,7 @@ def compute_optimal_k_factors(
         fixed_k=fixed_k,
         pca_threshold=pca_threshold,
         kaiser_threshold=kaiser_threshold,
-        train_end=train_end,
-        progress_callback=None  # 静默模式，不输出进度
+        train_end=train_end
     )
 
     logger.debug(

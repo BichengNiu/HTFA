@@ -99,16 +99,16 @@ def estimate_loadings(
         y_i_valid = y_i[valid_idx]
         F_valid = factors_data.loc[valid_idx]
 
-        # 需要足够样本进行回归
-        if len(y_i_valid) > n_factors:
-            try:
-                # 使用statsmodels.OLS（匹配原实现）
-                ols_model = sm.OLS(y_i_valid, F_valid)
-                ols_results = ols_model.fit()
-                Lambda[i, :] = ols_results.params.values
-            except Exception as e:
-                logger.warning(f"变量{obs_data.columns[i]}: OLS失败 - {e}")
-                # Lambda[i, :] 保持NaN
+        # 需要足够样本进行回归 (n_factors + 2 for degrees of freedom)
+        if len(y_i_valid) >= n_factors + 2:
+            # 使用statsmodels.OLS（匹配原实现）
+            ols_model = sm.OLS(y_i_valid, F_valid)
+            ols_results = ols_model.fit()
+            Lambda[i, :] = ols_results.params.values
+        else:
+            raise ValueError(
+                f"变量{obs_data.columns[i]}: 有效样本数({len(y_i_valid)}) < 所需最小样本数({n_factors + 2})"
+            )
 
     return Lambda
 

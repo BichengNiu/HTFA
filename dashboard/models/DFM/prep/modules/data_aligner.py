@@ -39,6 +39,43 @@ class DataAligner:
         if not target_freq.upper().endswith('-FRI'):
             raise ValueError(f"当前目标对齐逻辑仅支持周五 (W-FRI)。提供的目标频率 '{target_freq}' 无效。")
 
+    def _clean_and_merge_dataframes(
+        self,
+        data_list: List[pd.DataFrame],
+        freq_name: str
+    ) -> pd.DataFrame:
+        """
+        清理并合并DataFrame列表（通用方法）
+
+        Args:
+            data_list: DataFrame列表
+            freq_name: 频率名称（用于日志）
+
+        Returns:
+            pd.DataFrame: 合并后的DataFrame
+        """
+        if not data_list:
+            return pd.DataFrame()
+
+        # 清理重复索引
+        cleaned_list = []
+        for i, df in enumerate(data_list):
+            if df.index.duplicated().any():
+                logger.warning("%s数据 %d 有重复索引，正在清理...", freq_name, i)
+                df = df[~df.index.duplicated(keep='first')]
+            cleaned_list.append(df)
+
+        # 合并数据
+        merged_df = pd.concat(cleaned_list, axis=1, join='outer', sort=True)
+
+        # 处理重复列
+        merged_df = self.cleaner.remove_duplicate_columns(merged_df, f"[{freq_name}合并] ")
+
+        if merged_df.empty:
+            logger.warning("合并后的%s数据为空。", freq_name)
+
+        return merged_df
+
     def align_target_to_nearest_friday(self, target_values: pd.Series) -> pd.Series:
         """
         将目标变量对齐到最近的周五
@@ -57,6 +94,11 @@ class DataAligner:
         temp_target_df = pd.DataFrame({'value': target_values})
 
         temp_target_df['nearest_friday'] = temp_target_df.index.map(get_nearest_friday)
+
+        # 验证周五日期计算结果
+        if temp_target_df['nearest_friday'].isna().any():
+            invalid_dates = temp_target_df[temp_target_df['nearest_friday'].isna()].index.tolist()[:5]
+            raise ValueError(f"无法计算周五日期: {invalid_dates}")
         
         # 处理同一个目标周五的重复：保留最新发布日期的数据
         # 我们先按原始发布日期索引排序，然后分组并取最后一个
@@ -211,32 +253,17 @@ class DataAligner:
 
         logger.info("处理日度数据...")
 
-        # 首先确保每个DataFrame的索引是唯一的
-        cleaned_daily_list = []
-        for i, df in enumerate(daily_data_list):
-            # 移除重复的索引（保留第一个）
-            if df.index.duplicated().any():
-                logger.warning("日度数据 %d 有重复索���，正在清理...", i)
-                df = df[~df.index.duplicated(keep='first')]
-            cleaned_daily_list.append(df)
-
-        # 合并所有日度数据
-        df_daily_full = pd.concat(cleaned_daily_list, axis=1, join='outer', sort=True)
-
-        # 处理重复列
-        df_daily_full = self.cleaner.remove_duplicate_columns(df_daily_full, "[日度合并] ")
+        df_daily_full = self._clean_and_merge_dataframes(daily_data_list, "日度")
 
         if df_daily_full.empty:
-            logger.warning("合并后的日度数据为空。")
             return pd.DataFrame()
 
         # 转换为周度（均值聚合）
         logger.info("转换日度数据为周度（均值聚合）...")
-        # 零值处理已在processor全局预处理中完成
         df_daily_weekly = df_daily_full.resample(self.target_freq).mean()
         logger.info("日度->周度(均值) 完成. Shape: %s", df_daily_weekly.shape)
         return df_daily_weekly
-    
+
     def align_weekly_data(
         self,
         weekly_data_list: List[pd.DataFrame],
@@ -245,11 +272,6 @@ class DataAligner:
     ) -> Tuple[pd.DataFrame, Dict]:
         """
         对齐周度数据到理论日期索引（基于用户指定的时间范围）
-
-        新逻辑：
-        1. 合并原始数据
-        2. 生成理论日期索引（用户时间范围内的所有周五）
-        3. 将原始数据映射到理论索引，包含借调逻辑
 
         Args:
             weekly_data_list: 周度数据DataFrame列表
@@ -266,23 +288,9 @@ class DataAligner:
 
         logger.info("处理周度数据...")
 
-        # 首先确保每个DataFrame的索引是唯一的
-        cleaned_weekly_list = []
-        for i, df in enumerate(weekly_data_list):
-            # 移除重复的索引（保留第一个）
-            if df.index.duplicated().any():
-                logger.warning("周度数据 %d 有重复索引，正在清理...", i)
-                df = df[~df.index.duplicated(keep='first')]
-            cleaned_weekly_list.append(df)
-
-        # 合并所有周度数据
-        df_weekly_full = pd.concat(cleaned_weekly_list, axis=1, join='outer', sort=True)
-
-        # 处理重复列
-        df_weekly_full = self.cleaner.remove_duplicate_columns(df_weekly_full, "[周度合并] ")
+        df_weekly_full = self._clean_and_merge_dataframes(weekly_data_list, "周度")
 
         if df_weekly_full.empty:
-            logger.warning("合并后的周度数据为空。")
             return pd.DataFrame(), borrowing_log
 
         # 生成理论日期索引（用户时间范围内的所有周五）
@@ -294,7 +302,7 @@ class DataAligner:
             data_start = df_weekly_full.index.min()
             data_end = df_weekly_full.index.max()
             theoretical_index = generate_theoretical_index(data_start, data_end, self.target_freq)
-            logger.warning("未指定日期范���，使用数据范围: %s 至 %s", theoretical_index[0].date(), theoretical_index[-1].date())
+            logger.warning("未指定日期范围，使用数据范围: %s 至 %s", theoretical_index[0].date(), theoretical_index[-1].date())
 
         # 对齐到理论索引（包含借调逻辑）
         logger.info("对齐周度数据到理论索引...")
@@ -330,17 +338,6 @@ class DataAligner:
         """
         将旬度数据转换为周度数据（基于理论索引）
 
-        新逻辑：
-        1. 合并并过滤旬日数据
-        2. 将旬日映射到对应的周五
-        3. 生成理论周度索引
-        4. 对齐到理论索引（包含借调逻辑）
-
-        旬日定义：
-        - 上旬：每月10日
-        - 中旬：每月20日
-        - 下旬：每月最后一天（28/29/30/31日）
-
         Args:
             dekad_data_list: 旬度数据DataFrame列表
             start_date: 用户设置的开始日期（用于生成理论索引）
@@ -355,20 +352,9 @@ class DataAligner:
 
         logger.info("处理旬度数据...")
 
-        # 首先确保每个DataFrame的索引是唯一的
-        cleaned_dekad_list = []
-        for i, df in enumerate(dekad_data_list):
-            if df.index.duplicated().any():
-                logger.warning("旬度数据 %d 有重复索引，正在清理...", i)
-                df = df[~df.index.duplicated(keep='first')]
-            cleaned_dekad_list.append(df)
-
-        # 合并所有旬度数据
-        df_dekad_full = pd.concat(cleaned_dekad_list, axis=1, join='outer', sort=True)
-        df_dekad_full = self.cleaner.remove_duplicate_columns(df_dekad_full, "[旬度合并] ")
+        df_dekad_full = self._clean_and_merge_dataframes(dekad_data_list, "旬度")
 
         if df_dekad_full.empty:
-            logger.warning("合并后的旬度数据为空。")
             return pd.DataFrame(), borrowing_log
 
         # 过滤出旬日（10日、20日、月末）的数据
@@ -410,61 +396,6 @@ class DataAligner:
 
         logger.info("旬度->周度 完成. Shape: %s", df_dekad_aligned.shape)
         return df_dekad_aligned, borrowing_log
-
-    def create_full_date_range(self, all_indices: List[pd.DatetimeIndex], start_date: Optional[str] = None, end_date: Optional[str] = None) -> pd.DatetimeIndex:
-        """
-        创建完整的日期范围
-        
-        Args:
-            all_indices: 所有数据的日期索引列表
-            start_date: 开始日期（可选）
-            end_date: 结束日期（可选）
-            
-        Returns:
-            pd.DatetimeIndex: 完整的日期范围
-        """
-        # 过滤出有效的索引
-        valid_indices = [idx for idx in all_indices if idx is not None and not idx.empty]
-
-        if not valid_indices:
-            raise ValueError("所有收集到的索引都为空，无法创建日期范围")
-        
-        min_date_orig = min(idx.min() for idx in valid_indices)
-        max_date_orig = max(idx.max() for idx in valid_indices)
-        
-        logger.info("所有原始数据中的最小/最大日期: %s / %s", min_date_orig.date(), max_date_orig.date())
-        
-        # 确定最终的开始/结束日期
-        final_start_date = pd.to_datetime(start_date) if start_date else min_date_orig
-        final_end_date = pd.to_datetime(end_date) if end_date else max_date_orig
-        
-        # 调整如果配置日期超出数据范围
-        if start_date and pd.to_datetime(start_date) < min_date_orig:
-            final_start_date = pd.to_datetime(start_date)
-        if end_date and pd.to_datetime(end_date) > max_date_orig:
-            final_end_date = pd.to_datetime(end_date)
-        
-        # 对齐最终开始/结束日期到周五频率
-        min_date_fri = min_date_orig - pd.Timedelta(days=(min_date_orig.weekday() - 4 + 7) % 7)
-        max_date_fri = max_date_orig - pd.Timedelta(days=(max_date_orig.weekday() - 4 + 7) % 7) + pd.Timedelta(weeks=0 if max_date_orig.weekday()==4 else 1)
-        
-        final_start_date_aligned = final_start_date - pd.Timedelta(days=(final_start_date.weekday() - 4 + 7) % 7)
-        final_end_date_aligned = final_end_date - pd.Timedelta(days=(final_end_date.weekday() - 4 + 7) % 7)
-        
-        # 尊重实际数据边界
-        actual_range_start = max(min_date_fri, final_start_date_aligned)
-        actual_range_end = min(max_date_fri, final_end_date_aligned)
-        
-        if actual_range_start > actual_range_end:
-            # 如果计算的开始日期晚于结束日期，使用原始数据范围
-            logger.warning("计算出的实际开始日期 (%s) 晚于结束日期 (%s)，使用原始数据范围。", actual_range_start.date(), actual_range_end.date())
-            actual_range_start = min_date_fri
-            actual_range_end = max_date_fri
-        
-        full_date_range = pd.date_range(start=actual_range_start, end=actual_range_end, freq=self.target_freq)
-        logger.info("最终确定的完整周度日期范围 (对齐到 %s): %s 到 %s", self.target_freq, full_date_range.min().date(), full_date_range.max().date())
-        
-        return full_date_range
 
     def align_by_type(
         self,
@@ -551,26 +482,13 @@ def _get_window_for_date(target_date, freq='W-FRI'):
     Returns:
         Tuple[pd.Timestamp, pd.Timestamp]: (窗口开始, 窗口结束)
     """
-    if freq == 'W-FRI':
-        # 窗口：上周六 到 本周五
-        window_end = target_date
-        window_start = target_date - pd.Timedelta(days=6)
-        return window_start, window_end
-    elif freq == 'ten_day':
-        # 旬度窗口逻辑
-        day = target_date.day
-        if day == 10:
-            window_start = target_date.replace(day=1)
-            window_end = target_date
-        elif day == 20:
-            window_start = target_date.replace(day=11)
-            window_end = target_date
-        else:  # 月末
-            window_start = target_date.replace(day=21)
-            window_end = target_date
-        return window_start, window_end
-    else:
+    if freq != 'W-FRI':
         raise ValueError(f"不支持的频率: {freq}")
+
+    # 窗口：上周六 到 本周五
+    window_end = target_date
+    window_start = target_date - pd.Timedelta(days=6)
+    return window_start, window_end
 
 
 def _align_column_to_theoretical_index(series_data, theoretical_index, freq='W-FRI', enable_borrowing=True, col_name=""):

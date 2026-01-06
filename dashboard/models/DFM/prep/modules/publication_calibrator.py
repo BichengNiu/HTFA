@@ -7,6 +7,7 @@
 """
 
 import pandas as pd
+import numpy as np
 import logging
 from typing import Dict
 
@@ -56,6 +57,12 @@ class PublicationCalibrator:
             lag_days = self.lag_map.get(col_norm)
 
             if lag_days is not None and lag_days != 0:
+                # 验证lag_days类型和范围
+                if not isinstance(lag_days, (int, np.integer)):
+                    raise TypeError(f"lag_days必须是整数，实际类型: {type(lag_days)}")
+                if lag_days < 0 or lag_days > 365:
+                    raise ValueError(f"lag_days超出合理范围 [0, 365]: {lag_days}")
+
                 series = df[col].dropna()
                 if series.empty:
                     result_columns[col] = df[col]

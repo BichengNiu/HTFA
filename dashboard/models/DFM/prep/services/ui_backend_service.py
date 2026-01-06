@@ -92,9 +92,10 @@ class UIBackendService:
                     # 更新 DataFrame
                     transformed_data[var_name] = transformed_series
 
-                    # 记录转换详情（从 transformer 的内部记录中获取）
-                    if var_name in transformer._transform_details:
-                        detail = transformer._transform_details[var_name]
+                    # 记录转换详情（从 transformer 的公共方法获取）
+                    transform_details_map = transformer.get_transform_details()
+                    if var_name in transform_details_map:
+                        detail = transform_details_map[var_name]
                         transform_details[var_name] = {
                             'operations': detail.get('operations', []),
                             'status': 'success'
@@ -112,7 +113,7 @@ class UIBackendService:
                 transformed_data,
                 variables=transformed_data.columns.tolist(),
                 alpha=0.05,
-                parallel=False
+                parallel=True
             )
 
             logger.info(f"平稳性检验完成: {len(stationarity_results)}个变量")
@@ -141,7 +142,7 @@ class UIBackendService:
                 'stationarity_results': stationarity_results,
                 'all_variables_sorted': all_variables_sorted,
                 'non_stationary_count': non_stationary_count,
-                'errors': errors if errors else None
+                'errors': errors
             }
 
         except Exception as e:

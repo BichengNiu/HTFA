@@ -12,11 +12,14 @@ DFM数据准备模块 - 简化API接口
 """
 
 import pandas as pd
+import numpy as np
 from typing import Dict, Any, Optional, Union, Tuple
 from pathlib import Path
 import logging
 import tempfile
 import os
+import threading
+import atexit
 from datetime import datetime
 
 from dashboard.models.DFM.prep.processor import DataPreparationProcessor
@@ -26,8 +29,31 @@ from dashboard.models.DFM.utils.text_utils import normalize_text
 logger = logging.getLogger(__name__)
 
 
-# 简化的缓存机制（基于文件修改时间）
+# 线程安全的缓存机制
 _MAPPING_CACHE = {}
+_CACHE_LOCK = threading.Lock()
+
+# 临时文件跟踪（用于清理）
+_TEMP_FILES = set()
+_TEMP_FILES_LOCK = threading.Lock()
+
+
+def _cleanup_temp_files():
+    """清理所有临时文件（在程序退出时调用）"""
+    while True:
+        with _TEMP_FILES_LOCK:
+            if not _TEMP_FILES:
+                break
+            tmp_path = _TEMP_FILES.pop()
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError as e:
+            logger.debug("清理临时文件失败 %s: %s", tmp_path, e)
+
+
+# 注册退出时清理
+atexit.register(_cleanup_temp_files)
 
 
 def load_mappings_once(
@@ -67,16 +93,17 @@ def load_mappings_once(
         # 处理文件输入
         file_path = _handle_file_input(excel_path)
 
-        # 检查缓存
+        # 检查缓存（线程安全）
         if use_cache:
             cache_key = _get_cache_key(file_path)
-            if cache_key in _MAPPING_CACHE:
-                logger.info("  从缓存加载映射表（命中）")
-                return {
-                    'status': 'success',
-                    'message': '从缓存加载映射表',
-                    'mappings': _MAPPING_CACHE[cache_key]
-                }
+            with _CACHE_LOCK:
+                if cache_key in _MAPPING_CACHE:
+                    logger.info("  从缓存加载映射表（命中）")
+                    return {
+                        'status': 'success',
+                        'message': '从缓存加载映射表',
+                        'mappings': _MAPPING_CACHE[cache_key]
+                    }
 
         # 加载映射表
         logger.info("  从Excel文件加载映射表...")
@@ -114,37 +141,33 @@ def load_mappings_once(
             df, reference_column_name, '单位'
         )
 
-        # 5. 变量-性质映射（变量名 → 性质）★新增：用于变量转换推荐★
-        if '性质' in df.columns:
-            mappings['var_nature_map'] = _extract_mapping(
-                df, reference_column_name, '性质'
-            )
-        else:
-            mappings['var_nature_map'] = {}
+        # 5. 变量-性质映射（变量名 → 性质）
+        if '性质' not in df.columns:
+            raise ValueError("映射表缺少必需列: '性质'")
+        mappings['var_nature_map'] = _extract_mapping(
+            df, reference_column_name, '性质'
+        )
 
-        # 6. 预测变量映射（可选）
-        if '预测变量' in df.columns:
-            mappings['single_stage_map'] = _extract_mapping(
-                df, reference_column_name, '预测变量', value_filter='是'
-            )
-        else:
-            mappings['single_stage_map'] = {}
+        # 6. 预测变量映射
+        if '预测变量' not in df.columns:
+            raise ValueError("映射表缺少必需列: '预测变量'")
+        mappings['single_stage_map'] = _extract_mapping(
+            df, reference_column_name, '预测变量', value_filter='是'
+        )
 
-        # 7. 目标变量映射（可选）
-        if '目标变量' in df.columns:
-            mappings['second_stage_target_map'] = _extract_mapping(
-                df, reference_column_name, '目标变量', value_filter='是'
-            )
-        else:
-            mappings['second_stage_target_map'] = {}
+        # 7. 目标变量映射
+        if '目标变量' not in df.columns:
+            raise ValueError("映射表缺少必需列: '目标变量'")
+        mappings['second_stage_target_map'] = _extract_mapping(
+            df, reference_column_name, '目标变量', value_filter='是'
+        )
 
-        # 8. 变量-发布日期滞后映射（新增：用于发布日期校准）
-        if '发布日期' in df.columns:
-            mappings['var_publication_lag_map'] = _extract_numeric_mapping(
-                df, reference_column_name, '发布日期'
-            )
-        else:
-            mappings['var_publication_lag_map'] = {}
+        # 8. 变量-发布日期滞后映射
+        if '发布日期' not in df.columns:
+            raise ValueError("映射表缺少必需列: '发布日期'")
+        mappings['var_publication_lag_map'] = _extract_numeric_mapping(
+            df, reference_column_name, '发布日期'
+        )
 
         # 统计信息
         logger.info(f"  映射加载完成:")
@@ -157,10 +180,11 @@ def load_mappings_once(
         logger.info(f"    预测变量: {len(mappings['single_stage_map'])}个")
         logger.info(f"    目标变量: {len(mappings['second_stage_target_map'])}个")
 
-        # 更新缓存
+        # 更新缓存（线程安全）
         if use_cache:
             cache_key = _get_cache_key(file_path)
-            _MAPPING_CACHE[cache_key] = mappings
+            with _CACHE_LOCK:
+                _MAPPING_CACHE[cache_key] = mappings
             logger.info("  映射表已缓存")
 
         return {
@@ -177,13 +201,12 @@ def load_mappings_once(
             'mappings': None
         }
 
-    except Exception as e:
-        logger.error(f"加载映射表失败: {e}", exc_info=True)
-        return {
-            'status': 'error',
-            'message': f'加载映射表失败: {str(e)}',
-            'mappings': None
-        }
+    except (ValueError, KeyError) as e:
+        logger.error(f"映射表数据验证失败: {e}")
+        raise
+    except pd.errors.EmptyDataError as e:
+        logger.error(f"映射表为空: {e}")
+        raise ValueError(f"映射表为空: {e}") from e
 
 
 def collect_time_ranges(
@@ -218,17 +241,16 @@ def collect_time_ranges(
         # 处理文件输入
         file_path = _handle_file_input(excel_path)
 
-        # 加载Excel文件
-        excel_file = pd.ExcelFile(file_path)
+        # 加载Excel文件（使用context manager确保资源释放）
         sheet_ranges = {}
         all_dates = []
 
-        for sheet_name in excel_file.sheet_names:
-            # 跳过映射表
-            if sheet_name == '指标体系':
-                continue
+        with pd.ExcelFile(file_path) as excel_file:
+            for sheet_name in excel_file.sheet_names:
+                # 跳过映射表
+                if sheet_name == '指标体系':
+                    continue
 
-            try:
                 # 读取第一列作为日期列
                 df = pd.read_excel(excel_file, sheet_name=sheet_name, usecols=[0])
                 if df.empty:
@@ -250,11 +272,7 @@ def collect_time_ranges(
 
                     all_dates.extend(valid_dates.tolist())
 
-                    logger.info(f"  {sheet_name}: {sheet_ranges[sheet_name]['start']} 至 {sheet_ranges[sheet_name]['end']}")
-
-            except Exception as e:
-                logger.debug(f"  跳过工作表 '{sheet_name}': {e}")
-                continue
+                    logger.info("  %s: %s 至 %s", sheet_name, sheet_ranges[sheet_name]['start'], sheet_ranges[sheet_name]['end'])
 
         if not all_dates:
             raise ValueError("未能从任何工作表中提取有效日期")
@@ -423,9 +441,9 @@ def prepare_dfm_data_simple(
                     normalize_text(k): v for k, v in raw_results.items()
                 }
                 logger.info(f"平稳性检验完成: {len(stationarity_check_results)}个变量")
-        except Exception as e:
-            logger.error(f"平稳性检验执行失败: {e}", exc_info=True)
-            logger.warning("平稳性检验异常，返回空结果字典，数据准备流程继续")
+        except (ValueError, np.linalg.LinAlgError) as e:
+            logger.error(f"平稳性检验执行失败: {e}")
+            raise RuntimeError(f"平稳性检验失败: {e}") from e
 
         # 构建元数据
         processing_time = (datetime.now() - start_time).total_seconds()
@@ -527,9 +545,9 @@ def validate_preparation_parameters(
 
         # 验证日期格式
         if data_start_date:
-            start_dt = pd.to_datetime(data_start_date)
+            pd.to_datetime(data_start_date)  # Validate format
         if data_end_date:
-            end_dt = pd.to_datetime(data_end_date)
+            pd.to_datetime(data_end_date)  # Validate format
 
         # 验证日期逻辑
         if data_start_date and data_end_date:
@@ -589,6 +607,9 @@ def _handle_file_input(file_input: Union[str, Any]) -> str:
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
             tmp_file.write(file_input.read())
             tmp_path = tmp_file.name
+            # 跟踪临时文件以便清理
+            with _TEMP_FILES_LOCK:
+                _TEMP_FILES.add(tmp_path)
             logger.debug(f"文件对象已保存到临时文件: {tmp_path}")
             return tmp_path
 
@@ -609,9 +630,16 @@ def _get_cache_key(file_path: str) -> str:
 
     Returns:
         str: 缓存键
+
+    Raises:
+        FileNotFoundError: 文件不存在
     """
-    mtime = os.path.getmtime(file_path)
-    return f"{file_path}_{mtime}"
+    # 路径验证：规范化路径防止路径遍历
+    real_path = os.path.realpath(file_path)
+    if not os.path.exists(real_path):
+        raise FileNotFoundError(f"文件不存在: {file_path}")
+    mtime = os.path.getmtime(real_path)
+    return f"{real_path}_{mtime}"
 
 
 def _extract_mapping(
@@ -694,9 +722,9 @@ def _extract_numeric_mapping(
 
 
 def clear_mapping_cache():
-    """清除映射表缓存"""
-    global _MAPPING_CACHE
-    _MAPPING_CACHE.clear()
+    """清除映射表缓存（线程安全）"""
+    with _CACHE_LOCK:
+        _MAPPING_CACHE.clear()
     logger.info("映射表缓存已清除")
 
 

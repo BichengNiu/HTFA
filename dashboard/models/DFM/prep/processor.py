@@ -81,8 +81,12 @@ class DataPreparationProcessor:
             parallel_config: 并行处理配置，默认启用并行
         """
         # 仅在启用频率对齐时验证目标频率
-        if enable_freq_alignment and not target_freq.upper().endswith('-FRI'):
-            raise ValueError(f"当前仅支持周五对齐 (W-FRI)，提供的频率 '{target_freq}' 无效")
+        VALID_FREQS = {'W-FRI', 'W-MON', 'W-TUE', 'W-WED', 'W-THU', 'W-SAT', 'W-SUN', 'D', 'M', 'Q', 'Y'}
+        if enable_freq_alignment:
+            if target_freq.upper() not in VALID_FREQS:
+                raise ValueError(f"不支持的频率格式 '{target_freq}'，支持: {VALID_FREQS}")
+            if not target_freq.upper().endswith('-FRI'):
+                raise ValueError(f"当前仅支持周五对齐 (W-FRI)，提供的频率 '{target_freq}' 无效")
 
         self.excel_path = excel_path
         self.target_variable_name = target_variable_name
@@ -244,15 +248,14 @@ class DataPreparationProcessor:
         Returns:
             Dict: {'start': '2020-01-01', 'end': '2024-12-31'}
         """
-        excel_file = pd.ExcelFile(self.excel_path)
         all_dates = []
 
-        for sheet_name in excel_file.sheet_names:
-            # 跳过映射表
-            if sheet_name == '指标体系':
-                continue
+        with pd.ExcelFile(self.excel_path) as excel_file:
+            for sheet_name in excel_file.sheet_names:
+                # 跳过映射表
+                if sheet_name == '指标体系':
+                    continue
 
-            try:
                 # 读取第一列作为日期列
                 df = pd.read_excel(excel_file, sheet_name=sheet_name, usecols=[0])
                 if df.empty:
@@ -264,10 +267,6 @@ class DataPreparationProcessor:
 
                 if not valid_dates.empty:
                     all_dates.extend(valid_dates.tolist())
-
-            except Exception as e:
-                logger.debug(f"  跳过工作表 '{sheet_name}': {e}")
-                continue
 
         if not all_dates:
             raise ValueError("未能从任何工作表中提取有效日期")
@@ -291,23 +290,25 @@ class DataPreparationProcessor:
                 'monthly': {'var4': series4, ...}
             }
         """
-        excel_file = pd.ExcelFile(self.excel_path)
-        data_by_freq = {
-            'daily': {},
-            'weekly': {},
-            'dekad': {},
-            'monthly': {},
-            'quarterly': {},
-            'yearly': {}
-        }
+        if self.excel_path is None:
+            raise ValueError("excel_path不能为None")
 
-        for sheet_name in excel_file.sheet_names:
-            if sheet_name == '指标体系':
-                continue
+        with pd.ExcelFile(self.excel_path) as excel_file:
+            data_by_freq = {
+                'daily': {},
+                'weekly': {},
+                'dekad': {},
+                'monthly': {},
+                'quarterly': {},
+                'yearly': {}
+            }
 
-            logger.info(f"  加载工作表: {sheet_name}")
+            for sheet_name in excel_file.sheet_names:
+                if sheet_name == '指标体系':
+                    continue
 
-            try:
+                logger.info(f"  加载工作表: {sheet_name}")
+
                 # 统一读取所有sheet
                 df = pd.read_excel(excel_file, sheet_name=sheet_name, header=0)
                 if df.shape[1] < 2:
@@ -349,27 +350,24 @@ class DataPreparationProcessor:
                     else:
                         logger.warning(f"    变量 '{var_name}' 频率 '{freq}' 无法识别，跳过")
 
-            except Exception as e:
-                logger.warning(f"    加载失败: {e}")
-                continue
 
-        # 转换为DataFrame格式并应用全局预处理
-        for freq_type in ['daily', 'weekly', 'dekad', 'monthly', 'quarterly', 'yearly']:
-            if data_by_freq[freq_type]:
-                series_list = []
-                for var_name, series in data_by_freq[freq_type].items():
-                    if series.index.duplicated().any():
-                        series = series[~series.index.duplicated(keep='last')]
-                    series_list.append(series)
-                if series_list:
-                    combined_df = pd.concat(series_list, axis=1)
-                    # 应用全局零值和负值预处理
-                    combined_df = self._apply_global_preprocessing(combined_df)
-                    # 应用发布日期校准（传入频率类型）
-                    combined_df = self._apply_publication_date_calibration(combined_df, freq_type)
-                    data_by_freq[freq_type] = {'combined': combined_df}
+            # 转换为DataFrame格式并应用全局预处理
+            for freq_type in ['daily', 'weekly', 'dekad', 'monthly', 'quarterly', 'yearly']:
+                if data_by_freq[freq_type]:
+                    series_list = []
+                    for var_name, series in data_by_freq[freq_type].items():
+                        if series.index.duplicated().any():
+                            series = series[~series.index.duplicated(keep='last')]
+                        series_list.append(series)
+                    if series_list:
+                        combined_df = pd.concat(series_list, axis=1)
+                        # 应用全局零值和负值预处理
+                        combined_df = self._apply_global_preprocessing(combined_df)
+                        # 应用发布日期校准（传入频率类型）
+                        combined_df = self._apply_publication_date_calibration(combined_df, freq_type)
+                        data_by_freq[freq_type] = {'combined': combined_df}
 
-        return data_by_freq
+            return data_by_freq
 
     def _step5_smart_missing_detection_and_align(
         self,

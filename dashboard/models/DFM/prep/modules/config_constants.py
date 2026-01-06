@@ -19,11 +19,27 @@ DEFAULT_INDICATOR_COL = '指标名称'
 DEFAULT_TYPE_COL = '类型'
 DEFAULT_INDUSTRY_COL = '行业'
 
+# 数据质量阈值
+MIN_VALID_DATE_RATIO = 0.5       # 日期解析最低有效比例
+MIN_TARGET_VALID_RATIO = 0.5    # 目标变量最低有效比例
+MIN_PREDICTOR_VALID_RATIO = 0.3 # 预测变量最低有效比例
+
+# 频率配置（用于并行处理）
+FREQ_CONFIGS = [
+    ('daily', 'D'),
+    ('weekly', 'W'),
+    ('dekad', 'K'),
+    ('monthly', 'M'),
+    ('quarterly', 'Q'),
+    ('yearly', 'Y')
+]
+
 # 频率优先级顺序（数字越小频率越高）
 FREQ_ORDER = {
     'D': 1,      # 日度
+    'K': 1.5,    # 旬度
     'W': 2,      # 周度
-    '10D': 2.5,  # 旬度
+    '10D': 2.5,  # 旬度（兼容旧代码）
     'M': 3,      # 月度
     'Q': 4,      # 季度
     'Y': 5       # 年度
@@ -50,6 +66,10 @@ __all__ = [
     'DEFAULT_INDICATOR_COL',
     'DEFAULT_TYPE_COL',
     'DEFAULT_INDUSTRY_COL',
+    'MIN_VALID_DATE_RATIO',
+    'MIN_TARGET_VALID_RATIO',
+    'MIN_PREDICTOR_VALID_RATIO',
+    'FREQ_CONFIGS',
     'FREQ_ORDER',
     'FREQ_DAYS_MAP'
 ]

@@ -99,6 +99,7 @@ class TrainingConfig:
 
     # 随机种子
     ddfm_seed: int = 3  # DDFM随机种子
+    dfm_random_seed: int = 42  # 经典DFM随机种子
 
     def __post_init__(self):
         """后初始化验证"""

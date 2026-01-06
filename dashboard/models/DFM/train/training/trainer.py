@@ -157,6 +157,11 @@ class DFMTrainer:
                 # DDFM: 使用全部变量，不进行变量选择
                 selected_vars = predictor_vars
                 selection_history = []
+                if not self.config.encoder_structure:
+                    raise ValueError(
+                        "encoder_structure不能为空，无法确定DDFM因子数。"
+                        "请在配置中设置有效的encoder_structure，如(16, 4)。"
+                    )
                 k_factors = self.config.encoder_structure[-1]  # 因子数由编码器结构决定
 
                 if progress_callback:
@@ -288,7 +293,6 @@ class DFMTrainer:
                     selection_history = []
 
                 # 步骤3: 阶段2因子数选择
-                print(f"[FACTOR_SELECTION] 输入参数: method={self.config.factor_selection_method}, fixed_k={self.config.k_factors}, pca_threshold={self.config.pca_threshold or 0.9}, kaiser_threshold={self.config.kaiser_threshold or 1.0}")
                 k_factors, pca_analysis = select_num_factors(
                     data=data,
                     selected_vars=selected_vars,
@@ -296,10 +300,8 @@ class DFMTrainer:
                     fixed_k=self.config.k_factors,
                     pca_threshold=self.config.pca_threshold or 0.9,
                     kaiser_threshold=self.config.kaiser_threshold or 1.0,
-                    train_end=self.config.train_end,
-                    progress_callback=progress_callback
+                    train_end=self.config.train_end
                 )
-                print(f"[FACTOR_SELECTION] 输出结果: k_factors={k_factors}")
 
                 # 步骤4: 最终模型训练（直接调用）
                 # 准备数据并训练
@@ -385,9 +387,7 @@ class DFMTrainer:
             return result
 
         except Exception as e:
-            logger.error(f"训练过程出错: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"训练过程出错: {e}")
 
             if progress_callback:
                 progress_callback(f"训练失败: {e}")

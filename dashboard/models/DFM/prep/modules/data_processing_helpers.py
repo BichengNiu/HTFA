@@ -43,7 +43,6 @@ class AlignedData:
     monthly_predictors: pd.DataFrame
     daily_weekly_combined: pd.DataFrame
     all_indices: List[pd.DatetimeIndex]
-    monthly_transform_log: Dict
     removed_variables_log: List[Dict]
 
 
@@ -216,8 +215,7 @@ def load_all_sheets(
 
 def align_all_frequencies(
     data_aligner: DataAligner,
-    loaded_data: LoadedData,
-    all_indices_for_range: List[pd.DatetimeIndex]
+    loaded_data: LoadedData
 ) -> AlignedData:
     """
     对齐所有不同频率的数据到目标频率
@@ -225,7 +223,6 @@ def align_all_frequencies(
     Args:
         data_aligner: 数据对齐器实例
         loaded_data: 加载的数据
-        all_indices_for_range: 用于计算日期范围的索引列表
 
     Returns:
         AlignedData: 对齐后的数据集合
@@ -236,63 +233,32 @@ def align_all_frequencies(
 
     # 2a: 目标变量对齐到最近周五
     target_series_aligned = data_aligner.align_target_to_nearest_friday(loaded_data.raw_target_values)
-    if not target_series_aligned.empty:
-        all_indices_for_range.append(loaded_data.raw_target_values.index)
 
     # 2b: 目标Sheet预测变量对齐到最近周五
     target_sheet_predictors_aligned = data_aligner.align_target_sheet_predictors_to_nearest_friday(
         loaded_data.target_sheet_predictors
     )
-    if not target_sheet_predictors_aligned.empty:
-        all_indices_for_range.append(target_sheet_predictors_aligned.index)
 
     # 2c: 其他月度预测变量对齐到月末最后周五
-    if not loaded_data.other_monthly_predictors.empty:
-        all_indices_for_range.append(loaded_data.other_monthly_predictors.index)
-
-    monthly_predictors_aligned, monthly_transform_log, monthly_removed_info = data_aligner.align_monthly_to_last_friday(
-        loaded_data.other_monthly_predictors, apply_stationarity=True
+    monthly_predictors_aligned = data_aligner.align_monthly_to_last_friday(
+        loaded_data.other_monthly_predictors
     )
 
-    # 记录月度处理的移除变量
-    for reason, cols in monthly_removed_info.items():
-        for col in cols:
-            removed_variables_log.append({
-                'Variable': col,
-                'Reason': f'monthly_stationarity_{reason}'
-            })
-
     # 2d: 日度数据转换为周度
-    if loaded_data.data_parts_by_freq['daily']:
-        for df in loaded_data.data_parts_by_freq['daily']:
-            if not df.empty:
-                all_indices_for_range.append(df.index)
-
     df_daily_weekly = data_aligner.convert_daily_to_weekly(loaded_data.data_parts_by_freq['daily'])
 
     # 2e: 旬度数据转换为周度
-    if loaded_data.data_parts_by_freq['dekad']:
-        for df in loaded_data.data_parts_by_freq['dekad']:
-            if not df.empty:
-                all_indices_for_range.append(df.index)
-
-    df_dekad_weekly = data_aligner.convert_dekad_to_weekly(loaded_data.data_parts_by_freq['dekad'])
+    df_dekad_weekly, _ = data_aligner.convert_dekad_to_weekly(loaded_data.data_parts_by_freq['dekad'])
 
     # 2f: 周度数据对齐
-    if loaded_data.data_parts_by_freq['weekly']:
-        for df in loaded_data.data_parts_by_freq['weekly']:
-            if not df.empty:
-                all_indices_for_range.append(df.index)
-
-    df_weekly_aligned = data_aligner.align_weekly_data(loaded_data.data_parts_by_freq['weekly'])
+    df_weekly_aligned, _ = data_aligner.align_weekly_data(loaded_data.data_parts_by_freq['weekly'])
 
     return AlignedData(
         target_series=target_series_aligned,
         target_sheet_predictors=target_sheet_predictors_aligned,
         monthly_predictors=monthly_predictors_aligned,
         daily_weekly_combined=pd.DataFrame(),  # 将在下一步合并
-        all_indices=all_indices_for_range,
-        monthly_transform_log=monthly_transform_log,
+        all_indices=[],
         removed_variables_log=removed_variables_log
     ), df_daily_weekly, df_dekad_weekly, df_weekly_aligned
 

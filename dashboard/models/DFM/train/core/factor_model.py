@@ -51,12 +51,14 @@ class DFMModel:
         n_factors: int,
         max_lags: int = 1,
         max_iter: int = 30,
-        tolerance: float = 1e-6
+        tolerance: float = 1e-6,
+        random_seed: int = 42
     ):
         self.n_factors = n_factors
         self.max_lags = max_lags
         self.max_iter = max_iter
         self.tolerance = tolerance
+        self.random_seed = random_seed
 
         self.results_: Optional[DFMModelResult] = None
 
@@ -83,11 +85,8 @@ class DFMModel:
         """
         if not training_start or not train_end:
             raise ValueError("training_start和train_end必须提供")
-        # 设置确定性随机种子（匹配老代码）
-        DFM_SEED = 42
-        np.random.seed(DFM_SEED)
-        import random
-        random.seed(DFM_SEED)
+        # 设置确定性随机种子
+        np.random.seed(self.random_seed)
 
         Z_orig = data.copy()
 
@@ -216,8 +215,6 @@ class DFMModel:
         n_nan_rows = nan_rows.sum()
 
         if n_nan_rows > 0:
-            pass  # 静默处理NaN
-
             # 对有NaN的行，使用SVD直接估计载荷
             # Lambda = V[:n_factors].T * sqrt(s[:n_factors])
             V_short = Vh[:self.n_factors, :].T  # (n_obs, n_factors)
@@ -388,11 +385,10 @@ class DFMModel:
                 loglik_diff = loglik_current - loglik_prev
                 logger.debug(f"  LogLik: {loglik_current:.2f} (增量: {loglik_diff:.4f})")
 
-                # [TEMPORARY] 禁用收敛检查以匹配老代码的固定30次迭代
-                # if abs(loglik_diff) < self.tolerance:
-                #     # logger.info(f"EM算法收敛于迭代{iteration + 1}")
-                #     converged = True
-                #     break
+                if abs(loglik_diff) < self.tolerance:
+                    logger.info(f"EM算法收敛于迭代{iteration + 1}")
+                    converged = True
+                    break
 
             loglik_prev = loglik_current
 

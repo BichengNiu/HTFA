@@ -144,11 +144,12 @@ def _process_single_frequency(
             removal_log
         )
 
-    except Exception as e:
+    except (ValueError, KeyError) as e:
         logger.error(f"  [并行] {freq_name}处理失败: {e}")
-        import traceback
-        traceback.print_exc()
-        return (freq_name, None, {}, [])
+        raise RuntimeError(f"频率处理失败 ({freq_name}): {e}") from e
+    except pd.errors.EmptyDataError as e:
+        logger.error(f"  [并行] {freq_name}数据为空: {e}")
+        raise ValueError(f"频率数据为空 ({freq_name}): {e}") from e
 
 
 def _serialize_freq_data(freq_data: Dict[str, pd.DataFrame]) -> Dict[str, Tuple[np.ndarray, np.ndarray]]:
@@ -204,7 +205,7 @@ def parallel_process_frequencies(
     freq_configs = [
         ('daily', 'D'),
         ('weekly', 'W'),
-        ('dekad', 'M'),
+        ('dekad', 'K'),  # 旬度使用独立频率代码
         ('monthly', 'M'),
         ('quarterly', 'Q'),
         ('yearly', 'Y')
@@ -256,7 +257,11 @@ def parallel_process_frequencies(
             if not aligned_df.empty:
                 aligned_data[freq_name] = aligned_df
         if borrowing_log:
-            all_borrowing_log.update(borrowing_log)
+            for key, value in borrowing_log.items():
+                if key in all_borrowing_log:
+                    all_borrowing_log[key].extend(value)
+                else:
+                    all_borrowing_log[key] = value
         all_removal_log.extend(removal_log)
 
     logger.info(f"  并行处理完成, 有效频率数: {len(aligned_data)}")

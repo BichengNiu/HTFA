@@ -1347,5 +1347,6 @@ def _get_file_size(file_path: str) -> str:
             return f"{size_bytes / 1024:.1f} KB"
         else:
             return f"{size_bytes / (1024 * 1024):.1f} MB"
-    except Exception:
+    except Exception as e:
+        logger.warning(f"获取文件大小失败: {e}")
         return "未知大小"

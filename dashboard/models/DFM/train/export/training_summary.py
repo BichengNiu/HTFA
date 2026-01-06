@@ -52,7 +52,7 @@ def generate_training_summary(
     # 预测变量信息
     lines.append("[预测变量]")
     # 预测变量统计
-    initial_indicators = config.selected_indicators if hasattr(config, 'selected_indicators') else []
+    initial_indicators = config.selected_indicators
     lines.append(f"  进入训练的预测变量数: {len(initial_indicators)}")
     if initial_indicators:
         lines.append("  进入训练的预测变量明细:")
@@ -95,9 +95,8 @@ def generate_training_summary(
         lines.append("    并行计算: 未启用")
 
     # 目标配对模式
-    if hasattr(config, 'target_alignment_mode'):
-        alignment_desc = "下月值" if config.target_alignment_mode == 'next_month' else "本月值"
-        lines.append(f"    目标配对模式: {alignment_desc} ({config.target_alignment_mode})")
+    alignment_desc = "下月值" if config.target_alignment_mode == 'next_month' else "本月值"
+    lines.append(f"    目标配对模式: {alignment_desc} ({config.target_alignment_mode})")
 
     lines.append("")
 

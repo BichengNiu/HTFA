@@ -16,7 +16,7 @@ from dashboard.models.DFM.train.evaluation.metrics import (
 )
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
 from dashboard.models.DFM.train.utils.formatting import generate_progress_bar
-from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_removals
+from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_changes
 
 logger = get_logger(__name__)
 
@@ -343,12 +343,14 @@ class BackwardSelector:
 
             # 并行评估
             logger.info(f"  使用并行评估 ({self.parallel_config.get_effective_n_jobs()} 核心)")
-            candidate_results = evaluate_removals(
+            candidate_results = evaluate_changes(
                 current_predictors=current_predictors,
+                candidate_vars=current_predictors,
                 target_variable=target_variable,
                 full_data=self._eval_params['full_data'],
                 k_factors=k_factors,
                 evaluator_config=evaluator_config,
+                operation='remove',
                 use_parallel=True,
                 n_jobs=self.parallel_config.get_effective_n_jobs(),
                 backend=self.parallel_config.backend,

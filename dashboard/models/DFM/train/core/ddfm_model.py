@@ -449,7 +449,10 @@ class DDFMModel:
         has_lags = self.lags_input > 0
 
         prediction_iter = self.autoencoder.predict(self.data_tmp.values, verbose=0)
-        self.data_mod_only_miss.values[self.lags_input:][self.bool_miss] = prediction_iter[self.bool_miss]
+        # Fix: Use .loc with iloc to avoid chained indexing (which creates a copy)
+        miss_indices = np.where(self.bool_miss)
+        data_values = self.data_mod_only_miss.values
+        data_values[self.lags_input + miss_indices[0], miss_indices[1]] = prediction_iter[self.bool_miss]
 
         self.eps = self.data_tmp[self.data_mod.columns].values - prediction_iter
 
@@ -556,8 +559,10 @@ class DDFMModel:
 
             prediction_prev_iter = prediction_iter.copy()
 
-            # 更新缺失值
-            self.data_mod_only_miss.values[self.lags_input:][self.bool_miss] = prediction_iter[self.bool_miss]
+            # 更新缺失值 - Fix: Use direct indexing to avoid chained indexing
+            miss_indices = np.where(self.bool_miss)
+            data_values = self.data_mod_only_miss.values
+            data_values[self.lags_input + miss_indices[0], miss_indices[1]] = prediction_iter[self.bool_miss]
             self.eps = self.data_mod_only_miss.values[self.lags_input:] - prediction_iter
             iter_count += 1
 

@@ -21,16 +21,7 @@ def get_file_hash(file_obj) -> str:
     if file_obj is None:
         return ""
 
-    if hasattr(file_obj, 'file_id'):
-        return str(file_obj.file_id)
-
-    current_pos = file_obj.tell()
-    file_obj.seek(0)
-    content = file_obj.read()
-    file_hash = hashlib.md5(content).hexdigest()
-    file_obj.seek(current_pos)
-
-    return file_hash
+    return str(file_obj.file_id)
 
 
 def load_cached_file(
