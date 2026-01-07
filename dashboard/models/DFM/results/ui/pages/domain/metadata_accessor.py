@@ -30,6 +30,7 @@ class TrainingInfo:
     validation_end: str = 'N/A'
     target_variable: str = ''
     estimation_method: str = 'N/A'
+    n_industries: Any = 'N/A'
     n_variables: Any = 'N/A'
     n_factors: Any = 'N/A'
 
@@ -62,6 +63,9 @@ class DFMMetadataAccessor:
             raise TypeError(f"'best_variables'应为list类型，实际为{type(best_variables)}")
         n_vars = len(best_variables)
 
+        # 计算最终行业数
+        n_industries = self._get_n_industries(best_variables)
+
         return TrainingInfo(
             training_start=self._get_date_str('training_start_date'),
             training_end=self._get_date_str('train_end_date'),
@@ -69,6 +73,7 @@ class DFMMetadataAccessor:
             validation_end=self._get_date_str('validation_end_date'),
             target_variable=self._metadata.get('target_variable', ''),
             estimation_method=self._metadata.get('estimation_method', 'N/A'),
+            n_industries=n_industries,
             n_variables=n_vars,
             n_factors=self._get_k_factors()
         )
@@ -83,6 +88,18 @@ class DFMMetadataAccessor:
         if 'k_factors' not in best_params:
             raise KeyError("'best_params'中缺少'k_factors'字段")
         return best_params['k_factors']
+
+    def _get_n_industries(self, best_variables: list) -> Any:
+        """计算最终行业数"""
+        var_industry_map = self._metadata.get('var_industry_map')
+        if not var_industry_map or not isinstance(var_industry_map, dict):
+            return 'N/A'
+        industries = set()
+        for var in best_variables:
+            industry = var_industry_map.get(var)
+            if industry:
+                industries.add(industry)
+        return len(industries) if industries else 'N/A'
 
     @property
     def training_metrics(self) -> ModelMetrics:
@@ -144,6 +161,13 @@ class DFMMetadataAccessor:
         return is_valid_number(metrics.rmse) or is_valid_number(metrics.mae)
 
     @property
+    def is_ddfm(self) -> bool:
+        """判断是否为DDFM模型"""
+        best_params = self._metadata.get('best_params', {})
+        algorithm = best_params.get('algorithm', 'classical')
+        return algorithm == 'deep_learning'
+
+    @property
     def complete_aligned_table(self) -> Optional[pd.DataFrame]:
         """获取完整对齐表"""
         return self._metadata.get('complete_aligned_table')
@@ -162,16 +186,6 @@ class DFMMetadataAccessor:
     def smoothed_factors(self) -> Optional[pd.DataFrame]:
         """获取平滑因子"""
         return self._metadata.get('smoothed_factors')
-
-    @property
-    def industry_r2(self) -> Optional[pd.Series]:
-        """获取行业R²"""
-        return self._metadata.get('industry_r2_results')
-
-    @property
-    def factor_industry_r2(self) -> Optional[Dict]:
-        """获取因子-行业R²"""
-        return self._metadata.get('factor_industry_r2_results')
 
     @property
     def factor_series(self) -> Optional[pd.DataFrame]:

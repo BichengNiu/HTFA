@@ -17,7 +17,6 @@ from typing import Dict, Optional, Any, Tuple
 import numpy as np
 import pandas as pd
 import joblib
-from sklearn.linear_model import LinearRegression
 from dashboard.models.DFM.train.utils.logger import get_logger
 from dashboard.models.DFM.train.utils.file_io import read_data_file
 
@@ -306,10 +305,10 @@ class TrainingResultExporter:
         is_ddfm = (getattr(config, 'algorithm', 'classical') == 'deep_learning')
 
         if is_ddfm:
-            # DDFM模型直接使用validation_start和validation_end作为观察期
-            metadata['observation_period_start'] = config.validation_start
-            metadata['observation_period_end'] = config.validation_end
-            logger.info(f"[DDFM] 观察期时间段: {config.validation_start} 至 {config.validation_end}")
+            # DDFM模型使用observation_start和observation_end作为观察期
+            metadata['observation_period_start'] = config.observation_start
+            metadata['observation_period_end'] = config.observation_end
+            logger.info(f"[DDFM] 观察期时间段: {config.observation_start} 至 {config.observation_end}")
         else:
             # 经典DFM：基于对齐表格计算观察期
             observation_period_start, observation_period_end = self._calculate_observation_period(
@@ -328,18 +327,6 @@ class TrainingResultExporter:
         else:
             metadata['prepared_data'] = None
             logger.debug("未提供prepared_data，影响分解功能可能受限")
-
-        # R²分析结果
-        var_industry_map = metadata.get('var_industry_map')
-        if not var_industry_map:
-            raise ValueError("var_industry_map为空，无法计算行业R²分析。请确保训练配置中包含industry_map。")
-
-        logger.info("开始计算行业R²分析...")
-        industry_r2, factor_industry_r2 = self._calculate_industry_r2(result, config, var_industry_map)
-        metadata['industry_r2_results'] = industry_r2
-        metadata['factor_industry_r2_results'] = factor_industry_r2
-        if industry_r2 is not None:
-            logger.info(f"成功生成R²分析结果: {len(industry_r2)} 个行业")
 
         logger.info(f"元数据构建完成,包含 {len(metadata)} 个字段")
         return metadata
@@ -921,232 +908,6 @@ class TrainingResultExporter:
         except Exception as e:
             logger.error(f"获取观察期日期索引失败: {e}")
             return None
-
-    def _prepare_r2_calculation_data(
-        self,
-        result,
-        config
-    ) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
-        """
-        准备R²计算所需的因子和变量数据
-
-        Args:
-            result: 训练结果
-            config: 训练配置
-
-        Returns:
-            tuple: (factors_train, train_data) 或 None（如果失败）
-        """
-        if not result.model_result or not hasattr(result.model_result, 'factors'):
-            logger.warning("缺少模型结果或因子数据，无法计算R²")
-            return None
-
-        factors_data = result.model_result.factors
-        if isinstance(factors_data, np.ndarray):
-            if factors_data.ndim == 2:
-                factors_df = pd.DataFrame(
-                    factors_data.T,
-                    columns=[f'Factor_{i+1}' for i in range(factors_data.shape[0])]
-                )
-            else:
-                logger.warning(f"因子数据维度不正确: {factors_data.ndim}")
-                return None
-        elif isinstance(factors_data, pd.DataFrame):
-            factors_df = factors_data
-        else:
-            logger.warning(f"因子数据类型不支持: {type(factors_data)}")
-            return None
-
-        data = self._read_data_file(config.data_path)
-
-        if not isinstance(data.index, pd.DatetimeIndex):
-            try:
-                data.index = pd.to_datetime(data.index)
-            except Exception as e:
-                raise ValueError(f"无法将数据索引转换为DatetimeIndex: {e}") from e
-
-        if len(factors_df) != len(data):
-            logger.warning(f"因子数据长度({len(factors_df)})与完整数据长度({len(data)})不匹配")
-            min_len = min(len(factors_df), len(data))
-            factors_df = factors_df.iloc[:min_len].copy()
-            data = data.iloc[:min_len].copy()
-
-        factors_df.index = data.index
-
-        if not config.train_end:
-            raise ValueError("配置中缺少train_end字段")
-        train_end = pd.to_datetime(config.train_end)
-        train_data = data[data.index <= train_end]
-        factors_train = factors_df[factors_df.index <= train_end]
-
-        return factors_train, train_data
-
-    def _group_variables_by_industry(
-        self,
-        result,
-        var_industry_map: Dict[str, str]
-    ) -> Optional[Dict[str, list]]:
-        """
-        按行业分组变量
-
-        Args:
-            result: 训练结果
-            var_industry_map: 变量到行业的映射字典
-
-        Returns:
-            dict: {industry_name: [variable_names]} 或 None（如果失败）
-        """
-        if not result.selected_variables:
-            logger.warning("缺少选定变量，无法计算R²")
-            return None
-
-        industry_groups = {}
-        for var in result.selected_variables:
-            if var not in var_industry_map:
-                continue
-            industry = var_industry_map[var]
-            if industry not in industry_groups:
-                industry_groups[industry] = []
-            industry_groups[industry].append(var)
-
-        if not industry_groups:
-            logger.warning("没有有效的行业分组")
-            return None
-
-        logger.info(f"识别到 {len(industry_groups)} 个行业: {list(industry_groups.keys())}")
-        return industry_groups
-
-    def _compute_industry_r2_scores(
-        self,
-        industry_groups: Dict[str, list],
-        factors_train: pd.DataFrame,
-        train_data: pd.DataFrame
-    ) -> Tuple[Optional[pd.Series], Optional[Dict]]:
-        """
-        计算每个行业的R²得分
-
-        Args:
-            industry_groups: 行业分组
-            factors_train: 训练期因子数据
-            train_data: 训练期变量数据
-
-        Returns:
-            tuple: (industry_r2_series, factor_industry_r2_dict)
-        """
-        industry_r2_results = {}
-        factor_industry_r2_results = {f'Factor_{i+1}': {} for i in range(len(factors_train.columns))}
-
-        for industry, variables in industry_groups.items():
-            industry_vars = [v for v in variables if v in train_data.columns]
-            if not industry_vars:
-                logger.warning(f"行业 '{industry}' 没有有效变量")
-                continue
-
-            industry_data = train_data[industry_vars].dropna(how='all')
-
-            common_index = factors_train.index.intersection(industry_data.index)
-            if len(common_index) == 0:
-                logger.warning(f"行业 '{industry}' 的数据无法与因子对齐")
-                continue
-
-            X = factors_train.loc[common_index].values
-            Y = industry_data.loc[common_index].values
-
-            valid_mask = ~np.isnan(Y).any(axis=1) & ~np.isnan(X).any(axis=1)
-            X_clean = X[valid_mask]
-            Y_clean = Y[valid_mask]
-
-            # 最小样本数要求：至少10个有效样本才能计算R²
-            min_samples = 10
-            if len(X_clean) < min_samples:
-                # 只在debug级别记录，避免大量警告刷屏
-                logger.debug(f"行业 '{industry}' 有效样本不足({len(X_clean)}<{min_samples})，跳过R²计算")
-                continue
-
-            try:
-                model = LinearRegression()
-                model.fit(X_clean, Y_clean)
-                Y_pred = model.predict(X_clean)
-
-                rss = np.sum((Y_clean - Y_pred) ** 2)
-                tss = np.sum((Y_clean - np.mean(Y_clean, axis=0)) ** 2)
-
-                TSS_EPSILON = 1e-10
-                if tss > TSS_EPSILON:
-                    r2_overall = 1 - rss / tss
-                    industry_r2_results[industry] = float(r2_overall)
-                    logger.debug(f"行业 '{industry}' 整体R²: {r2_overall:.4f}")
-                else:
-                    industry_r2_results[industry] = 0.0
-                    logger.warning(f"行业 '{industry}' TSS过小({tss:.2e})，R²设为0")
-            except Exception as e:
-                logger.warning(f"计算行业 '{industry}' 整体R²失败: {e}")
-                continue
-
-            for i, factor_name in enumerate(factors_train.columns):
-                try:
-                    X_single = X_clean[:, i:i+1]
-                    model_single = LinearRegression()
-                    model_single.fit(X_single, Y_clean)
-                    Y_pred_single = model_single.predict(X_single)
-
-                    rss_single = np.sum((Y_clean - Y_pred_single) ** 2)
-
-                    if tss > TSS_EPSILON:
-                        r2_single = 1 - rss_single / tss
-                        factor_industry_r2_results[factor_name][industry] = float(r2_single)
-                        logger.debug(f"行业 '{industry}' {factor_name} R²: {r2_single:.4f}")
-                    else:
-                        factor_industry_r2_results[factor_name][industry] = 0.0
-                except Exception as e:
-                    logger.warning(f"计算行业 '{industry}' {factor_name} R²失败: {e}")
-                    continue
-
-        if not industry_r2_results:
-            logger.info("没有行业满足R²计算的最小样本要求，跳过R²分析")
-            return None, None
-
-        industry_r2_series = pd.Series(industry_r2_results)
-        industry_r2_series.name = "Industry R2 (All Factors)"
-
-        logger.info(f"成功计算 {len(industry_r2_results)} 个行业的R²分析")
-        return industry_r2_series, factor_industry_r2_results
-
-    def _calculate_industry_r2(
-        self,
-        result,
-        config,
-        var_industry_map: Dict[str, str]
-    ) -> Tuple[Optional[pd.Series], Optional[Dict]]:
-        """
-        计算行业整体R²和因子对行业的R²
-
-        Args:
-            result: 训练结果
-            config: 训练配置
-            var_industry_map: 变量到行业的映射字典
-
-        Returns:
-            tuple: (industry_r2_series, factor_industry_r2_dict)
-                - industry_r2_series: pd.Series，index为行业名称，value为整体R²
-                - factor_industry_r2_dict: dict，可转换为DataFrame，行业×因子的R²矩阵
-        """
-        try:
-            data_result = self._prepare_r2_calculation_data(result, config)
-            if data_result is None:
-                return None, None
-
-            factors_train, train_data = data_result
-
-            industry_groups = self._group_variables_by_industry(result, var_industry_map)
-            if industry_groups is None:
-                return None, None
-
-            return self._compute_industry_r2_scores(industry_groups, factors_train, train_data)
-
-        except Exception as e:
-            logger.error(f"计算行业R²失败: {e}", exc_info=True)
-            return None, None
 
 
 __all__ = ['TrainingResultExporter']

@@ -28,6 +28,10 @@ class TrainingConfig:
     validation_start: str  # 验证期开始日期
     validation_end: str  # 验证期结束日期
 
+    # 观察期配置（DDFM专用）
+    observation_start: Optional[str] = None  # 观察期开始日期
+    observation_end: Optional[str] = None    # 观察期结束日期
+
     # ========== 可选字段（有默认值） ==========
     # 核心配置
     selected_indicators: List[str] = field(default_factory=list)

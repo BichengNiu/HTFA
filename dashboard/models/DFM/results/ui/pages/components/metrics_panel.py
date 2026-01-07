@@ -20,18 +20,21 @@ class MetricsPanel:
     @staticmethod
     def render_basic_info(accessor: DFMMetadataAccessor) -> None:
         """
-        渲染基本信息（变量数、因子数）
+        渲染基本信息（行业数、变量数、因子数）
 
         Args:
             accessor: 元数据访问器
         """
         info = accessor.training_info
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
+            display_ind = int(info.n_industries) if isinstance(info.n_industries, (int, np.integer)) else 'N/A'
+            st.metric("最终行业数", display_ind)
+        with col2:
             display_n = int(info.n_variables) if isinstance(info.n_variables, (int, np.integer)) else 'N/A'
             st.metric("最终变量数", display_n)
-        with col2:
+        with col3:
             display_k = int(info.n_factors) if isinstance(info.n_factors, (int, np.integer)) else 'N/A'
             st.metric("最终因子数", display_k)
 

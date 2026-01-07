@@ -227,6 +227,9 @@ class TrainingConfigBuilder:
             # DDFM不支持变量选择
             config_kwargs['enable_variable_selection'] = False
             config_kwargs['variable_selection_method'] = 'none'
+            # DDFM观察期配置
+            config_kwargs['observation_start'] = observation_start_value.strftime('%Y-%m-%d')
+            config_kwargs['observation_end'] = validation_end_value.strftime('%Y-%m-%d')
 
         training_config = TrainingConfig(**config_kwargs)
 

@@ -55,7 +55,6 @@ from dashboard.models.DFM.results.dfm_backend import (
 # Import new components
 from dashboard.models.DFM.results.ui.pages.domain import DFMMetadataAccessor
 from dashboard.models.DFM.results.ui.pages.components import MetricsPanel
-from dashboard.models.DFM.results.ui.pages.utils import generate_r2_excel
 
 logger = logging.getLogger(__name__)
 
@@ -343,12 +342,13 @@ def _render_nowcast_chart(st, accessor: DFMMetadataAccessor, is_ddfm: bool) -> N
     # 添加观察期背景色标记
     obs_start = accessor.observation_period_start
     obs_end = accessor.observation_period_end
+    logger.info(f"[DEBUG] 观察期: obs_start={obs_start}, obs_end={obs_end}, is_ddfm={is_ddfm}")
 
     if obs_start and obs_start != 'N/A':
         obs_start_dt = pd.to_datetime(obs_start)
 
         # 确定观察期结束日期
-        if is_ddfm and obs_end and obs_end != 'N/A':
+        if obs_end and obs_end != 'N/A':
             data_end_str = obs_end
         elif not comparison_df.empty and comparison_df.index.max() > obs_start_dt:
             data_end_str = str(comparison_df.index.max().date())
@@ -437,61 +437,6 @@ def _render_pca_section(st, accessor: DFMMetadataAccessor, is_ddfm: bool) -> Non
         '特征值 (Eigenvalue)': '特征值(Eigenvalue)'
     })
     st.dataframe(pca_df_display, width='stretch')
-
-
-def _render_r2_analysis(st, accessor: DFMMetadataAccessor) -> None:
-    """
-    渲染R²分析部分
-
-    Args:
-        st: Streamlit模块
-        accessor: 元数据访问器
-    """
-    st.markdown("--- ")
-    st.markdown("**R² 分析**")
-
-    industry_r2 = accessor.industry_r2
-    factor_industry_r2 = accessor.factor_industry_r2
-
-    r2_col1, r2_col2 = st.columns(2)
-
-    with r2_col1:
-        st.markdown("**因子整体 R²**")
-        if industry_r2 is not None and isinstance(industry_r2, pd.Series) and not industry_r2.empty:
-            st.dataframe(industry_r2.to_frame(name="Industry R2 (All Factors)"), width='stretch')
-            st.caption("附注：衡量所有因子共同解释该行业内所有变量整体变动的百分比。计算方式为对行业内各变量分别对所有因子进行OLS回归后，汇总各变量的总平方和(TSS)与残差平方和(RSS)，计算 R² = 1 - (Sum(RSS) / Sum(TSS))。")
-        else:
-            st.write("未找到行业整体 R² 数据。")
-
-    with r2_col2:
-        st.markdown("**因子对行业 R²**")
-        if factor_industry_r2 and isinstance(factor_industry_r2, dict):
-            factor_industry_df = pd.DataFrame(factor_industry_r2)
-            st.dataframe(factor_industry_df, width='stretch')
-            st.caption("附注：衡量单个因子解释该行业内所有变量整体变动的百分比。计算方式为对行业内各变量分别对单个因子进行OLS回归后，汇总TSS与RSS，计算 R² = 1 - (Sum(RSS) / Sum(TSS))。")
-        elif factor_industry_r2 is not None:
-            st.write("因子对行业 R² 数据格式不正确或为空。")
-        else:
-            st.write("未找到因子对行业 R² 数据。")
-
-    # 添加数据下载按钮
-    has_industry_r2 = industry_r2 is not None and isinstance(industry_r2, pd.Series) and not industry_r2.empty
-    has_factor_industry_r2 = factor_industry_r2 and isinstance(factor_industry_r2, dict) and len(factor_industry_r2) > 0
-
-    if has_industry_r2 or has_factor_industry_r2:
-        # 让ValueError向上传播，不捕获
-        excel_data = generate_r2_excel(industry_r2, factor_industry_r2)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"R2_Analysis_Data_{timestamp}.xlsx"
-
-        st.download_button(
-            label="数据下载",
-            data=excel_data,
-            file_name=filename,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="r2_analysis_download_file",
-            type="primary"
-        )
 
 
 def _render_factor_loadings(st, accessor: DFMMetadataAccessor) -> bool:
@@ -709,16 +654,13 @@ def render_dfm_tab(st):
     MetricsPanel.render_all_metrics(accessor)
 
     # 判断是否为DDFM模型
-    is_ddfm = not accessor.has_valid_validation_metrics
+    is_ddfm = accessor.is_ddfm
 
     # 渲染Nowcast图表
     _render_nowcast_chart(st, accessor, is_ddfm)
 
     # 渲染PCA结果
     _render_pca_section(st, accessor, is_ddfm)
-
-    # 渲染R²分析
-    _render_r2_analysis(st, accessor)
 
     # 渲染因子载荷
     has_loadings = _render_factor_loadings(st, accessor)
