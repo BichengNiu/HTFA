@@ -6,7 +6,7 @@ Metrics Panel Components
 import streamlit as st
 import pandas as pd
 import numpy as np
-from typing import Any, Optional
+from typing import Any, Optional, Callable
 from dashboard.models.DFM.results.ui.pages.domain import DFMMetadataAccessor, ModelMetrics
 
 
@@ -16,21 +16,6 @@ class MetricsPanel:
 
     统一管理和渲染模型评估指标
     """
-
-    @staticmethod
-    def format_metric_value(val: Any, is_percent: bool = False, precision: int = 2) -> str:
-        """
-        格式化指标值
-
-        Args:
-            val: 原始值
-            is_percent: 是否为百分比
-            precision: 小数精度
-
-        Returns:
-            格式化字符串
-        """
-        return DFMMetadataAccessor.format_metric(val, is_percent, precision)
 
     @staticmethod
     def render_basic_info(accessor: DFMMetadataAccessor) -> None:
@@ -54,7 +39,7 @@ class MetricsPanel:
     def render_period_metrics(
         label: str,
         metrics: ModelMetrics,
-        formatter: Optional[callable] = None
+        formatter: Optional[Callable] = None
     ) -> None:
         """
         渲染某个时期的三个指标（MAE、RMSE、胜率）
@@ -65,7 +50,7 @@ class MetricsPanel:
             formatter: 可选的格式化函数
         """
         if formatter is None:
-            formatter = MetricsPanel.format_metric_value
+            formatter = DFMMetadataAccessor.format_metric
 
         col1, col2, col3 = st.columns(3)
         with col1:

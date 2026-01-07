@@ -8,6 +8,7 @@ from typing import Optional, Any, Dict
 import math
 import pandas as pd
 import logging
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
 
@@ -54,22 +55,19 @@ class DFMMetadataAccessor:
     @property
     def training_info(self) -> TrainingInfo:
         """获取训练信息"""
-        best_variables = self._metadata.get('best_variables', [])
-        if isinstance(best_variables, list) and len(best_variables) > 0:
-            n_vars = len(best_variables)
-        else:
-            factor_loadings = self._metadata.get('factor_loadings_df')
-            if factor_loadings is not None and hasattr(factor_loadings, 'index'):
-                n_vars = len(factor_loadings.index)
-            else:
-                n_vars = 'N/A'
+        best_variables = self._metadata.get('best_variables')
+        if best_variables is None:
+            raise KeyError("元数据中缺少'best_variables'字段")
+        if not isinstance(best_variables, list):
+            raise TypeError(f"'best_variables'应为list类型，实际为{type(best_variables)}")
+        n_vars = len(best_variables)
 
         return TrainingInfo(
             training_start=self._get_date_str('training_start_date'),
             training_end=self._get_date_str('train_end_date'),
             validation_start=self._get_date_str('validation_start_date'),
             validation_end=self._get_date_str('validation_end_date'),
-            target_variable=self._metadata.get('target_variable', '规模以上工业增加值:当月同比'),
+            target_variable=self._metadata.get('target_variable', ''),
             estimation_method=self._metadata.get('estimation_method', 'N/A'),
             n_variables=n_vars,
             n_factors=self._get_k_factors()
@@ -168,12 +166,27 @@ class DFMMetadataAccessor:
     @property
     def industry_r2(self) -> Optional[pd.Series]:
         """获取行业R²"""
-        return self._metadata.get('industry_r2')
+        return self._metadata.get('industry_r2_results')
 
     @property
     def factor_industry_r2(self) -> Optional[Dict]:
         """获取因子-行业R²"""
-        return self._metadata.get('factor_industry_r2')
+        return self._metadata.get('factor_industry_r2_results')
+
+    @property
+    def factor_series(self) -> Optional[pd.DataFrame]:
+        """获取因子时间序列"""
+        return self._metadata.get('factor_series')
+
+    @property
+    def observation_period_start(self) -> Optional[str]:
+        """获取观察期开始日期"""
+        return self._get_date_str('observation_period_start')
+
+    @property
+    def observation_period_end(self) -> Optional[str]:
+        """获取观察期结束日期"""
+        return self._get_date_str('observation_period_end')
 
     @property
     def pca_results_df(self) -> Optional[pd.DataFrame]:
@@ -205,6 +218,9 @@ class DFMMetadataAccessor:
 
         Returns:
             格式化的日期字符串或'N/A'
+
+        Raises:
+            TypeError: 日期值类型不支持
         """
         date_val = self._metadata.get(key)
         if date_val is None:
@@ -213,13 +229,11 @@ class DFMMetadataAccessor:
         if isinstance(date_val, str):
             return date_val
 
-        if isinstance(date_val, pd.Timestamp):
+        if isinstance(date_val, (pd.Timestamp, datetime, date)):
             return date_val.strftime('%Y-%m-%d')
 
-        try:
-            return str(date_val)
-        except Exception:
-            return 'N/A'
+        # Raise error for unsupported types instead of silent str() conversion
+        raise TypeError(f"Unsupported date type for key '{key}': {type(date_val).__name__}")
 
     @staticmethod
     def format_metric(val: Any, is_percent: bool = False, precision: int = 2) -> str:

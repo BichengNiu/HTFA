@@ -101,6 +101,9 @@ class TrainingConfig:
     ddfm_seed: int = 3  # DDFM随机种子
     dfm_random_seed: int = 42  # 经典DFM随机种子
 
+    # 行业映射（用于R²分析）
+    industry_map: Optional[Dict[str, str]] = None
+
     def __post_init__(self):
         """后初始化验证"""
         # 设置默认输出目录

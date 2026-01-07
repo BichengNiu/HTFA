@@ -180,8 +180,8 @@ class TrainingConfigBuilder:
 
             # 模型参数
             'k_factors': factor_params.get('k_factors', 4),
-            'max_lags': self._get_required('dfm_factor_ar_order'),
-            'max_iterations': self._get_required('dfm_max_iterations'),
+            'max_lags': self._get_required('dfm_factor_ar_order') if algorithm != 'deep_learning' else self.state.get('dfm_ddfm_factor_order', 1),
+            'max_iterations': self.state.get('dfm_max_iterations', 30) if algorithm != 'deep_learning' else 30,
             'tolerance': 1e-6,
 
             # 变量选择配置
@@ -216,6 +216,9 @@ class TrainingConfigBuilder:
 
             # 算法选择（2025-12-21新增）
             'algorithm': algorithm,
+
+            # 行业映射（用于R²分析）
+            'industry_map': var_industry_map,
         }
 
         # 添加DDFM专用参数

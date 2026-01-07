@@ -18,7 +18,7 @@ from datetime import datetime
 import logging
 
 from dashboard.models.DFM.prep.modules.data_loader import DataLoader
-from dashboard.models.DFM.prep.modules.data_aligner import DataAligner
+from dashboard.models.DFM.prep.modules.data_aligner import DataAligner, generate_theoretical_index
 from dashboard.models.DFM.prep.modules.data_cleaner import DataCleaner, clean_dataframe
 from dashboard.models.DFM.prep.modules.config_constants import FREQ_ORDER
 from dashboard.models.DFM.prep.modules.publication_calibrator import PublicationCalibrator
@@ -560,8 +560,8 @@ class DataPreparationProcessor:
             # 对齐模式：创建完整日期范围并对齐
             logger.info("  创建完整日期范围...")
             all_indices = [part.index for part in all_parts if hasattr(part, 'index')]
-            full_date_range = self.data_aligner.create_full_date_range(
-                all_indices, start_date, end_date
+            full_date_range = generate_theoretical_index(
+                start_date, end_date, self.data_aligner.target_freq
             )
             logger.info(f"  日期范围: {full_date_range[0]} 至 {full_date_range[-1]}, 共{len(full_date_range)}个周五")
 

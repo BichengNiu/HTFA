@@ -12,10 +12,13 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple, Optional, List
 import io
+import logging
 from datetime import datetime
 
 from ..utils.validators import validate_model_data
 from ..utils.exceptions import ModelLoadError, ValidationError, DataFormatError
+
+logger = logging.getLogger(__name__)
 
 
 class SavedNowcastData:
@@ -79,7 +82,7 @@ class ModelLoader:
             if not hasattr(self._model, '__dict__'):
                 raise ModelLoadError("加载的对象不是有效的模型实例")
 
-            print(f"[ModelLoader] 成功加载DFM模型，类型: {type(self._model)}")
+            logger.info(f"成功加载DFM模型，类型: {type(self._model)}")
             return self._model
 
         except Exception as e:
@@ -110,7 +113,7 @@ class ModelLoader:
             if not isinstance(self._metadata, dict):
                 raise ModelLoadError("元数据文件格式无效，应为字典")
 
-            print(f"[ModelLoader] 成功加载元数据，包含 {len(self._metadata)} 个键")
+            logger.info(f"成功加载元数据，包含 {len(self._metadata)} 个键")
             return self._metadata
 
         except Exception as e:
@@ -214,13 +217,13 @@ class ModelLoader:
 
             # 15. 检测并设置模型类型
             nowcast_data.model_type = self.detect_model_type()
-            print(f"[ModelLoader] 模型类型: {nowcast_data.model_type}")
+            logger.info(f"模型类型: {nowcast_data.model_type}")
 
             # 验证提取的数据
             self._validate_extracted_data(nowcast_data)
 
             self._nowcast_data = nowcast_data
-            print(f"[ModelLoader] 成功提取nowcast数据")
+            logger.info("成功提取nowcast数据")
             return nowcast_data
 
         except Exception as e:
@@ -264,7 +267,7 @@ class ModelLoader:
                     f"因子数量不匹配: best_params.k_factors={k_factors}, factor_loadings_df.columns={factor_loadings_cols}"
                 )
 
-            print(f"[ModelLoader] 模型兼容性验证通过")
+            logger.info("模型兼容性验证通过")
             return True
 
         except ValidationError:
@@ -290,35 +293,43 @@ class ModelLoader:
         if nowcast_series.empty:
             raise DataFormatError("nowcast时间序列为空")
 
-        print(f"[ModelLoader] 提取nowcast序列: {len(nowcast_series)} 个数据点")
+        logger.info(f"提取nowcast序列: {len(nowcast_series)} 个数据点")
         return nowcast_series
 
     def _extract_kalman_gains(self) -> List[np.ndarray]:
         """提取卡尔曼增益历史"""
-        # 从元数据中提取卡尔曼增益历史
-        if 'kalman_gains_history' in self._metadata:
-            kalman_gains_history = self._metadata['kalman_gains_history']
-            if kalman_gains_history is not None and len(kalman_gains_history) > 0:
-                print(f"[ModelLoader] 提取卡尔曼增益历史: {len(kalman_gains_history)} 个时间步")
-                # 验证格式
-                first_non_none = next((k for k in kalman_gains_history if k is not None), None)
-                if first_non_none is not None:
-                    print(f"[ModelLoader] K_t矩阵形状: {first_non_none.shape}")
-                return kalman_gains_history
+        if 'kalman_gains_history' not in self._metadata:
+            raise DataFormatError(
+                "元数据中缺少kalman_gains_history字段。\n"
+                "影响分解功能需要卡尔曼增益历史数据。\n"
+                "请使用新版本训练模块重新训练模型以支持此功能。"
+            )
 
-        # 从模型对象中获取
-        if hasattr(self._model, 'kalman_gains_history'):
-            kalman_gains_history = self._model.kalman_gains_history
-            if kalman_gains_history is not None and len(kalman_gains_history) > 0:
-                print(f"[ModelLoader] 从模型对象提取卡尔曼增益历史: {len(kalman_gains_history)} 个时间步")
-                return kalman_gains_history
+        kalman_gains_history = self._metadata['kalman_gains_history']
 
-        # 未找到卡尔曼增益历史，抛出错误
-        raise DataFormatError(
-            "未找到卡尔曼增益历史。\n"
-            "影响分解功能需要卡尔曼增益历史数据。\n"
-            "请使用新版本训练模块重新训练模型以支持此功能。"
-        )
+        if kalman_gains_history is None or len(kalman_gains_history) == 0:
+            raise DataFormatError(
+                "kalman_gains_history为空。\n"
+                "影响分解功能需要卡尔曼增益历史数据。\n"
+                "请使用新版本训练模块重新训练模型以支持此功能。"
+            )
+
+        # 验证至少有一个非None的K_t矩阵
+        if all(K is None for K in kalman_gains_history):
+            raise DataFormatError(
+                "kalman_gains_history中所有K_t矩阵均为None。\n"
+                "影响分解功能需要至少一个有效的卡尔曼增益矩阵。\n"
+                "请检查模型训练过程是否正确保存了卡尔曼增益。"
+            )
+
+        logger.info(f"提取卡尔曼增益历史: {len(kalman_gains_history)} 个时间步")
+
+        # 验证格式
+        first_non_none = next((k for k in kalman_gains_history if k is not None), None)
+        if first_non_none is not None:
+            logger.info(f"K_t矩阵形状: {first_non_none.shape}")
+
+        return kalman_gains_history
 
     def _extract_factor_loadings(self) -> np.ndarray:
         """提取因子载荷矩阵"""
@@ -333,31 +344,30 @@ class ModelLoader:
         if factor_loadings.empty:
             raise DataFormatError("因子载荷矩阵为空")
 
-        print(f"[ModelLoader] 提取因子载荷矩阵: {factor_loadings.shape}")
+        logger.info(f"提取因子载荷矩阵: {factor_loadings.shape}")
         return factor_loadings.values
 
     def _extract_target_factor_loading(self) -> np.ndarray:
         """提取目标变量的因子载荷向量"""
-        # 从元数据中提取
-        if 'target_factor_loading' in self._metadata:
-            target_loading = self._metadata['target_factor_loading']
-            if target_loading is not None and isinstance(target_loading, np.ndarray):
-                print(f"[ModelLoader] 提取目标变量因子载荷: 形状={target_loading.shape}")
-                return target_loading
+        if 'target_factor_loading' not in self._metadata:
+            raise DataFormatError(
+                "元数据中缺少target_factor_loading字段。\n"
+                "影响分解功能需要目标变量的因子载荷向量。\n"
+                "请使用新版本训练模块重新训练模型以支持此功能。"
+            )
 
-        # 从模型对象中提取
-        if self._model and hasattr(self._model, 'target_factor_loading'):
-            target_loading = self._model.target_factor_loading
-            if target_loading is not None and isinstance(target_loading, np.ndarray):
-                print(f"[ModelLoader] 从模型对象提取目标变量因子载荷: 形状={target_loading.shape}")
-                return target_loading
+        target_loading = self._metadata['target_factor_loading']
 
-        # 未找到目标变量因子载荷，抛出错误
-        raise DataFormatError(
-            "未找到目标变量因子载荷。\n"
-            "影响分解功能需要目标变量的因子载荷向量。\n"
-            "请使用新版本训练模块重新训练模型以支持此功能。"
-        )
+        if target_loading is None:
+            raise DataFormatError("target_factor_loading字段存在但值为None")
+
+        if not isinstance(target_loading, np.ndarray):
+            raise DataFormatError(
+                f"target_factor_loading格式无效，应为ndarray类型，实际为{type(target_loading)}"
+            )
+
+        logger.info(f"提取目标变量因子载荷: 形状={target_loading.shape}")
+        return target_loading
 
     def _extract_factor_series(self) -> pd.DataFrame:
         """提取因子时间序列"""
@@ -372,7 +382,7 @@ class ModelLoader:
         if factor_series.empty:
             raise DataFormatError("因子序列为空")
 
-        print(f"[ModelLoader] 提取因子序列: {factor_series.shape}")
+        logger.info(f"提取因子序列: {factor_series.shape}")
         return factor_series
 
     def _extract_target_variable(self) -> str:
@@ -385,7 +395,7 @@ class ModelLoader:
         if not isinstance(target_variable, str):
             raise DataFormatError("目标变量信息格式无效")
 
-        print(f"[ModelLoader] 提取目标变量: {target_variable}")
+        logger.info(f"提取目标变量: {target_variable}")
         return target_variable
 
     def _extract_model_parameters(self) -> Dict[str, Any]:
@@ -404,7 +414,7 @@ class ModelLoader:
         if 'best_params' in self._metadata:
             parameters.update(self._metadata['best_params'])
 
-        print(f"[ModelLoader] 提取模型参数: {len(parameters)} 个")
+        logger.info(f"提取模型参数: {len(parameters)} 个")
         return parameters
 
     def _extract_data_period(self) -> Tuple[str, str]:
@@ -447,7 +457,7 @@ class ModelLoader:
             if key in self._metadata:
                 convergence_info[key] = float(self._metadata[key])
 
-        print(f"[ModelLoader] 提取收敛信息: {len(convergence_info)} 项")
+        logger.info(f"提取收敛信息: {len(convergence_info)} 项")
         return convergence_info
 
     def _extract_prepared_data(self) -> pd.DataFrame:
@@ -470,8 +480,8 @@ class ModelLoader:
         if prepared_data.empty:
             raise DataFormatError("prepared_data为空")
 
-        print(f"[ModelLoader] 提取历史观测数据表: 形状={prepared_data.shape}, 列数={len(prepared_data.columns)}")
-        print(f"[ModelLoader] 数据时间范围: {prepared_data.index[0]} 到 {prepared_data.index[-1]}")
+        logger.info(f"提取历史观测数据表: 形状={prepared_data.shape}, 列数={len(prepared_data.columns)}")
+        logger.info(f"数据时间范围: {prepared_data.index[0]} 到 {prepared_data.index[-1]}")
 
         return prepared_data
 
@@ -494,7 +504,7 @@ class ModelLoader:
             raise DataFormatError("factor_loadings_df的索引为空，无法提取变量列表")
 
         variable_list = list(factor_loadings_df.index)
-        print(f"[ModelLoader] 从factor_loadings_df提取{len(variable_list)}个预测变量")
+        logger.info(f"从factor_loadings_df提取{len(variable_list)}个预测变量")
 
         # 构建变量名到索引的映射（索引对应K_t矩阵的列索引）
         variable_index_map = {var_name: idx for idx, var_name in enumerate(variable_list)}
@@ -503,9 +513,9 @@ class ModelLoader:
         # 注意：target_variable已在_extract_target_variable中验证存在
         target_variable = self._metadata['target_variable']
         if target_variable:
-            print(f"[ModelLoader] 目标变量: {target_variable} (不在预测变量映射中)")
+            logger.info(f"目标变量: {target_variable} (不在预测变量映射中)")
 
-        print(f"[ModelLoader] 提取变量映射: {len(variable_index_map)} 个预测变量")
+        logger.info(f"提取变量映射: {len(variable_index_map)} 个预测变量")
         return None, variable_index_map
 
     def _extract_industry_map(self) -> Optional[Dict[str, str]]:
@@ -516,22 +526,22 @@ class ModelLoader:
             变量名到行业的映射字典，如果不存在则返回None
         """
         if 'var_industry_map' not in self._metadata:
-            print("[ModelLoader] 提示: 元数据中缺少var_industry_map字段（可选）")
+            logger.debug("元数据中缺少var_industry_map字段（可选）")
             return None
 
         var_industry_map = self._metadata['var_industry_map']
 
         if not isinstance(var_industry_map, dict):
-            print("[ModelLoader] 警告: var_industry_map格式无效，应为字典类型")
+            logger.warning("var_industry_map格式无效，应为字典类型")
             return None
 
         if not var_industry_map:
-            print("[ModelLoader] 提示: var_industry_map为空字典")
+            logger.debug("var_industry_map为空字典")
             return {}
 
-        print(f"[ModelLoader] 提取行业分类映射: {len(var_industry_map)} 个变量")
+        logger.info(f"提取行业分类映射: {len(var_industry_map)} 个变量")
         sample_items = list(var_industry_map.items())[:3]
-        print(f"[ModelLoader] 示例映射: {sample_items}")
+        logger.debug(f"示例映射: {sample_items}")
 
         return var_industry_map
 
@@ -561,7 +571,7 @@ class ModelLoader:
                 f"factor_states_predicted格式无效，应为ndarray类型，实际为{type(data)}"
             )
 
-        print(f"[ModelLoader] 提取先验因子状态: 形状={data.shape}")
+        logger.info(f"提取先验因子状态: 形状={data.shape}")
         return data
 
     def _extract_target_standardization_params(self) -> Tuple[float, float]:
@@ -610,7 +620,7 @@ class ModelLoader:
                 "请检查训练数据是否存在问题。"
             )
 
-        print(f"[ModelLoader] 提取标准化参数: mean={target_mean:.4f}, std={target_std:.4f}")
+        logger.info(f"提取标准化参数: mean={target_mean:.4f}, std={target_std:.4f}")
         return float(target_mean), float(target_std)
 
     def _validate_extracted_data(self, nowcast_data: SavedNowcastData) -> None:
@@ -665,7 +675,7 @@ class ModelLoader:
                     f"K_t变量维度({first_non_none.shape[1]})与H变量维度({n_variables})不一致"
                 )
 
-            print(f"[ModelLoader] K_t维度验证: ({first_non_none.shape[0]}, {first_non_none.shape[1]}), "
+            logger.info(f"K_t维度验证: ({first_non_none.shape[0]}, {first_non_none.shape[1]}), "
                   f"将截取前{n_factors}行用于影响分析")
 
         # 验证factor_states_predicted维度（独立于K_t验证）
@@ -678,9 +688,9 @@ class ModelLoader:
             raise ValidationError(
                 f"factor_states_predicted因子数({fsp_shape[1]})与factor_loadings因子数({n_factors})不一致"
             )
-        print(f"[ModelLoader] factor_states_predicted维度验证: {fsp_shape}")
+        logger.info(f"factor_states_predicted维度验证: {fsp_shape}")
 
-        print("[ModelLoader] 数据完整性验证通过")
+        logger.info("数据完整性验证通过")
 
     def get_model_info(self) -> Dict[str, Any]:
         """

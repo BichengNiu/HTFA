@@ -26,52 +26,50 @@ class R2ExcelGenerator:
 
         Args:
             industry_r2: 整体R²数据(按行业)
-            factor_industry_r2: 因子对行业Pooled R²数据
+            factor_industry_r2: 因子对行业R²数据
         """
         self.industry_r2 = industry_r2
         self.factor_industry_r2 = factor_industry_r2
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def generate(self) -> Optional[bytes]:
+    def generate(self) -> bytes:
         """
         生成Excel文件
 
         Returns:
-            Excel文件的字节数据，失败时返回None
+            Excel文件的字节数据
+
+        Raises:
+            ValueError: 数据无效时抛出
         """
-        try:
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "R2_Analysis"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "R2_Analysis"
 
-            current_row = 1
+        current_row = 1
 
-            # 添加标题
-            self._add_title(ws, current_row)
-            current_row += 2
+        # 添加标题
+        self._add_title(ws, current_row)
+        current_row += 2
 
-            # 添加生成时间
-            ws.cell(row=current_row, column=1, value=f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-            current_row += 3
+        # 添加生成时间
+        ws.cell(row=current_row, column=1, value=f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        current_row += 3
 
-            # 第一个表：整体R²(按行业)
-            current_row = self._add_industry_r2_table(ws, current_row)
+        # 第一个表：整体R²(按行业)
+        current_row = self._add_industry_r2_table(ws, current_row)
 
-            # 第二个表：因子对行业Pooled R²
-            current_row = self._add_factor_industry_r2_table(ws, current_row)
+        # 第二个表：因子对行业R²
+        current_row = self._add_factor_industry_r2_table(ws, current_row)
 
-            # 调整列宽
-            self._adjust_column_widths(ws)
+        # 调整列宽
+        self._adjust_column_widths(ws)
 
-            # 保存到字节流
-            output = io.BytesIO()
-            wb.save(output)
-            output.seek(0)
-            return output.getvalue()
-
-        except Exception as e:
-            self.logger.error(f"生成R²Excel文件时发生错误: {e}")
-            return None
+        # 保存到字节流
+        output = io.BytesIO()
+        wb.save(output)
+        output.seek(0)
+        return output.getvalue()
 
     def _add_title(self, ws, row: int) -> None:
         """添加标题"""
@@ -84,14 +82,21 @@ class R2ExcelGenerator:
 
         Returns:
             下一个可用行号
+
+        Raises:
+            ValueError: industry_r2数据无效
         """
-        if self.industry_r2 is None or not isinstance(self.industry_r2, pd.Series) or self.industry_r2.empty:
-            return start_row
+        if self.industry_r2 is None:
+            raise ValueError("industry_r2数据为None，无法生成Excel")
+        if not isinstance(self.industry_r2, pd.Series):
+            raise ValueError(f"industry_r2应为pd.Series，实际为{type(self.industry_r2)}")
+        if self.industry_r2.empty:
+            raise ValueError("industry_r2数据为空")
 
         current_row = start_row
 
         # 表标题
-        ws.cell(row=current_row, column=1, value="整体 R² (按行业)")
+        ws.cell(row=current_row, column=1, value="因子整体 R² ")
         ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True, size=12)
         current_row += 2
 
@@ -124,7 +129,7 @@ class R2ExcelGenerator:
             "衡量所有因子共同解释该行业内所有变量整体变动的百分比。",
             "计算方式为对行业内各变量分别对所有因子进行OLS回归后，",
             "汇总各变量的总平方和(TSS)与残差平方和(RSS)，",
-            "计算 Pooled R² = 1 - (Sum(RSS) / Sum(TSS))。"
+            "计算 R² = 1 - (Sum(RSS) / Sum(TSS))。"
         ]
 
         for note in notes:
@@ -135,45 +140,46 @@ class R2ExcelGenerator:
 
     def _add_factor_industry_r2_table(self, ws, start_row: int) -> int:
         """
-        添加因子对行业Pooled R²表
+        添加因子对行业R²表
 
         Returns:
             下一个可用行号
+
+        Raises:
+            ValueError: factor_industry_r2数据无效
         """
-        if not self.factor_industry_r2 or not isinstance(self.factor_industry_r2, dict) or len(self.factor_industry_r2) == 0:
-            return start_row
+        if self.factor_industry_r2 is None:
+            raise ValueError("factor_industry_r2数据为None，无法生成Excel")
+        if not isinstance(self.factor_industry_r2, dict):
+            raise ValueError(f"factor_industry_r2应为dict，实际为{type(self.factor_industry_r2)}")
+        if len(self.factor_industry_r2) == 0:
+            raise ValueError("factor_industry_r2数据为空字典")
 
-        try:
-            factor_industry_df = pd.DataFrame(self.factor_industry_r2)
+        factor_industry_df = pd.DataFrame(self.factor_industry_r2)
+        current_row = start_row
 
-            current_row = start_row
+        # 表标题
+        ws.cell(row=current_row, column=1, value="因子对行业 R²")
+        ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True, size=12)
+        current_row += 2
 
-            # 表标题
-            ws.cell(row=current_row, column=1, value="因子对行业 Pooled R²")
-            ws.cell(row=current_row, column=1).font = ws.cell(row=current_row, column=1).font.copy(bold=True, size=12)
-            current_row += 2
+        # 表头
+        for col_idx, column in enumerate(['行业/因子'] + list(factor_industry_df.columns)):
+            ws.cell(row=current_row, column=col_idx + 1, value=column)
+            ws.cell(row=current_row, column=col_idx + 1).font = ws.cell(row=current_row, column=col_idx + 1).font.copy(bold=True)
+        current_row += 1
 
-            # 表头
-            for col_idx, column in enumerate(['行业/因子'] + list(factor_industry_df.columns)):
-                ws.cell(row=current_row, column=col_idx + 1, value=column)
-                ws.cell(row=current_row, column=col_idx + 1).font = ws.cell(row=current_row, column=col_idx + 1).font.copy(bold=True)
+        # 数据行
+        for index, row_data in factor_industry_df.iterrows():
+            ws.cell(row=current_row, column=1, value=str(index))
+            for col_idx, value in enumerate(row_data):
+                ws.cell(row=current_row, column=col_idx + 2, value=float(value) if pd.notna(value) else None)
             current_row += 1
 
-            # 数据行
-            for index, row_data in factor_industry_df.iterrows():
-                ws.cell(row=current_row, column=1, value=str(index))
-                for col_idx, value in enumerate(row_data):
-                    ws.cell(row=current_row, column=col_idx + 2, value=float(value) if pd.notna(value) else None)
-                current_row += 1
+        # 附注
+        current_row = self._add_factor_industry_r2_notes(ws, current_row)
 
-            # 附注
-            current_row = self._add_factor_industry_r2_notes(ws, current_row)
-
-            return current_row
-
-        except Exception as e:
-            self.logger.error(f"处理factor_industry_r2数据时出错: {e}")
-            return start_row
+        return current_row
 
     def _add_factor_industry_r2_notes(self, ws, start_row: int) -> int:
         """添加因子对行业R²附注"""
@@ -185,7 +191,7 @@ class R2ExcelGenerator:
         notes = [
             "衡量单个因子解释该行业内所有变量整体变动的百分比。",
             "计算方式为对行业内各变量分别对单个因子进行OLS回归后，",
-            "汇总TSS与RSS，计算 Pooled R² = 1 - (Sum(RSS) / Sum(TSS))。"
+            "汇总TSS与RSS，计算 R² = 1 - (Sum(RSS) / Sum(TSS))。"
         ]
 
         for note in notes:
@@ -201,25 +207,27 @@ class R2ExcelGenerator:
             max_length = 0
             column_letter = column[0].column_letter
             for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
+                if cell.value is not None:
+                    cell_length = len(str(cell.value))
+                    if cell_length > max_length:
+                        max_length = cell_length
             adjusted_width = min(max_length + 2, 50)
             ws.column_dimensions[column_letter].width = adjusted_width
 
 
-def generate_r2_excel(industry_r2: pd.Series, factor_industry_r2: dict) -> Optional[bytes]:
+def generate_r2_excel(industry_r2: pd.Series, factor_industry_r2: dict) -> bytes:
     """
     生成R²分析数据的Excel文件
 
     Args:
         industry_r2: 整体R²数据(按行业)
-        factor_industry_r2: 因子对行业Pooled R²数据
+        factor_industry_r2: 因子对行业R²数据
 
     Returns:
         bytes: Excel文件的字节数据
+
+    Raises:
+        ValueError: 数据无效时抛出
     """
     generator = R2ExcelGenerator(industry_r2, factor_industry_r2)
     return generator.generate()

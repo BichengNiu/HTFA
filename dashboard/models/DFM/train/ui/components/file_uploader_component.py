@@ -4,9 +4,12 @@
 处理预处理数据和行业映射文件的上传与加载
 """
 
+import streamlit as st
 import pandas as pd
 import unicodedata
 from typing import Tuple, Optional, Dict, Any
+
+from dashboard.models.DFM.train.ui.utils.text_helpers import normalize_variable_name
 
 
 class FileUploaderComponent:
@@ -93,8 +96,6 @@ class FileUploaderComponent:
         Args:
             st_instance: Streamlit实例（用于打印日志）
         """
-        import streamlit as st
-
         # 1. 变量选择相关状态（StateManager命名空间内）
         variable_selection_keys = [
             'dfm_selected_indicators',
@@ -257,7 +258,7 @@ class FileUploaderComponent:
 
             for idx, (k, v) in enumerate(zip(industry_map_df['指标名称'], industry_map_df['行业'])):
                 if pd.notna(k) and pd.notna(v) and str(k).strip() and str(v).strip():
-                    normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
+                    normalized_key = normalize_variable_name(k)
                     var_industry_map[normalized_key] = str(v).strip()
                 else:
                     filtered_count += 1
@@ -277,7 +278,7 @@ class FileUploaderComponent:
 
             if '预测变量' in industry_map_df.columns:
                 dfm_default_vars = {
-                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                    normalize_variable_name(k): str(v).strip()
                     for k, v in zip(industry_map_df['指标名称'], industry_map_df['预测变量'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
@@ -285,7 +286,7 @@ class FileUploaderComponent:
 
             if '目标变量' in industry_map_df.columns:
                 target_map = {
-                    unicodedata.normalize('NFKC', str(k)).strip().lower(): str(v).strip()
+                    normalize_variable_name(k): str(v).strip()
                     for k, v in zip(industry_map_df['指标名称'], industry_map_df['目标变量'])
                     if pd.notna(k) and pd.notna(v) and str(v).strip() == '是'
                 }
@@ -339,7 +340,7 @@ class FileUploaderComponent:
             invalid_frequencies = []
             for k, v in zip(industry_map_df['指标名称'], industry_map_df['频率']):
                 if pd.notna(k) and pd.notna(v) and str(v).strip():
-                    normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
+                    normalized_key = normalize_variable_name(k)
                     freq_raw = str(v).strip()
 
                     # 转换频率标签
@@ -369,7 +370,7 @@ class FileUploaderComponent:
             var_unit_map = {}
             for k, v in zip(industry_map_df['指标名称'], industry_map_df['单位']):
                 if pd.notna(k) and pd.notna(v) and str(v).strip():
-                    normalized_key = unicodedata.normalize('NFKC', str(k)).strip().lower()
+                    normalized_key = normalize_variable_name(k)
                     var_unit_map[normalized_key] = str(v).strip()
 
             if len(var_unit_map) == 0:

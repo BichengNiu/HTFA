@@ -9,8 +9,9 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
-import unicodedata
 
+from .helpers import normalize_variable_name
+from .constants import DEFAULT_INDUSTRY
 from ..core.news_impact_calculator import NewsContribution
 
 
@@ -30,39 +31,7 @@ class IndustryAggregator:
             var_industry_map: 变量名到行业的映射字典
         """
         self.var_industry_map = var_industry_map or {}
-        self.default_industry = "Other"  # 默认行业类别
-
-    @staticmethod
-    def _normalize_variable_name(variable_name: str) -> str:
-        """
-        标准化变量名以匹配var_industry_map中的键
-
-        采用与数据准备模块相同的标准化策略：
-        - Unicode NFKC规范化
-        - 去除首尾空格
-        - 英文字母转小写
-
-        Args:
-            variable_name: 原始变量名
-
-        Returns:
-            标准化后的变量名
-        """
-        if pd.isna(variable_name) or variable_name == '':
-            return ''
-
-        # NFKC规范化
-        text = str(variable_name)
-        text = unicodedata.normalize('NFKC', text)
-
-        # 去除前后空格
-        text = text.strip()
-
-        # 英文字母转小写
-        if any(ord(char) < 128 for char in text):
-            text = text.lower()
-
-        return text
+        self.default_industry = DEFAULT_INDUSTRY
 
     def aggregate_by_industry(
         self,
@@ -104,7 +73,7 @@ class IndustryAggregator:
 
         # 按行业累加统计
         for contrib in contributions:
-            industry = self._get_industry(contrib.variable_name)
+            industry = self.get_industry(contrib.variable_name)
 
             industry_stats[industry]['impact'] += contrib.impact_value
             industry_stats[industry]['count'] += 1
@@ -145,7 +114,7 @@ class IndustryAggregator:
         time_industry_impact = defaultdict(lambda: defaultdict(float))
 
         for contrib in contributions:
-            industry = self._get_industry(contrib.variable_name)
+            industry = self.get_industry(contrib.variable_name)
             timestamp = contrib.release_date
             time_industry_impact[timestamp][industry] += contrib.impact_value
 
@@ -236,7 +205,7 @@ class IndustryAggregator:
         # 获取所有行业
         all_industries = set()
         for contrib in contributions:
-            industry = self._get_industry(contrib.variable_name)
+            industry = self.get_industry(contrib.variable_name)
             all_industries.add(industry)
 
         industries = sorted(list(all_industries))
@@ -253,7 +222,7 @@ class IndustryAggregator:
             industry_impact_at_date = defaultdict(lambda: {'pos': 0.0, 'neg': 0.0})
 
             for contrib in contribs_at_date:
-                industry = self._get_industry(contrib.variable_name)
+                industry = self.get_industry(contrib.variable_name)
                 if contrib.impact_value > 0:
                     industry_impact_at_date[industry]['pos'] += contrib.impact_value
                 elif contrib.impact_value < 0:
@@ -321,21 +290,8 @@ class IndustryAggregator:
         Returns:
             行业名称
         """
-        # 标准化变量名以匹配var_industry_map中的键
-        normalized_name = self._normalize_variable_name(variable_name)
+        normalized_name = normalize_variable_name(variable_name)
         return self.var_industry_map.get(normalized_name, self.default_industry)
-
-    def _get_industry(self, variable_name: str) -> str:
-        """
-        获取变量所属行业（内部方法，保持向后兼容）
-
-        Args:
-            variable_name: 变量名
-
-        Returns:
-            行业名称
-        """
-        return self.get_industry(variable_name)
 
     def get_summary_statistics(
         self,

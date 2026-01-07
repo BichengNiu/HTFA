@@ -18,6 +18,7 @@ from .exceptions import (
     ValidationError,
     ComputationError
 )
+from .logging_config import get_logger
 
 __all__ = [
     # 验证器
@@ -31,5 +32,7 @@ __all__ = [
     'DecompError',
     'ModelLoadError',
     'ValidationError',
-    'ComputationError'
+    'ComputationError',
+    # 日志
+    'get_logger'
 ]

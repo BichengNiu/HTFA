@@ -630,26 +630,6 @@ class TrainingStatusComponent(DFMComponent):
 
         return "\n".join(log_entries)
 
-    def _estimate_training_time(self, data_size: int, num_variables: int) -> float:
-        """
-        估算训练时间
-
-        Args:
-            data_size: 数据大小
-            num_variables: 变量数量
-
-        Returns:
-            估算的训练时间（秒）
-        """
-        # 简单的时间估算公式
-        base_time = 30  # 基础时间30秒
-        data_factor = data_size / 1000 * 0.1  # 每1000行数据增加0.1秒
-        variable_factor = num_variables * 2  # 每个变量增加2秒
-
-        estimated_time = base_time + data_factor + variable_factor
-
-        return max(estimated_time, 10)  # 最少10秒
-
     def _set_state(self, key: str, value: Any, max_retries: int = 3) -> None:
         """设置状态值（带重试机制）"""
         import time
@@ -657,14 +637,13 @@ class TrainingStatusComponent(DFMComponent):
 
         for attempt in range(max_retries):
             try:
-                # 直接使用st.session_state
                 full_key = f'train_model.{key}'
                 st.session_state[full_key] = value
-                return  # 成功则退出
+                return
             except Exception as e:
-                # 如果不是最后一次尝试，等待后重试
                 if attempt < max_retries - 1:
-                    time.sleep(0.1 * (attempt + 1))  # 递增延迟
+                    time.sleep(0.1 * (attempt + 1))
                     continue
                 else:
                     logger.error(f"设置状态失败: {key}, 错误: {e}")
+                    raise RuntimeError(f"设置状态失败: {key}") from e

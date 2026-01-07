@@ -22,6 +22,7 @@ from .visualization.waterfall_plotter import ImpactWaterfallPlotter
 from .utils.industry_aggregator import IndustryAggregator
 from .utils.data_flow_formatter import DataFlowFormatter
 from .utils.exceptions import DecompError, ModelLoadError, ComputationError, ValidationError
+from .utils.constants import NORMALIZATION_ZERO_THRESHOLD
 
 
 def _get_month_date_range(target_date: pd.Timestamp) -> Tuple[pd.Timestamp, pd.Timestamp]:
@@ -177,7 +178,7 @@ def execute_news_analysis(
               f"scale_factor={analysis_results['summary'].get('normalization_scale_factor')}")
         return result
 
-    except Exception as e:
+    except (DecompError, ModelLoadError, ComputationError, ValidationError) as e:
         error_msg = f"影响分解执行失败: {str(e)}"
         print(f"[API] ERROR: {error_msg}")
         print(f"[API] 详细错误: {traceback.format_exc()}")
@@ -235,14 +236,14 @@ def _normalize_impacts_to_actual_change(
     raw_total_impact = sum(c.impact_value for c in contributions)
 
     # 计算归一化因子
-    if abs(raw_total_impact) < 1e-10:
+    if abs(raw_total_impact) < NORMALIZATION_ZERO_THRESHOLD:
         raise ComputationError(
             f"原始累加影响接近0（{raw_total_impact:.2e}），无法计算有意义的归一化因子。"
             "这表明影响计算可能存在问题，请检查数据发布和卡尔曼增益。"
         )
 
     # 特殊情况：Nowcast无变化
-    if abs(actual_change) < 1e-10:
+    if abs(actual_change) < NORMALIZATION_ZERO_THRESHOLD:
         raise ComputationError(
             f"目标月份Nowcast无变化（first={first_nowcast:.4f}, last={last_nowcast:.4f}），"
             f"但原始影响累加为{raw_total_impact:.4f}。这是异常情况，请检查数据完整性。"

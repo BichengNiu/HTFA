@@ -3,14 +3,17 @@
 观测变量先验预测器
 
 计算卡尔曼滤波的先验预测值：y_t|t-1 = H × f_t|t-1
-用于新闻分解中计算正确的expected_value。
+用于新闻分解中���算正确的expected_value。
 """
 
 import numpy as np
 import pandas as pd
+import logging
 from typing import Dict
 
-from ..utils.exceptions import ComputationError
+from ..utils.exceptions import ComputationError, ValidationError
+
+logger = logging.getLogger(__name__)
 
 
 class ObservationPriorPredictor:
@@ -42,7 +45,38 @@ class ObservationPriorPredictor:
             factor_loadings: 因子载荷矩阵 (n_variables, n_factors)
             variable_index_map: 变量名到索引的映射
             time_index: 时间索引
+
+        Raises:
+            ValidationError: 输入数据形状不匹配时抛出
         """
+        # 验证factor_states_predicted形状
+        if factor_states_predicted.ndim != 2:
+            raise ValidationError(
+                f"factor_states_predicted必须是2维数组，"
+                f"实际维度: {factor_states_predicted.ndim}"
+            )
+
+        # 验证factor_loadings形状
+        if factor_loadings.ndim != 2:
+            raise ValidationError(
+                f"factor_loadings必须是2维数组，"
+                f"实际维度: {factor_loadings.ndim}"
+            )
+
+        # 验证因子数一致性
+        if factor_states_predicted.shape[1] != factor_loadings.shape[1]:
+            raise ValidationError(
+                f"因子数不匹配: factor_states_predicted有{factor_states_predicted.shape[1]}个因子，"
+                f"factor_loadings有{factor_loadings.shape[1]}个因子"
+            )
+
+        # 验证时间索引长度
+        if len(time_index) != factor_states_predicted.shape[0]:
+            raise ValidationError(
+                f"时间索引长度({len(time_index)})与"
+                f"factor_states_predicted行数({factor_states_predicted.shape[0]})不匹配"
+            )
+
         self.H = factor_loadings                    # (n_variables, n_factors)
         self.f_pred = factor_states_predicted       # (n_time, n_factors)
         self.var_map = variable_index_map
@@ -52,12 +86,12 @@ class ObservationPriorPredictor:
         # H @ f_pred.T = (n_variables, n_factors) @ (n_factors, n_time) = (n_variables, n_time)
         self.predictions = self.H @ self.f_pred.T
 
-        print(f"[PriorPredictor] 初始化完成:")
-        print(f"  - H矩阵形状: {self.H.shape}")
-        print(f"  - 先验因子状态形状: {self.f_pred.shape}")
-        print(f"  - 预测矩阵形状: {self.predictions.shape}")
-        print(f"  - 变量数: {len(self.var_map)}")
-        print(f"  - 时间点数: {len(self.time_index)}")
+        logger.info("初始化完成:")
+        logger.info(f"  - H矩阵形状: {self.H.shape}")
+        logger.info(f"  - 先验因子状态形状: {self.f_pred.shape}")
+        logger.info(f"  - 预测矩阵形状: {self.predictions.shape}")
+        logger.info(f"  - 变量数: {len(self.var_map)}")
+        logger.info(f"  - 时间点数: {len(self.time_index)}")
 
     def get_prior_prediction(self, var_name: str, timestamp: pd.Timestamp) -> float:
         """

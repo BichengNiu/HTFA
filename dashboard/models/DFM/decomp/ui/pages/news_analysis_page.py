@@ -54,7 +54,6 @@ def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
 
         # 文件上传区域
         st_module.markdown("### 模型文件上传")
-        st_module.info("请上传模型训练模块导出的模型文件和元数据文件")
 
         col_model, col_metadata = st_module.columns(2)
 

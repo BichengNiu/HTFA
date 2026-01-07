@@ -8,11 +8,15 @@
 
 import numpy as np
 import pandas as pd
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 
 from ..utils.exceptions import ComputationError, ValidationError
+from ..utils.constants import CONFIDENCE_INTERVAL_Z_SCORE, DEFAULT_MEASUREMENT_ERROR
 from .nowcast_extractor import NowcastExtractor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -72,13 +76,12 @@ class ImpactAnalyzer:
             nowcast_extractor: Nowcast提取器实例
         """
         self.extractor = nowcast_extractor
-        self._impact_cache: Optional[Dict[str, ImpactResult]] = None
 
         # 验证数据完整性
         if self.extractor.data.kalman_gains_history is None:
-            print("[ImpactAnalyzer] 警告: 卡尔曼增益历史不可用，影响分析功能受限")
+            logger.warning("卡尔曼增益历史不可用，影响分析功能受限")
         if self.extractor.data.variable_index_map is None:
-            print("[ImpactAnalyzer] 警告: 变量索引映射不可用，可能无法正确识别变量")
+            logger.warning("变量索引映射不可用，可能无法正确识别变量")
 
     def calculate_single_release_impact(self, release: DataRelease) -> ImpactResult:
         """
@@ -99,9 +102,9 @@ class ImpactAnalyzer:
         """
         try:
             # 调试日志：输入参数
-            print(f"[ImpactAnalyzer] === {release.variable_name} @ {release.timestamp} ===")
-            print(f"[ImpactAnalyzer] observed={release.observed_value:.4f}, expected={release.expected_value:.4f}")
-            print(f"[ImpactAnalyzer] innovation={release.observed_value - release.expected_value:.4f}")
+            logger.debug(f"=== {release.variable_name} @ {release.timestamp} ===")
+            logger.debug(f"observed={release.observed_value:.4f}, expected={release.expected_value:.4f}")
+            logger.debug(f"innovation={release.observed_value - release.expected_value:.4f}")
 
             # 检查数据完整性
             if self.extractor.data.kalman_gains_history is None:
@@ -141,11 +144,12 @@ class ImpactAnalyzer:
             effective_kalman_weight = np.linalg.norm(K_col)  # 向量的范数
 
             # 调试日志：计算结果
-            print(f"[ImpactAnalyzer] 影响计算: standardized={impact_standardized:.4f}, "
+            logger.debug(f"影响计算: standardized={impact_standardized:.4f}, "
                   f"std={target_std:.4f}, original={impact_on_target:.4f}")
 
-            # 9. 计算贡献百分比（相对于标准化的基准）
-            contribution_percentage = self._calculate_contribution_percentage(impact_on_target)
+            # 9. 贡献百分比在NewsImpactCalculator中基于总影响计算
+            # 此处设为0.0作为占位符
+            contribution_percentage = 0.0
 
             # 10. 计算置信区间
             confidence_interval = self._calculate_confidence_interval(
@@ -179,7 +183,7 @@ class ImpactAnalyzer:
                 calculation_details=calculation_details
             )
 
-            print(f"[ImpactAnalyzer] 单次影响计算: {release.variable_name} = {impact_on_target:.4f} "
+            logger.debug(f"单次影响计算: {release.variable_name} = {impact_on_target:.4f} "
                   f"(innovation={innovation:.4f}, ||K||={effective_kalman_weight:.4f})")
             return result
 
@@ -266,7 +270,7 @@ class ImpactAnalyzer:
                 negative_impact_sum=negative_impact_sum
             )
 
-            print(f"[ImpactAnalyzer] 时序影响分析完成: 总影响 = {cumulative_impact:.4f}")
+            logger.info(f"时序影响分析完成: 总影响 = {cumulative_impact:.4f}")
             return result
 
         except Exception as e:
@@ -343,83 +347,12 @@ class ImpactAnalyzer:
                 'impact_count': len(sequential_result.individual_impacts)
             }
 
-            print(f"[ImpactAnalyzer] 影响分解完成: {len(variable_summary)} 个变量")
+            logger.info(f"影响分解完成: {len(variable_summary)} 个变量")
             return decomposition_result
 
         except Exception as e:
             raise ComputationError(f"影响分解失败: {str(e)}", "impact_decomposition")
 
-    def simulate_counterfactual(
-        self,
-        releases: List[DataRelease],
-        excluded_releases: List[str],
-        target_date: pd.Timestamp
-    ) -> Dict[str, Any]:
-        """
-        反事实分析：模拟排除某些数据发布后的影响差异
-
-        Args:
-            releases: 完整的数据发布列表
-            excluded_releases: 要排除的变量名列表
-            target_date: 目标日期
-
-        Returns:
-            反事实分析结果
-
-        Raises:
-            ComputationError: 模拟失败时抛出
-        """
-        try:
-            # 过滤掉排除的数据发布
-            filtered_releases = [
-                release for release in releases
-                if release.variable_name not in excluded_releases
-            ]
-
-            # 计算完整影响
-            full_result = self.analyze_sequential_impacts(releases, target_date)
-
-            # 计算过滤后的影响
-            filtered_result = self.analyze_sequential_impacts(filtered_releases, target_date)
-
-            # 计算差异
-            impact_difference = full_result.total_impact - filtered_result.total_impact
-
-            # 分析排除变量的影响
-            excluded_impacts = {}
-            for var_name in excluded_releases:
-                var_impacts = [
-                    imp for imp in full_result.individual_impacts
-                    if imp.release.variable_name == var_name
-                ]
-                if var_impacts:
-                    excluded_impacts[var_name] = {
-                        'total_impact': sum(imp.impact_on_target for imp in var_impacts),
-                        'release_count': len(var_impacts),
-                        'impacts': var_impacts
-                    }
-
-            counterfactual_result = {
-                'target_date': target_date,
-                'excluded_variables': excluded_releases,
-                'full_impact': full_result.total_impact,
-                'filtered_impact': filtered_result.total_impact,
-                'impact_difference': impact_difference,
-                'baseline_value': full_result.baseline_value,
-                'full_final_value': full_result.final_value,
-                'filtered_final_value': filtered_result.final_value,
-                'excluded_impacts': excluded_impacts,
-                'difference_percentage': (
-                    abs(impact_difference) / abs(full_result.total_impact) * 100
-                    if full_result.total_impact != 0 else 0
-                )
-            }
-
-            print(f"[ImpactAnalyzer] 反事实分析完成: 影响差异 = {impact_difference:.4f}")
-            return counterfactual_result
-
-        except Exception as e:
-            raise ComputationError(f"反事实分析失败: {str(e)}", "counterfactual_analysis")
 
     def _get_target_variable_loading(self) -> np.ndarray:
         """
@@ -479,7 +412,7 @@ class ImpactAnalyzer:
             for idx in range(closest_date_index - 1, -1, -1):
                 if self.extractor.data.kalman_gains_history[idx] is not None:
                     K_t = self.extractor.data.kalman_gains_history[idx]
-                    print(f"[ImpactAnalyzer] 使用时刻 {idx} 的卡尔曼增益（最接近 {timestamp}）")
+                    logger.debug(f"使用时刻 {idx} 的卡尔曼增益（最接近 {timestamp}）")
                     break
 
         if K_t is None:
@@ -500,7 +433,7 @@ class ImpactAnalyzer:
             # 只取前n_factors行
             original_rows = K_t.shape[0]
             K_t = K_t[:n_factors, :]
-            print(f"[ImpactAnalyzer] K_t从({original_rows}, {K_t.shape[1]})截取为({n_factors}, {K_t.shape[1]})")
+            logger.debug(f"K_t从({original_rows}, {K_t.shape[1]})截取为({n_factors}, {K_t.shape[1]})")
 
         return K_t
 
@@ -535,13 +468,6 @@ class ImpactAnalyzer:
 
         return self.extractor.data.variable_index_map[variable_name]
 
-    def _calculate_contribution_percentage(self, impact: float) -> float:
-        """计算贡献百分比"""
-        # 简化的贡献度计算
-        # 实际应用中应该基于基准预测的标准化
-        baseline_std = 1.0  # 简化假设
-        return (abs(impact) / baseline_std * 100) if baseline_std != 0 else 0
-
     def _calculate_confidence_interval(
         self,
         impact: float,
@@ -551,10 +477,10 @@ class ImpactAnalyzer:
         # 简化的置信区间计算
         # 实际应用中应该基于完整的协方差矩阵
         if measurement_error is None:
-            measurement_error = 0.1  # 默认测量误差
+            measurement_error = DEFAULT_MEASUREMENT_ERROR
 
         standard_error = measurement_error * abs(impact) if impact != 0 else measurement_error
-        margin = 1.96 * standard_error  # 95% 置信区间
+        margin = CONFIDENCE_INTERVAL_Z_SCORE * standard_error  # 95% 置信区间
 
         return (impact - margin, impact + margin)
 
@@ -608,7 +534,6 @@ class ImpactAnalyzer:
             'kalman_gains_timesteps': len(data.kalman_gains_history) if data.kalman_gains_history else 0,
             'kalman_gains_shape': kt_shape,
             'variable_mapping_count': len(data.variable_index_map) if data.variable_index_map else 0,
-            'cached_impacts_count': len(self._impact_cache) if self._impact_cache else 0,
         }
 
         if kt_shape is not None:

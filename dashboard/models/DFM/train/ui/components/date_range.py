@@ -176,11 +176,7 @@ class DateRangeComponent(DFMComponent):
                 validation_start_date = data_start_date + timedelta(days=training_days)
                 validation_end_date = data_end_date
             else:
-                # 如果无法获取数据日期，使用固定默认值
-                from datetime import date
-                training_start_date = date(2020, 1, 1)
-                validation_start_date = date(2023, 1, 1)
-                validation_end_date = date(2023, 12, 31)
+                raise ValueError("无法获取数据日期范围，请确保训练数据包含有效的日期索引")
 
             return {
                 'training_start_date': training_start_date,
@@ -192,15 +188,7 @@ class DateRangeComponent(DFMComponent):
 
         except Exception as e:
             logger.error(f"计算默认日期失败: {e}")
-            # 返回固定默认值
-            from datetime import date
-            return {
-                'training_start_date': date(2020, 1, 1),
-                'validation_start_date': date(2023, 1, 1),
-                'validation_end_date': date(2023, 12, 31),
-                'data_start_date': None,
-                'data_end_date': None
-            }
+            raise ValueError(f"计算默认日期失败: {e}") from e
 
     def _update_date_states_from_data(self, training_data: pd.DataFrame,
                                            date_defaults: Dict[str, Any]):
@@ -282,79 +270,6 @@ class DateRangeComponent(DFMComponent):
             logger.error(f"渲染日期输入控件失败: {e}")
             return {}
 
-    def _calculate_default_dates(self, training_data: pd.DataFrame,
-                               data_prep_dates: Dict[str, date]) -> Dict[str, date]:
-        """
-        计算默认日期
-        
-        Args:
-            training_data: 训练数据
-            data_prep_dates: 数据准备页面的日期设置
-            
-        Returns:
-            默认日期字典
-        """
-        try:
-            today = datetime.now().date()
-            
-            # 获取数据的时间范围
-            data_start = training_data.index.min().date()
-            data_end = training_data.index.max().date()
-            
-            # 优先使用数据准备页面设置的边界
-            prep_start = data_prep_dates.get('data_start_date')
-            prep_end = data_prep_dates.get('data_end_date')
-            
-            # 计算训练开始日期
-            if prep_start:
-                training_start = prep_start
-            else:
-                # 使用数据开始日期，但不早于合理的历史范围
-                reasonable_start = datetime(2020, 1, 1).date()
-                training_start = max(data_start, reasonable_start)
-            
-            # 计算验证期日期
-            if prep_start and prep_end:
-                # 基于数据准备边界计算：80%用于训练，20%用于验证
-                total_days = (prep_end - prep_start).days
-                training_days = int(total_days * 0.8)
-                validation_start = prep_start + timedelta(days=training_days)
-                validation_end = prep_end
-            else:
-                # 基于实际数据计算
-                total_days = (data_end - data_start).days
-                training_days = int(total_days * 0.8)
-                validation_start = data_start + timedelta(days=training_days)
-                validation_end = data_end
-            
-            # 确保验证期不包含未来日期
-            if validation_start > today:
-                validation_start = today - timedelta(days=90)  # 3个月前
-            
-            if validation_end > today:
-                validation_end = datetime(2024, 12, 31).date()  # 强制使用2024年底
-            
-            # 验证日期逻辑的合理性
-            if validation_start >= validation_end:
-                validation_end = datetime(2024, 12, 31).date()
-                validation_start = validation_end - timedelta(days=90)  # 验证期3个月
-            
-            return {
-                'training_start': training_start,
-                'validation_start': validation_start,
-                'validation_end': validation_end
-            }
-            
-        except Exception as e:
-            logger.error(f"计算默认日期失败: {e}")
-            # 返回静态默认值
-            today = datetime.now().date()
-            return {
-                'training_start': datetime(today.year - self._default_training_years, 1, 1).date(),
-                'validation_start': datetime(2024, 7, 1).date(),
-                'validation_end': datetime(2024, 12, 31).date()
-            }
-    
     def _auto_correct_dates(self, dates: Dict[str, date]) -> Dict[str, date]:
         """
         自动修正日期设置

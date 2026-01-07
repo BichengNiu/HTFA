@@ -7,17 +7,58 @@
 
 import numpy as np
 import pandas as pd
+import unicodedata
 from typing import Union, Tuple, Optional, List, Any
 from scipy import linalg
 from scipy.stats import zscore
 import warnings
+import logging
 
 from .exceptions import ComputationError
+
+logger = logging.getLogger(__name__)
+from .constants import (
+    NUMERICAL_EPSILON,
+    DIVISION_EPSILON,
+    ZSCORE_OUTLIER_THRESHOLD
+)
+
+
+def normalize_variable_name(variable_name: str) -> str:
+    """
+    标准化变量名以匹配var_industry_map中的键
+
+    采用与数据准备模块相同的标准化策略：
+    - Unicode NFKC规范化
+    - 去除首尾空格
+    - 英文字母转小写
+
+    Args:
+        variable_name: 原始变量名
+
+    Returns:
+        标准化后的变量名
+    """
+    if pd.isna(variable_name) or variable_name == '':
+        return ''
+
+    # NFKC规范化
+    text = str(variable_name)
+    text = unicodedata.normalize('NFKC', text)
+
+    # 去除前后空格
+    text = text.strip()
+
+    # 英文字母转小写
+    if any(ord(char) < 128 for char in text):
+        text = text.lower()
+
+    return text
 
 
 def ensure_numerical_stability(
     matrix: np.ndarray,
-    epsilon: float = 1e-10,
+    epsilon: float = NUMERICAL_EPSILON,
     method: str = "regularize"
 ) -> np.ndarray:
     """
@@ -55,12 +96,13 @@ def ensure_numerical_stability(
             if matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1]:
                 try:
                     stabilized = nearest_positive_definite(matrix)
-                except:
-                    # 方阵情况下可以安全使用eye
+                except (np.linalg.LinAlgError, ValueError) as e:
+                    # 方阵情况下可以安全使用eye正则化
+                    logger.warning(f"Cholesky正定化失败，使用正则化: {e}")
                     stabilized = matrix + epsilon * np.eye(matrix.shape[0])
             else:
                 # 非方阵不进行cholesky分解，直接返回原矩阵
-                print(f"[Warning] 矩阵形状 {matrix.shape} 不适用于Cholesky分解，跳过正定化")
+                logger.warning(f"矩阵形状 {matrix.shape} 不适用于Cholesky分解，跳过正定化")
                 stabilized = matrix
         else:
             stabilized = matrix
@@ -92,7 +134,7 @@ def safe_matrix_division(
             warnings.simplefilter("ignore")
 
             if isinstance(denominator, (int, float)):
-                if abs(denominator) < 1e-15:
+                if abs(denominator) < DIVISION_EPSILON:
                     return default_value if isinstance(numerator, (int, float)) else np.full_like(numerator, default_value)
                 return numerator / denominator
 
@@ -101,7 +143,7 @@ def safe_matrix_division(
                 result = np.full_like(numerator, default_value, dtype=float)
 
                 # 找到非零元素
-                non_zero_mask = np.abs(denominator) > 1e-15
+                non_zero_mask = np.abs(denominator) > DIVISION_EPSILON
 
                 # 只对非零元素进行除法
                 if np.any(non_zero_mask):
@@ -164,16 +206,16 @@ def align_time_series(
             if fill_method is not None:
                 if isinstance(aligned, pd.Series):
                     if fill_method == "ffill":
-                        aligned = aligned.fillna(method='ffill')
+                        aligned = aligned.ffill()
                     elif fill_method == "bfill":
-                        aligned = aligned.fillna(method='bfill')
+                        aligned = aligned.bfill()
                     elif fill_method == "interpolate":
                         aligned = aligned.interpolate()
                 elif isinstance(aligned, pd.DataFrame):
                     if fill_method == "ffill":
-                        aligned = aligned.fillna(method='ffill')
+                        aligned = aligned.ffill()
                     elif fill_method == "bfill":
-                        aligned = aligned.fillna(method='bfill')
+                        aligned = aligned.bfill()
                     elif fill_method == "interpolate":
                         aligned = aligned.interpolate()
 
@@ -219,7 +261,7 @@ def nearest_positive_definite(matrix: np.ndarray) -> np.ndarray:
 def detect_outliers(
     data: Union[pd.Series, np.ndarray],
     method: str = "zscore",
-    threshold: float = 3.0
+    threshold: float = ZSCORE_OUTLIER_THRESHOLD
 ) -> np.ndarray:
     """
     检测异常值

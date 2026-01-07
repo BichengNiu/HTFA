@@ -4,10 +4,33 @@ import pickle
 import io
 import logging
 import numpy as np
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+import math
 from scipy.cluster import hierarchy as sch
 
 logger = logging.getLogger(__name__)
+
+# Module constants
+ZERO_NORM_THRESHOLD = 1e-10  # Threshold for avoiding division by zero in normalization
+
+
+def _safe_format(val, fmt=".2f"):
+    """
+    安全格式化数值，处理None/inf/NaN情况
+
+    Args:
+        val: 待格式化的值
+        fmt: 格式字符串
+
+    Returns:
+        str: 格式化后的字符串
+    """
+    if val is None or not isinstance(val, (int, float)):
+        return "N/A"
+    if math.isinf(val):
+        return "+inf" if val > 0 else "-inf"
+    if math.isnan(val):
+        return "NaN"
+    return f"{val:{fmt}}"
 
 
 def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
@@ -42,21 +65,13 @@ def load_dfm_results_from_uploads(loaded_model_object, loaded_metadata_object):
     # 添加调试日志：输出元数据中实际包含的键
     logger.info(f"元数据中包含的指标相关键: {[k for k in metadata.keys() if any(x in k for x in ['rmse', 'mae', 'win_rate'])]}")
 
-    if has_standard_metrics:
-        logger.info("发现训练模块计算的标准指标，直接使用...")
-        logger.info(f"已加载标准指标: IS胜率={metadata['is_win_rate']:.2f}%, OOS胜率={metadata['oos_win_rate']:.2f}%")
-        logger.info(f"                 IS_RMSE={metadata['is_rmse']:.4f}, OOS_RMSE={metadata['oos_rmse']:.4f}")
-        logger.info(f"                 IS_MAE={metadata['is_mae']:.4f}, OOS_MAE={metadata['oos_mae']:.4f}")
-    else:
-        error_msg = "元数据中缺少必要的性能指标，请使用最新版本的训练模块重新训练模型"
-        logger.error(error_msg)
-        load_errors.append(error_msg)
+    if not has_standard_metrics:
+        raise ValueError("元数据中缺少必要的性能指标，请使用最新版本的训练模块重新训练模型")
 
-    # 检查模型对象是否有效
-    if model is None:
-        error_msg = "模型对象为空，请上传有效的模型文件"
-        logger.error(error_msg)
-        load_errors.append(error_msg)
+    logger.info("发现训练模块计算的标准指标，直接使用...")
+    logger.info(f"已加载标准指标: IS胜率={_safe_format(metadata['is_win_rate'])}%, OOS胜率={_safe_format(metadata['oos_win_rate'])}%")
+    logger.info(f"                 IS_RMSE={_safe_format(metadata['is_rmse'], '.4f')}, OOS_RMSE={_safe_format(metadata['oos_rmse'], '.4f')}")
+    logger.info(f"                 IS_MAE={_safe_format(metadata['is_mae'], '.4f')}, OOS_MAE={_safe_format(metadata['oos_mae'], '.4f')}")
 
     return model, metadata, load_errors
 
@@ -76,9 +91,13 @@ def perform_loadings_clustering(loadings_df: pd.DataFrame, cluster_vars: bool = 
             - variable_order: 聚类后的变量顺序列表
             - clustering_success: 聚类是否成功的布尔值
     """
-    if not isinstance(loadings_df, pd.DataFrame) or loadings_df.empty:
-        logger.warning("无法进行聚类：提供的载荷数据无效。")
-        return loadings_df, loadings_df.index.tolist() if not loadings_df.empty else [], False
+    if not isinstance(loadings_df, pd.DataFrame):
+        logger.warning("无法进行聚类：提供的载荷数据无效（非DataFrame类型）。")
+        return loadings_df, [], False
+
+    if loadings_df.empty:
+        logger.warning("无法进行聚类：提供的载荷数据为空。")
+        return loadings_df, loadings_df.index.tolist(), False
 
     data_for_clustering = loadings_df.copy()  # 变量是行
 
@@ -86,8 +105,8 @@ def perform_loadings_clustering(loadings_df: pd.DataFrame, cluster_vars: bool = 
     if normalize:
         logger.info("对因子载荷进行行标准化（单位长度）...")
         norms = np.linalg.norm(data_for_clustering.values, axis=1, keepdims=True)
-        # 避免除零
-        norms = np.where(norms > 1e-10, norms, 1.0)
+        # 避免除零 - 使用模块常量
+        norms = np.where(norms > ZERO_NORM_THRESHOLD, norms, 1.0)
         data_for_clustering = pd.DataFrame(
             data_for_clustering.values / norms,
             index=data_for_clustering.index,
@@ -104,18 +123,13 @@ def perform_loadings_clustering(loadings_df: pd.DataFrame, cluster_vars: bool = 
 
     # 对变量进行聚类 (如果变量多于1个)
     if data_for_clustering.shape[0] > 1:
-        try:
-            linked = sch.linkage(data_for_clustering.values, method='ward', metric='euclidean')
-            dendro = sch.dendrogram(linked, no_plot=True)
-            clustered_indices = dendro['leaves']
-            data_for_clustering = data_for_clustering.iloc[clustered_indices, :]
-            variable_order = data_for_clustering.index.tolist()  # 聚类成功后更新
-            clustering_success = True
-            logger.info("因子载荷变量聚类成功。")
-        except Exception as e_cluster:
-            logger.warning(f"因子载荷变量聚类失败: {e_cluster}. 将按原始顺序显示变量。")
-            variable_order = variable_names_original
-            data_for_clustering = loadings_df.copy()  # 恢复原始数据
+        linked = sch.linkage(data_for_clustering.values, method='ward', metric='euclidean')
+        dendro = sch.dendrogram(linked, no_plot=True)
+        clustered_indices = dendro['leaves']
+        data_for_clustering = data_for_clustering.iloc[clustered_indices, :]
+        variable_order = data_for_clustering.index.tolist()
+        clustering_success = True
+        logger.info("因子载荷变量聚类成功。")
     else:
         logger.info("只有一个变量，跳过聚类。")
         variable_order = variable_names_original

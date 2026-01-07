@@ -7,12 +7,16 @@
 """
 
 import pandas as pd
-import unicodedata
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from collections import defaultdict
 from datetime import datetime
 
+from .helpers import normalize_variable_name
+from .constants import DEFAULT_INDUSTRY
 from ..core.news_impact_calculator import NewsContribution
+
+if TYPE_CHECKING:
+    from .industry_aggregator import IndustryAggregator
 
 
 class DataFlowFormatter:
@@ -23,39 +27,20 @@ class DataFlowFormatter:
     支持在Streamlit中使用expander展示。
     """
 
-    def __init__(self, var_industry_map: Optional[Dict[str, str]] = None):
+    def __init__(
+        self,
+        var_industry_map: Optional[Dict[str, str]] = None,
+        industry_aggregator: Optional['IndustryAggregator'] = None
+    ):
         """
         初始化数据流格式化器
 
         Args:
             var_industry_map: 变量名到行业的映射字典
+            industry_aggregator: 行业聚合器实例(可选,优先使用)
         """
         self.var_industry_map = var_industry_map or {}
-
-    @staticmethod
-    def _normalize_variable_name(variable_name: str) -> str:
-        """
-        标准化变量名以匹配var_industry_map中的键
-
-        采用与数据准备模块相同的标准化策略
-
-        Args:
-            variable_name: 原始变量名
-
-        Returns:
-            标准化后的变量名
-        """
-        if pd.isna(variable_name) or variable_name == '':
-            return ''
-
-        text = str(variable_name)
-        text = unicodedata.normalize('NFKC', text)
-        text = text.strip()
-
-        if any(ord(char) < 128 for char in text):
-            text = text.lower()
-
-        return text
+        self._industry_aggregator = industry_aggregator
 
     def _get_industry(self, variable_name: str) -> str:
         """
@@ -67,8 +52,10 @@ class DataFlowFormatter:
         Returns:
             行业名称
         """
-        normalized_name = self._normalize_variable_name(variable_name)
-        return self.var_industry_map.get(normalized_name, 'Other')
+        if self._industry_aggregator:
+            return self._industry_aggregator.get_industry(variable_name)
+        normalized_name = normalize_variable_name(variable_name)
+        return self.var_industry_map.get(normalized_name, DEFAULT_INDUSTRY)
 
     def format_data_flow(
         self,
@@ -140,7 +127,7 @@ class DataFlowFormatter:
             releases = []
             for contrib in sorted(contribs_at_date, key=lambda x: x.release_date):
                 release = {
-                    'time': contrib.release_date.strftime('%I:%M%p'),  # 格式: 08:35AM
+                    'time': contrib.release_date.strftime('%H:%M'),
                     'variable': contrib.variable_name,
                     'industry': self._get_industry(contrib.variable_name),
                     'actual': float(contrib.observed_value),

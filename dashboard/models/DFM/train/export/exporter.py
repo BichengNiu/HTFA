@@ -179,7 +179,7 @@ class TrainingResultExporter:
 
             # 训练统计
             'total_runtime_seconds': float(result.training_time),
-            'var_industry_map': config.industry_map if config.industry_map else {var: '综合' for var in result.selected_variables},
+            'var_industry_map': config.industry_map,
         }
 
         # 评估指标（使用results模块需要的字段名）
@@ -300,15 +300,26 @@ class TrainingResultExporter:
         # 对齐表格（核心数据）
         metadata['complete_aligned_table'] = self._generate_aligned_table(result, config, metadata)
 
-        # 观察期日期（基于对齐表格计算）
-        observation_period_start, observation_period_end = self._calculate_observation_period(
-            config.validation_end,
-            metadata['complete_aligned_table']
-        )
-        if observation_period_start and observation_period_end:
-            metadata['observation_period_start'] = observation_period_start
-            metadata['observation_period_end'] = observation_period_end
-            logger.info(f"观察期时间段: {observation_period_start} 至 {observation_period_end}")
+        # 观察期日期
+        # DDFM模型：validation_start~validation_end就是观察期（无验证期）
+        # 经典DFM：观察期是validation_end之后的数据
+        is_ddfm = (getattr(config, 'algorithm', 'classical') == 'deep_learning')
+
+        if is_ddfm:
+            # DDFM模型直接使用validation_start和validation_end作为观察期
+            metadata['observation_period_start'] = config.validation_start
+            metadata['observation_period_end'] = config.validation_end
+            logger.info(f"[DDFM] 观察期时间段: {config.validation_start} 至 {config.validation_end}")
+        else:
+            # 经典DFM：基于对齐表格计算观察期
+            observation_period_start, observation_period_end = self._calculate_observation_period(
+                config.validation_end,
+                metadata['complete_aligned_table']
+            )
+            if observation_period_start and observation_period_end:
+                metadata['observation_period_start'] = observation_period_start
+                metadata['observation_period_end'] = observation_period_end
+                logger.info(f"观察期时间段: {observation_period_start} 至 {observation_period_end}")
 
         # 保存完整观测数据矩阵（用于影响分解的数据发布提取）
         if prepared_data is not None:
@@ -318,19 +329,17 @@ class TrainingResultExporter:
             metadata['prepared_data'] = None
             logger.debug("未提供prepared_data，影响分解功能可能受限")
 
-        # R²分析结果（可选）
-        var_industry_map = metadata.get('var_industry_map', {})
-        if var_industry_map:
-            logger.info("开始计算行业R²分析...")
-            industry_r2, factor_industry_r2 = self._calculate_industry_r2(result, config, var_industry_map)
-            metadata['industry_r2_results'] = industry_r2
-            metadata['factor_industry_r2_results'] = factor_industry_r2
-            if industry_r2 is not None:
-                logger.info(f"成功生成R²分析结果: {len(industry_r2)} 个行业")
-        else:
-            logger.warning("缺少var_industry_map，跳过R²分析")
-            metadata['industry_r2_results'] = None
-            metadata['factor_industry_r2_results'] = None
+        # R²分析结果
+        var_industry_map = metadata.get('var_industry_map')
+        if not var_industry_map:
+            raise ValueError("var_industry_map为空，无法计算行业R²分析。请确保训练配置中包含industry_map。")
+
+        logger.info("开始计算行业R²分析...")
+        industry_r2, factor_industry_r2 = self._calculate_industry_r2(result, config, var_industry_map)
+        metadata['industry_r2_results'] = industry_r2
+        metadata['factor_industry_r2_results'] = factor_industry_r2
+        if industry_r2 is not None:
+            logger.info(f"成功生成R²分析结果: {len(industry_r2)} 个行业")
 
         logger.info(f"元数据构建完成,包含 {len(metadata)} 个字段")
         return metadata
@@ -1110,7 +1119,7 @@ class TrainingResultExporter:
         var_industry_map: Dict[str, str]
     ) -> Tuple[Optional[pd.Series], Optional[Dict]]:
         """
-        计算行业整体R²和因子对行业的Pooled R²
+        计算行业整体R²和因子对行业的R²
 
         Args:
             result: 训练结果

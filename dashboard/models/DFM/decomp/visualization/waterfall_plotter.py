@@ -11,13 +11,42 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 import tempfile
 import os
+import re
 
-from ..utils.exceptions import VisualizationError
+from ..utils.exceptions import VisualizationError, ConfigurationError
+from ..utils.constants import WATERFALL_COLORS
 from ..core.impact_analyzer import ImpactResult, SequentialImpactResult
 from ..core.news_impact_calculator import NewsContribution
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_filename(filename: str) -> str:
+    """
+    清理文件名，移除路径遍历和危险字符
+
+    Args:
+        filename: 原始文件名
+
+    Returns:
+        安全的文件名
+    """
+    # 移除路径分隔符
+    filename = re.sub(r'[/\\]', '_', filename)
+    # 移除其他危险字符
+    filename = re.sub(r'[<>:"|?*]', '_', filename)
+    # 移除连续的点（路径遍历）
+    filename = re.sub(r'\.{2,}', '_', filename)
+    # 移除前后的点和空格
+    filename = filename.strip('. ')
+    # 确保文件名不为空
+    if not filename:
+        filename = 'unnamed_chart'
+    return filename
 
 
 class ImpactWaterfallPlotter:
@@ -29,13 +58,7 @@ class ImpactWaterfallPlotter:
     """
 
     def __init__(self):
-        self.default_colors = {
-            'positive': '#2E8B57',    # 海绿色
-            'negative': '#DC143C',    # 深红色
-            'neutral': '#708090',     # 石板灰
-            'baseline': '#4169E1',    # 皇家蓝
-            'total': '#FFD700'        # 金色
-        }
+        self.default_colors = WATERFALL_COLORS.copy()
 
     def create_waterfall_chart(
         self,
@@ -157,7 +180,7 @@ class ImpactWaterfallPlotter:
                 annotation_position="bottom right"
             )
 
-            print(f"[WaterfallPlotter] 瀑布图创建完成: {len(sorted_contributions)} 个贡献")
+            logger.info(f"瀑布图创建完成: {len(sorted_contributions)} 个贡献")
             return fig
 
         except Exception as e:
@@ -192,7 +215,7 @@ class ImpactWaterfallPlotter:
             elif group_by == "sign":
                 grouped_data = self._group_by_sign(contributions)
             else:
-                raise ValidationError(f"不支持的分组方式: {group_by}")
+                raise ConfigurationError(f"不支持的分组方式: {group_by}", config_key="group_by", config_value=group_by)
 
             # 创建子图
             fig = make_subplots(
@@ -244,7 +267,7 @@ class ImpactWaterfallPlotter:
                 template='plotly_white'
             )
 
-            print(f"[WaterfallPlotter] 分组瀑布图创建完成: {len(grouped_data)} 个组")
+            logger.info(f"分组瀑布图创建完成: {len(grouped_data)} 个组")
             return fig
 
         except Exception as e:
@@ -340,7 +363,7 @@ class ImpactWaterfallPlotter:
                 template='plotly_white'
             )
 
-            print(f"[WaterfallPlotter] 对比瀑布图创建完成")
+            logger.info("对比瀑布图创建完成")
             return fig
 
         except Exception as e:
@@ -443,6 +466,12 @@ class ImpactWaterfallPlotter:
         try:
             if filename is None:
                 filename = f"waterfall_chart_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.html"
+            else:
+                # 清理用户提供的文件名，防止路径遍历攻击
+                filename = _sanitize_filename(filename)
+                # 确保有.html扩展名
+                if not filename.endswith('.html'):
+                    filename = filename + '.html'
 
             if directory is None:
                 directory = tempfile.gettempdir()
@@ -452,7 +481,7 @@ class ImpactWaterfallPlotter:
 
             fig.write_html(file_path, include_plotlyjs='cdn')
 
-            print(f"[WaterfallPlotter] 图表已保存: {file_path}")
+            logger.info(f"图表已保存: {file_path}")
             return file_path
 
         except Exception as e:

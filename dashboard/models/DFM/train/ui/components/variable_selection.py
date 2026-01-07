@@ -201,17 +201,24 @@ class VariableSelectionComponent(DFMComponent):
                     normalized_industry_map[normalized_key] = str(v).strip()
 
             industry_to_vars = defaultdict(list)
+            unmapped_vars = []
 
             for var in variables:
                 lookup_key = unicodedata.normalize('NFKC', str(var)).strip().lower()
-                industry = normalized_industry_map.get(lookup_key, "_未知行业_")
-                industry_to_vars[industry].append(var)
+                industry = normalized_industry_map.get(lookup_key)
+                if industry:
+                    industry_to_vars[industry].append(var)
+                else:
+                    unmapped_vars.append(var)
+
+            if unmapped_vars:
+                logger.warning(f"以下变量未找到行业映射: {unmapped_vars[:5]}{'...' if len(unmapped_vars) > 5 else ''}")
 
             return dict(industry_to_vars)
 
         except Exception as e:
             logger.error(f"按行业分组变量失败: {e}")
-            return {"_未知行业_": variables}
+            raise ValueError(f"按行业分组变量失败: {e}") from e
 
     def _initialize_target_variable(self, available_vars: List[str]) -> str:
         """

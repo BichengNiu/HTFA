@@ -8,13 +8,23 @@
 
 import numpy as np
 import pandas as pd
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from ..utils.exceptions import ComputationError, ValidationError
 from ..utils.helpers import detect_outliers
+from ..utils.constants import (
+    KEY_DRIVERS_CONTRIBUTION_THRESHOLD,
+    PRIMARY_DRIVERS_RANK_THRESHOLD,
+    SECONDARY_DRIVERS_RANK_THRESHOLD,
+    STABLE_POSITIVE_RATIO_THRESHOLD,
+    STABLE_NEGATIVE_RATIO_THRESHOLD
+)
 from .impact_analyzer import ImpactResult, SequentialImpactResult, DataRelease
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,7 +70,6 @@ class NewsImpactCalculator:
             impact_analyzer: 影响分析器实例
         """
         self.analyzer = impact_analyzer
-        self._contributions_cache: Optional[Dict[str, ContributionSummary]] = None
 
     def calculate_news_contributions(
         self,
@@ -111,7 +120,7 @@ class NewsImpactCalculator:
 
                 contributions.append(contribution)
 
-            print(f"[NewsImpactCalculator] 计算了 {len(contributions)} 个新闻贡献")
+            logger.info(f"计算了 {len(contributions)} 个新闻贡献")
             return contributions
 
         except Exception as e:
@@ -178,7 +187,7 @@ class NewsImpactCalculator:
 
             # 如果没有数据，返回空DataFrame（带列名）
             if len(ranking_df) == 0:
-                print("[NewsImpactCalculator] 警告: contributions为空，返回空排名DataFrame")
+                logger.warning("contributions为空，返回空排名DataFrame")
                 empty_df = pd.DataFrame(columns=[
                     'rank', 'variable_name', 'total_impact', 'avg_impact',
                     'total_contribution_pct', 'release_count', 'positive_count',
@@ -201,7 +210,7 @@ class NewsImpactCalculator:
             # 添加排名列
             ranking_df['rank'] = range(1, len(ranking_df) + 1)
 
-            print(f"[NewsImpactCalculator] 变量排名完成: {method} 方法")
+            logger.info(f"变量排名完成: {method} 方法")
             return ranking_df
 
         except Exception as e:
@@ -231,10 +240,11 @@ class NewsImpactCalculator:
             total_negative = sum(c.impact_value for c in negative_contributions)
             net_impact = total_positive + total_negative
 
-            # 计算占比
-            total_abs = total_positive - total_negative  # 负数为负值，所以减去
-            positive_ratio = total_positive / total_abs if total_abs != 0 else 0
-            negative_ratio = abs(total_negative) / total_abs if total_abs != 0 else 0
+            # 计算占比（基于绝对值总和）
+            # total_positive是正数，total_negative是负数（负影响之和）
+            total_abs = total_positive + abs(total_negative)
+            positive_ratio = total_positive / total_abs if total_abs > 0 else 0
+            negative_ratio = abs(total_negative) / total_abs if total_abs > 0 else 0
 
             # 按变量分解正负影响
             positive_by_var = {}
@@ -267,7 +277,7 @@ class NewsImpactCalculator:
                 'balance_factor': abs(total_positive / total_negative) if total_negative != 0 else float('inf')
             }
 
-            print(f"[NewsImpactCalculator] 正负影响分解: 正向={total_positive:.4f}, 负向={total_negative:.4f}")
+            logger.info(f"正负影响分解: 正向={total_positive:.4f}, 负向={total_negative:.4f}")
             return split_result
 
         except Exception as e:
@@ -276,8 +286,8 @@ class NewsImpactCalculator:
     def identify_key_drivers(
         self,
         contributions: List[NewsContribution],
-        threshold: float = 0.1,
-        top_n: int = 10
+        threshold: float = KEY_DRIVERS_CONTRIBUTION_THRESHOLD,
+        top_n: int = SECONDARY_DRIVERS_RANK_THRESHOLD
     ) -> Dict[str, Any]:
         """
         识别关键驱动变量
@@ -299,7 +309,7 @@ class NewsImpactCalculator:
 
             # 如果没有数据，返回空结果
             if len(ranking_df) == 0:
-                print("[NewsImpactCalculator] 警告: 无数据，返回空关键驱动结果")
+                logger.warning("无数据，返回空关键驱动结果")
                 return {
                     'key_drivers': ranking_df,
                     'primary_drivers': ranking_df.copy(),
@@ -334,9 +344,10 @@ class NewsImpactCalculator:
             key_drivers = key_drivers.sort_values('key_score', ascending=False)
 
             # 分类关键驱动
-            primary_drivers = key_drivers[key_drivers['rank'] <= 3].copy()
+            primary_drivers = key_drivers[key_drivers['rank'] <= PRIMARY_DRIVERS_RANK_THRESHOLD].copy()
             secondary_drivers = key_drivers[
-                (key_drivers['rank'] > 3) & (key_drivers['rank'] <= 10)
+                (key_drivers['rank'] > PRIMARY_DRIVERS_RANK_THRESHOLD) &
+                (key_drivers['rank'] <= SECONDARY_DRIVERS_RANK_THRESHOLD)
             ].copy()
 
             # 分析驱动模式
@@ -355,7 +366,7 @@ class NewsImpactCalculator:
                 'identification_time': datetime.now().isoformat()
             }
 
-            print(f"[NewsImpactCalculator] 识别关键驱动: {len(key_drivers)} 个变量")
+            logger.info(f"识别关键驱动: {len(key_drivers)} 个变量")
             return key_drivers_result
 
         except Exception as e:
@@ -448,7 +459,7 @@ class NewsImpactCalculator:
                 'most_active_period': temporal_df.loc[temporal_df['count'].idxmax()].to_dict() if len(temporal_df) > 0 else None
             }
 
-            print(f"[NewsImpactCalculator] 时间模式分析: {time_window} 窗口")
+            logger.info(f"时间模式分析: {time_window} 窗口")
             return temporal_patterns
 
         except Exception as e:
@@ -472,16 +483,16 @@ class NewsImpactCalculator:
             patterns['high_impact_drivers'] = high_impact_drivers['variable_name'].tolist()
 
             # 稳定性模式：影响方向一致的变量
-            stable_drivers = key_drivers[key_drivers['impact_ratio'] >= 0.8]  # 80%以上同向
+            stable_drivers = key_drivers[key_drivers['impact_ratio'] >= STABLE_POSITIVE_RATIO_THRESHOLD]
             patterns['stable_positive_drivers'] = stable_drivers['variable_name'].tolist()
 
-            unstable_drivers = key_drivers[key_drivers['impact_ratio'] <= 0.2]  # 20%以下同向
+            unstable_drivers = key_drivers[key_drivers['impact_ratio'] <= STABLE_NEGATIVE_RATIO_THRESHOLD]
             patterns['stable_negative_drivers'] = unstable_drivers['variable_name'].tolist()
 
             return patterns
 
         except Exception as e:
-            print(f"[NewsImpactCalculator] 驱动模式分析警告: {str(e)}")
+            logger.warning(f"驱动模式分析警告: {str(e)}")
             return {}
 
     def get_comprehensive_summary(

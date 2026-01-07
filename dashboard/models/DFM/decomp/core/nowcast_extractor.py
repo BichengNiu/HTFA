@@ -8,6 +8,7 @@ Nowcast提取器
 
 import numpy as np
 import pandas as pd
+import logging
 from typing import Dict, Any, Optional, Tuple, List
 from datetime import datetime, timedelta
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from dataclasses import dataclass
 from ..utils.exceptions import ComputationError, DataFormatError
 from ..utils.helpers import align_time_series, ensure_numerical_stability
 from .model_loader import SavedNowcastData
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -70,9 +73,9 @@ class NowcastExtractor:
                 target_date = pd.to_datetime(target_period)
                 nowcast_series = nowcast_series[nowcast_series.index <= target_date]
 
-            print(f"[NowcastExtractor] 提取nowcast序列: {len(nowcast_series)} 个数据点")
+            logger.info(f"提取nowcast序列: {len(nowcast_series)} 个数据点")
             if target_period:
-                print(f"[NowcastExtractor] 目标周期: {target_period}")
+                logger.info(f"目标周期: {target_period}")
 
             return nowcast_series
 
@@ -112,7 +115,7 @@ class NowcastExtractor:
         if self.data.factor_loadings is None:
             raise DataFormatError("因子载荷矩阵不可用")
 
-        print(f"[NowcastExtractor] 因子载荷矩阵: {self.data.factor_loadings.shape}")
+        logger.info(f"因子载荷矩阵: {self.data.factor_loadings.shape}")
         return self.data.factor_loadings
 
     def get_model_state_at_date(self, target_date: pd.Timestamp) -> Dict[str, np.ndarray]:
@@ -158,7 +161,7 @@ class NowcastExtractor:
                 'kalman_gains': self._get_latest_kalman_gain()
             }
 
-            print(f"[NowcastExtractor] 提取 {target_date} 的模型状态")
+            logger.info(f"提取 {target_date} 的模型状态")
             return model_state
 
         except Exception as e:
@@ -191,88 +194,11 @@ class NowcastExtractor:
             else:
                 baseline_value = self._baseline_predictions[target_date]
 
-            print(f"[NowcastExtractor] 基准预测值 ({target_date}): {baseline_value:.4f}")
+            logger.info(f"基准预测值 ({target_date}): {baseline_value:.4f}")
             return baseline_value
 
         except Exception as e:
             raise ComputationError(f"计算基准预测失败: {str(e)}", "baseline_computation")
-
-    def analyze_prediction_components(self) -> Dict[str, float]:
-        """
-        分析预测的组成成分
-
-        Returns:
-            各成分的贡献字典
-
-        Raises:
-            ComputationError: 分析失败时抛出
-        """
-        try:
-            components = {}
-
-            # 因子贡献
-            if self.data.factor_series is not None and self.data.factor_loadings is not None:
-                # 使用最新的因子状态和载荷计算贡献
-                latest_factors = self.data.factor_series.iloc[-1]
-                factor_contributions = np.dot(latest_factors.values, self.data.factor_loadings.T)
-
-                for i, contribution in enumerate(factor_contributions):
-                    components[f'factor_{i+1}_contribution'] = contribution
-
-            # 模型参数贡献
-            if self.data.model_parameters:
-                for param_name, param_value in self.data.model_parameters.items():
-                    if isinstance(param_value, (int, float)):
-                        components[f'param_{param_name}'] = param_value
-
-            print(f"[NowcastExtractor] 分析了 {len(components)} 个预测成分")
-            return components
-
-        except Exception as e:
-            raise ComputationError(f"分析预测成分失败: {str(e)}", "component_analysis")
-
-    def extract_time_series_slice(
-        self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> Dict[str, pd.DataFrame]:
-        """
-        提取指定时间范围内的数据切片
-
-        Args:
-            start_date: 开始日期
-            end_date: 结束日期
-
-        Returns:
-            数据切片字典
-
-        Raises:
-            ComputationError: 提取失败时抛出
-        """
-        try:
-            if self._aligned_data is None:
-                self._prepare_aligned_data()
-
-            if self._aligned_data is None:
-                raise DataFormatError("对齐数据不可用")
-
-            slice_data = {}
-
-            # 应用时间过滤
-            for key, data in self._aligned_data.items():
-                if isinstance(data, (pd.Series, pd.DataFrame)):
-                    filtered_data = data.copy()
-                    if start_date:
-                        filtered_data = filtered_data[filtered_data.index >= start_date]
-                    if end_date:
-                        filtered_data = filtered_data[filtered_data.index <= end_date]
-                    slice_data[key] = filtered_data
-
-            print(f"[NowcastExtractor] 提取时间切片: {start_date} 到 {end_date}")
-            return slice_data
-
-        except Exception as e:
-            raise ComputationError(f"提取时间切片失败: {str(e)}", "time_slice_extraction")
 
     def _prepare_aligned_data(self) -> None:
         """准备对齐的数据"""
@@ -295,7 +221,7 @@ class NowcastExtractor:
                     aligned_data['factor_series'] = self.data.factor_series
 
             self._aligned_data = aligned_data
-            print(f"[NowcastExtractor] 数据对齐完成，包含 {len(aligned_data)} 个序列")
+            logger.info(f"数据对齐完成，包含 {len(aligned_data)} 个序列")
 
         except Exception as e:
             raise ComputationError(f"数据对齐失败: {str(e)}", "data_alignment")
@@ -319,7 +245,7 @@ class NowcastExtractor:
             baseline_predictions = baseline_predictions.bfill().ffill()
 
             self._baseline_predictions = baseline_predictions.to_dict()
-            print(f"[NowcastExtractor] 计算了 {len(self._baseline_predictions)} 个基准预测值")
+            logger.info(f"计算了 {len(self._baseline_predictions)} 个基准预测值")
 
         except Exception as e:
             raise ComputationError(f"计算基准预测失败: {str(e)}", "baseline_computation")

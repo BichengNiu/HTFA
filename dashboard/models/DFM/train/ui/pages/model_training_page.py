@@ -286,22 +286,94 @@ def render_dfm_model_training_page(st_instance):
     # ===== 训练设置 =====
     st_instance.subheader("训练设置")
 
+    # 获取当前算法值（用于判断是否显示变量筛选和因子选择）
     current_algorithm = _state.get('dfm_algorithm', UIConfig.DEFAULT_ALGORITHM)
     if current_algorithm not in UIConfig.ALGORITHM_OPTIONS:
-        current_algorithm = UIConfig.DEFAULT_ALGORITHM
+        raise ValueError(f"无效的算法类型: {current_algorithm}，有效值: {list(UIConfig.ALGORITHM_OPTIONS.keys())}")
 
-    algorithm_value = st_instance.selectbox(
-        "选择算法",
-        options=list(UIConfig.ALGORITHM_OPTIONS.keys()),
-        format_func=lambda x: UIConfig.ALGORITHM_OPTIONS[x],
-        index=UIConfig.get_safe_option_index(
-            UIConfig.ALGORITHM_OPTIONS, current_algorithm, UIConfig.DEFAULT_ALGORITHM
-        ),
-        key='dfm_algorithm_selector',
-        help="经典DFM使用EM算法，深度学习DFM使用神经网络自编码器"
-    )
-    _state.set('dfm_algorithm', algorithm_value)
-    current_algorithm = algorithm_value
+    # 深度学习模式标志
+    is_deep_learning_mode = (current_algorithm == 'deep_learning')
+
+    # 第一行：选择算法 + 目标值 + 变量筛选方法 + 因子选择策略（后两者仅经典算法显示）
+    if is_deep_learning_mode:
+        col_algo, col_align = st_instance.columns(2)
+    else:
+        col_algo, col_align, col_var_method, col_factor_strategy = st_instance.columns(4)
+
+    with col_algo:
+        algorithm_value = st_instance.selectbox(
+            "选择算法",
+            options=list(UIConfig.ALGORITHM_OPTIONS.keys()),
+            format_func=lambda x: UIConfig.ALGORITHM_OPTIONS[x],
+            index=UIConfig.get_safe_option_index(
+                UIConfig.ALGORITHM_OPTIONS, current_algorithm, UIConfig.DEFAULT_ALGORITHM
+            ),
+            key='dfm_algorithm_selector',
+            help="经典DFM使用EM算法，深度学习DFM使用神经网络自编码器"
+        )
+        _state.set('dfm_algorithm', algorithm_value)
+        current_algorithm = algorithm_value
+
+    with col_align:
+        current_alignment = _state.get('dfm_target_alignment_mode', UIConfig.DEFAULT_TARGET_ALIGNMENT)
+        if current_alignment not in UIConfig.TARGET_ALIGNMENT_OPTIONS:
+            raise ValueError(f"无效的目标对齐方式: {current_alignment}，有效值: {list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys())}")
+
+        alignment_value = st_instance.selectbox(
+            "目标值",
+            options=list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys()),
+            format_func=lambda x: UIConfig.TARGET_ALIGNMENT_OPTIONS[x],
+            index=UIConfig.get_safe_option_index(
+                UIConfig.TARGET_ALIGNMENT_OPTIONS, current_alignment, UIConfig.DEFAULT_TARGET_ALIGNMENT
+            ),
+            key='dfm_target_alignment_mode_input',
+            help="nowcast预测值与目标变量实际值的配对方式"
+        )
+        _state.set('dfm_target_alignment_mode', alignment_value)
+
+    if not is_deep_learning_mode:
+        with col_var_method:
+            current_var_method = _state.get('dfm_variable_selection_method', UIConfig.DEFAULT_VAR_SELECTION)
+            if current_var_method not in UIConfig.VARIABLE_SELECTION_METHODS:
+                raise ValueError(f"无效的变量筛选方法: {current_var_method}，有效值: {list(UIConfig.VARIABLE_SELECTION_METHODS.keys())}")
+
+            var_method_value = st_instance.selectbox(
+                "变量筛选方法",
+                options=list(UIConfig.VARIABLE_SELECTION_METHODS.keys()),
+                format_func=lambda x: UIConfig.VARIABLE_SELECTION_METHODS[x],
+                index=UIConfig.get_safe_option_index(
+                    UIConfig.VARIABLE_SELECTION_METHODS, current_var_method, UIConfig.DEFAULT_VAR_SELECTION
+                ),
+                key='dfm_variable_selection_method_input',
+                help="选择在已选变量基础上的筛选方法"
+            )
+            _state.set('dfm_variable_selection_method', var_method_value)
+
+            enable_var_selection = (var_method_value != 'none')
+            _state.set('dfm_enable_variable_selection', enable_var_selection)
+
+        with col_factor_strategy:
+            current_strategy = _state.get('dfm_factor_selection_strategy', UIConfig.DEFAULT_FACTOR_STRATEGY)
+            if current_strategy not in UIConfig.FACTOR_STRATEGIES:
+                raise ValueError(f"无效的因子选择策略: {current_strategy}，有效值: {list(UIConfig.FACTOR_STRATEGIES.keys())}")
+
+            strategy_value = st_instance.selectbox(
+                "因子选择策略",
+                options=list(UIConfig.FACTOR_STRATEGIES.keys()),
+                format_func=lambda x: UIConfig.FACTOR_STRATEGIES[x],
+                index=UIConfig.get_safe_option_index(
+                    UIConfig.FACTOR_STRATEGIES, current_strategy, UIConfig.DEFAULT_FACTOR_STRATEGY
+                ),
+                key='dfm_factor_selection_strategy',
+                help="选择确定因子数量的方法"
+            )
+            _state.set('dfm_factor_selection_strategy', strategy_value)
+    else:
+        # 深度学习模式：禁用变量选择
+        _state.set('dfm_variable_selection_method', 'none')
+        _state.set('dfm_enable_variable_selection', False)
+        enable_var_selection = False
+        strategy_value = 'fixed_number'
 
     # ===== 训练周期设置 =====
 
@@ -310,17 +382,6 @@ def render_dfm_model_training_page(st_instance):
     var_frequency_map = _state.get('dfm_frequency_map_obj', {})
     target_freq_code = get_target_frequency(target_variable, var_frequency_map, default_freq='W')
     freq_label = get_frequency_label(target_freq_code)
-
-    # 显示算法模式说明
-    if current_algorithm == 'deep_learning':
-        st_instance.info(
-            f"**DDFM模式说明**: 深度学习算法将使用从训练期开始到观察期上一{freq_label}的全部数据进行训练。"
-            "验证期参数仅用于模型预测后的性能评估，不参与模型训练过程。"
-        )
-    else:
-        st_instance.info(
-            "**经典DFM模式说明**: 模型在训练期数据上拟合参数，在验证期数据上评估性能。"
-        )
 
     col_time1, col_time2, col_time3 = st_instance.columns(3)
 
@@ -332,6 +393,15 @@ def render_dfm_model_training_page(st_instance):
             help="模型训练数据的起始日期，默认为数据开始日期"
         )
         _state.set('dfm_training_start_date', training_start_value)
+        # 显示算法模式说明
+        if current_algorithm == 'deep_learning':
+            st_instance.caption(
+                f"DDFM模式: 使用从训练期开始到观察期上一{freq_label}的全部数据进行训练"
+            )
+        else:
+            st_instance.caption(
+                "经典DFM模式: 模型在训练期数据上拟合参数，在验证期数据上评估性能"
+            )
 
     # 判断是否为DDFM模式
     is_ddfm_mode = (current_algorithm == 'deep_learning')
@@ -385,79 +455,8 @@ def render_dfm_model_training_page(st_instance):
             validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
             _state.set('dfm_validation_end_date', validation_end_value)
 
-    # ===== 模型核心配置 =====
-
-    # 深度学习模式标志（复用上面的algorithm_value）
+    # ===== 高级选项 (折叠) =====
     is_deep_learning = (algorithm_value == 'deep_learning')
-
-    # 目标对齐方式（单列显示）
-    current_alignment = _state.get('dfm_target_alignment_mode', UIConfig.DEFAULT_TARGET_ALIGNMENT)
-    # 验证有效性
-    if current_alignment not in UIConfig.TARGET_ALIGNMENT_OPTIONS:
-        raise ValueError(f"无效的目标对齐方式: {current_alignment}，有效值: {list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys())}")
-
-    alignment_value = st_instance.selectbox(
-        "目标值",
-        options=list(UIConfig.TARGET_ALIGNMENT_OPTIONS.keys()),
-        format_func=lambda x: UIConfig.TARGET_ALIGNMENT_OPTIONS[x],
-        index=UIConfig.get_safe_option_index(
-            UIConfig.TARGET_ALIGNMENT_OPTIONS, current_alignment, UIConfig.DEFAULT_TARGET_ALIGNMENT
-        ),
-        key='dfm_target_alignment_mode_input',
-        help="nowcast预测值与目标变量实际值的配对方式"
-    )
-    _state.set('dfm_target_alignment_mode', alignment_value)
-
-    # 第二行: 变量筛选方法 + 因子选择策略（仅经典算法显示）
-    if not is_deep_learning:
-        col_core3, col_core4 = st_instance.columns(2)
-
-        with col_core3:
-            current_var_method = _state.get('dfm_variable_selection_method', UIConfig.DEFAULT_VAR_SELECTION)
-            # 验证方法有效性
-            if current_var_method not in UIConfig.VARIABLE_SELECTION_METHODS:
-                raise ValueError(f"无效的变量筛选方法: {current_var_method}，有效值: {list(UIConfig.VARIABLE_SELECTION_METHODS.keys())}")
-
-            var_method_value = st_instance.selectbox(
-                "变量筛选方法",
-                options=list(UIConfig.VARIABLE_SELECTION_METHODS.keys()),
-                format_func=lambda x: UIConfig.VARIABLE_SELECTION_METHODS[x],
-                index=UIConfig.get_safe_option_index(
-                    UIConfig.VARIABLE_SELECTION_METHODS, current_var_method, UIConfig.DEFAULT_VAR_SELECTION
-                ),
-                key='dfm_variable_selection_method_input',
-                help="选择在已选变量基础上的筛选方法"
-            )
-            _state.set('dfm_variable_selection_method', var_method_value)
-
-            enable_var_selection = (var_method_value != 'none')
-            _state.set('dfm_enable_variable_selection', enable_var_selection)
-
-        with col_core4:
-            current_strategy = _state.get('dfm_factor_selection_strategy', UIConfig.DEFAULT_FACTOR_STRATEGY)
-            # 验证策略有效性
-            if current_strategy not in UIConfig.FACTOR_STRATEGIES:
-                raise ValueError(f"无效的因子选择策略: {current_strategy}，有效值: {list(UIConfig.FACTOR_STRATEGIES.keys())}")
-
-            strategy_value = st_instance.selectbox(
-                "因子选择策略",
-                options=list(UIConfig.FACTOR_STRATEGIES.keys()),
-                format_func=lambda x: UIConfig.FACTOR_STRATEGIES[x],
-                index=UIConfig.get_safe_option_index(
-                    UIConfig.FACTOR_STRATEGIES, current_strategy, UIConfig.DEFAULT_FACTOR_STRATEGY
-                ),
-                key='dfm_factor_selection_strategy',
-                help="选择确定因子数量的方法"
-            )
-            _state.set('dfm_factor_selection_strategy', strategy_value)
-    else:
-        # 深度学习模式：禁用变量选择
-        _state.set('dfm_variable_selection_method', 'none')
-        _state.set('dfm_enable_variable_selection', False)
-        enable_var_selection = False
-        strategy_value = 'fixed_number'  # DDFM使用固定因子数（由编码器决定）
-
-    # ===== 卡片3: 高级选项 (折叠) =====
     with st_instance.expander("高级选项", expanded=False):
 
         # ===== DDFM专用参数（仅深度学习算法显示）=====
@@ -997,12 +996,9 @@ def render_dfm_model_training_page(st_instance):
                     if excluded_count > 0:
                         st_instance.caption(f"排除目标变量: {excluded_count}个")
 
-                    # 同步checkbox与multiselect
-                    if select_all_checked:
+                    # 同步checkbox与multiselect: 仅在checkbox状态变化时更新
+                    if select_all_checked and st.session_state[multiselect_key] != indicators_for_this_industry:
                         st.session_state[multiselect_key] = indicators_for_this_industry
-                    else:
-                        if st.session_state[multiselect_key] == indicators_for_this_industry:
-                            st.session_state[multiselect_key] = valid_default
 
                     selected_in_widget = st_instance.multiselect(
                         "选择指标",

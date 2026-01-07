@@ -690,6 +690,7 @@ class DDFMModel:
             factors_smooth=factors,
             kalman_gains_history=kalman_gains_history,
             factor_states_predicted=factor_states_predicted,  # 先验因子状态 (n_time, n_factors)
+            variable_names=full_data.columns.tolist(),
             converged=self.loss_now is not None,
             iterations=self.max_iter,
             log_likelihood=-self.loss_now if self.loss_now else -np.inf
