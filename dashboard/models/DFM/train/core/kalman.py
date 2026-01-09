@@ -163,16 +163,13 @@ class KalmanFilter:
             P_filt[t] = (P_filt[t] + P_filt[t].T) / 2.0
 
             # 计算对数似然（只用于有观测的时间步）
-            try:
-                sign, logdet = np.linalg.slogdet(S_t)
-                if sign > 0:
-                    loglikelihood += -0.5 * (
-                        len(ix) * np.log(2 * np.pi)
-                        + logdet
-                        + innov_t.T @ np.linalg.solve(S_t, innov_t)
-                    )
-            except Exception as e:
-                logger.warning(f"时间步{t}: 似然计算失败 - {e}")
+            sign, logdet = np.linalg.slogdet(S_t)
+            if sign > 0:
+                loglikelihood += -0.5 * (
+                    len(ix) * np.log(2 * np.pi)
+                    + logdet
+                    + innov_t.T @ np.linalg.solve(S_t, innov_t)
+                )
 
         # 转换P_filt和P_pred为3D数组以保持接口一致
         P_filt_array = np.array([P_filt[t] for t in range(n_time)])
@@ -275,60 +272,3 @@ class KalmanFilter:
             P_smoothed=P_smooth_array,
             P_lag_smoothed=P_lag_smooth_array
         )
-
-
-def kalman_filter(
-    Z: np.ndarray,
-    U: np.ndarray,
-    A: np.ndarray,
-    B: np.ndarray,
-    H: np.ndarray,
-    Q: np.ndarray,
-    R: np.ndarray,
-    x0: np.ndarray,
-    P0: np.ndarray
-) -> KalmanFilterResult:
-    """卡尔曼滤波函数接口
-
-    Args:
-        Z: 观测序列
-        U: 控制输入
-        A: 状态转移矩阵
-        B: 控制矩阵
-        H: 观测矩阵
-        Q: 过程噪声协方差
-        R: 观测噪声协方差
-        x0: 初始状态
-        P0: 初始协方差
-
-    Returns:
-        KalmanFilterResult: 滤波结果
-    """
-    kf = KalmanFilter(A, B, H, Q, R, x0, P0)
-    return kf.filter(Z, U)
-
-
-def kalman_smoother(
-    filter_result: KalmanFilterResult,
-    A: np.ndarray,
-    Q: np.ndarray
-) -> KalmanSmootherResult:
-    """卡尔曼平滑函数接口
-
-    Args:
-        filter_result: 滤波结果
-        A: 状态转移矩阵
-        Q: 过程噪声协方差
-
-    Returns:
-        KalmanSmootherResult: 平滑结果
-    """
-    n_states = A.shape[0]
-    B = np.eye(n_states)
-    H = np.eye(n_states)
-    R = np.eye(n_states)
-    x0 = np.zeros(n_states)
-    P0 = np.eye(n_states)
-
-    kf = KalmanFilter(A, B, H, Q, R, x0, P0)
-    return kf.smooth(filter_result)

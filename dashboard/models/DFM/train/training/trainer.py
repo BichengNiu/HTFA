@@ -80,17 +80,13 @@ class DFMTrainer:
         Returns:
             observation_end日期字符串，如果无观察期则返回None
         """
-        try:
-            val_end_dt = pd.to_datetime(validation_end)
-            data_end_dt = data.index.max()
+        val_end_dt = pd.to_datetime(validation_end)
+        data_end_dt = data.index.max()
 
-            if data_end_dt > val_end_dt:
-                return data_end_dt.strftime('%Y-%m-%d')
-            else:
-                logger.info("数据未超出验证期，无观察期")
-                return None
-        except Exception as e:
-            logger.error(f"检测观察期失败: {e}")
+        if data_end_dt > val_end_dt:
+            return data_end_dt.strftime('%Y-%m-%d')
+        else:
+            logger.info("数据未超出验证期，无观察期")
             return None
 
     def train(
@@ -213,7 +209,7 @@ class DFMTrainer:
                         selector = BackwardSelector(
                             evaluator_func=evaluator,
                             criterion='rmse',
-                            min_variables=self.config.min_variables_after_selection or 1,
+                            min_variables=self.config.min_variables_after_selection,
                             parallel_config=self.config.get_parallel_config()
                         )
                     elif self.config.variable_selection_method == 'stepwise':
@@ -222,21 +218,13 @@ class DFMTrainer:
                         selector = StepwiseSelector(
                             evaluator_func=evaluator,
                             criterion='rmse',
-                            min_variables=self.config.min_variables_after_selection or 1,
+                            min_variables=self.config.min_variables_after_selection,
                             parallel_config=self.config.get_parallel_config()
-                        )
-                    elif self.config.variable_selection_method == 'forward':
-                        # forward方法目前未实现
-                        raise NotImplementedError(
-                            "forward方法尚未实现，请使用'backward'或'stepwise'"
                         )
                     else:
-                        # 默认使用后向选择器
-                        selector = BackwardSelector(
-                            evaluator_func=evaluator,
-                            criterion='rmse',
-                            min_variables=self.config.min_variables_after_selection or 1,
-                            parallel_config=self.config.get_parallel_config()
+                        raise ValueError(
+                            f"不支持的变量选择方法: '{self.config.variable_selection_method}'。"
+                            f"支持的方法: 'backward', 'stepwise'"
                         )
 
                     # 根据因子选择策略确定k_factors用于变量选择
@@ -263,8 +251,8 @@ class DFMTrainer:
                             'training_weight': self.config.training_weight,  # 训练期权重（2025-12-20修复）
                             # 动态因子选择参数（2026-01-03新增）
                             'factor_selection_method': self.config.factor_selection_method,
-                            'pca_threshold': self.config.pca_threshold or 0.9,
-                            'kaiser_threshold': self.config.kaiser_threshold or 1.0
+                            'pca_threshold': self.config.pca_threshold,
+                            'kaiser_threshold': self.config.kaiser_threshold
                         },
                         validation_start=self.config.validation_start,
                         validation_end=self.config.validation_end,
@@ -298,8 +286,8 @@ class DFMTrainer:
                     selected_vars=selected_vars,
                     method=self.config.factor_selection_method,
                     fixed_k=self.config.k_factors,
-                    pca_threshold=self.config.pca_threshold or 0.9,
-                    kaiser_threshold=self.config.kaiser_threshold or 1.0,
+                    pca_threshold=self.config.pca_threshold,
+                    kaiser_threshold=self.config.kaiser_threshold,
                     train_end=self.config.train_end
                 )
 
@@ -360,29 +348,21 @@ class DFMTrainer:
 
             # 步骤8: 导出结果文件（直接调用）
             if enable_export:
-                try:
-                    exporter = TrainingResultExporter()
-                    file_paths = exporter.export_all(
-                        result,
-                        self.config,
-                        output_dir=export_dir,
-                        prepared_data=data  # 传递完整观测数据用于影响分解
-                    )
+                exporter = TrainingResultExporter()
+                file_paths = exporter.export_all(
+                    result,
+                    self.config,
+                    output_dir=export_dir,
+                    prepared_data=data  # 传递完整观测数据用于影响分解
+                )
 
-                    result.export_files = file_paths
+                result.export_files = file_paths
 
-                    total_count = len(file_paths)
-                    success_count = len([p for p in file_paths.values() if p])
+                total_count = len(file_paths)
+                success_count = len([p for p in file_paths.values() if p])
 
-                    if progress_callback:
-                        progress_callback(f"结果文件导出完成 (成功 {success_count}/{total_count} 个)")
-
-                except Exception as e:
-                    logger.warning(f"文件导出失败: {e}", exc_info=True)
-                    if progress_callback:
-                        progress_callback(f"文件导出失败: {e}")
-
-                    result.export_files = None
+                if progress_callback:
+                    progress_callback(f"结果文件导出完成 (成功 {success_count}/{total_count} 个)")
 
             return result
 

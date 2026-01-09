@@ -1147,10 +1147,9 @@ def render_dfm_model_training_page(st_instance):
                 # 创建进度回调函数
                 def progress_callback(message: str):
                     """进度回调函数 - 解析消息更新进度条"""
-                    # 更新训练日志
+                    # 更新训练日志（创建新列表以触发Streamlit状态变更检测）
                     training_log = _state.get('dfm_training_log', [])
-                    training_log.append(message)
-                    _state.set('dfm_training_log', training_log)
+                    _state.set('dfm_training_log', training_log + [message])
 
                     # 解析进度信息并更新进度条（支持EM和DDFM格式）
                     if progress_bar is not None:
@@ -1205,11 +1204,12 @@ def render_dfm_model_training_page(st_instance):
                 _state.set('dfm_training_status', '训练完成')
                 _state.set('dfm_training_completed_timestamp', time.time())
 
-                # 添加完成日志
-                training_log = _state.get('dfm_training_log', [])
-                training_log.append(f"[SUCCESS] 训练完成！总耗时: {training_time_display:.2f}秒")
-                training_log.append(f"[RESULT] 选中变量数: {len(selected_variables)}")
-                training_log.append(f"[RESULT] 因子数: {k_factors_display}")
+                # 添加完成日志（创建新列表以触发Streamlit状态变更检测）
+                new_log_entries = [
+                    f"[SUCCESS] 训练完成！总耗时: {training_time_display:.2f}秒",
+                    f"[RESULT] 选中变量数: {len(selected_variables)}",
+                    f"[RESULT] 因子数: {k_factors_display}"
+                ]
 
                 if metrics_obj:
                     is_ddfm = (algorithm_value == 'deep_learning')
@@ -1219,24 +1219,25 @@ def render_dfm_model_training_page(st_instance):
                         oos_rmse = metrics_obj.oos_rmse
                         oos_win_rate = metrics_obj.oos_win_rate
                         if oos_rmse is not None and not (np.isnan(oos_rmse) or np.isinf(oos_rmse)):
-                            training_log.append(f"[METRICS] 验证期RMSE: {oos_rmse:.4f}")
+                            new_log_entries.append(f"[METRICS] 验证期RMSE: {oos_rmse:.4f}")
                         if oos_win_rate is not None and not (np.isnan(oos_win_rate) or np.isinf(oos_win_rate)):
-                            training_log.append(f"[METRICS] 验证期Win Rate: {oos_win_rate:.2f}%")
+                            new_log_entries.append(f"[METRICS] 验证期Win Rate: {oos_win_rate:.2f}%")
 
                     # 观察期指标（两种模型都显示）
                     obs_rmse = metrics_obj.obs_rmse
                     obs_win_rate = metrics_obj.obs_win_rate
                     if obs_rmse is not None and not (np.isnan(obs_rmse) or np.isinf(obs_rmse)):
-                        training_log.append(f"[METRICS] 观察期RMSE: {obs_rmse:.4f}")
+                        new_log_entries.append(f"[METRICS] 观察期RMSE: {obs_rmse:.4f}")
                     else:
-                        training_log.append(f"[METRICS] 观察期RMSE: N/A")
+                        new_log_entries.append(f"[METRICS] 观察期RMSE: N/A")
 
                     if obs_win_rate is not None and not (np.isnan(obs_win_rate) or np.isinf(obs_win_rate)):
-                        training_log.append(f"[METRICS] 观察期Win Rate: {obs_win_rate:.2f}%")
+                        new_log_entries.append(f"[METRICS] 观察期Win Rate: {obs_win_rate:.2f}%")
                     else:
-                        training_log.append(f"[METRICS] 观察期Win Rate: N/A (数据不足)")
+                        new_log_entries.append(f"[METRICS] 观察期Win Rate: N/A (数据不足)")
 
-                _state.set('dfm_training_log', training_log)
+                training_log = _state.get('dfm_training_log', [])
+                _state.set('dfm_training_log', training_log + new_log_entries)
 
                 st_instance.success("[SUCCESS] 训练完成！")
 

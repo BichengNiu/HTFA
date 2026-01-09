@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 from typing import Optional, Tuple, Callable
 from sklearn.decomposition import PCA
-from dashboard.models.DFM.train.core.kalman import KalmanFilter, kalman_filter
+from dashboard.models.DFM.train.core.kalman import KalmanFilter
 from dashboard.models.DFM.train.core.estimator import (
     estimate_loadings,
     estimate_transition_matrix,
@@ -514,36 +514,3 @@ class DFMModel:
         R_diag_current = np.maximum(R_diag_current, R_MATRIX_MIN_VARIANCE)  # 确保正定性
 
         return np.diag(R_diag_current)
-
-
-def fit_dfm(
-    data: pd.DataFrame,
-    n_factors: int,
-    max_lags: int = 1,
-    max_iter: int = 30,
-    training_start: str = None,
-    train_end: str = None
-) -> DFMModelResult:
-    """拟合DFM模型的函数接口
-
-    Args:
-        data: 观测数据
-        n_factors: 因子数量
-        max_lags: 最大滞后阶数
-        max_iter: 最大迭代次数
-        training_start: 训练期开始日期（必填）
-        train_end: 训练期结束日期（必填）
-
-    Returns:
-        DFMModelResult: 拟合结果
-
-    Raises:
-        ValueError: 如果training_start或train_end未提供
-    """
-    model = DFMModel(
-        n_factors=n_factors,
-        max_lags=max_lags,
-        max_iter=max_iter
-    )
-
-    return model.fit(data, training_start, train_end)

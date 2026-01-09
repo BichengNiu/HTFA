@@ -34,12 +34,8 @@ def _build_temp_predictors(
         return current_predictors + [var]
 
 
-def _get_operation_verb(operation: OperationType, past_tense: bool = False) -> str:
-    """获取操作动词"""
-    if operation == 'remove':
-        return '移除' if not past_tense else '移除'
-    else:
-        return '添加' if not past_tense else '添加'
+# 操作动词映射
+_OPERATION_VERBS = {'remove': '移除', 'add': '添加'}
 
 
 def evaluate_single_variable_change(
@@ -128,7 +124,7 @@ def evaluate_single_variable_change(
         return (var, result)
 
     except Exception as e:
-        verb = _get_operation_verb(operation)
+        verb = _OPERATION_VERBS[operation]
         logger.exception(f"评估{verb}'{var}'时出错: {e}")
         return (var, None)
 
@@ -171,7 +167,7 @@ def parallel_evaluate_changes(
         logger.error("未安装joblib库，无法使用并行评估，请安装: pip install joblib")
         raise
 
-    verb = _get_operation_verb(operation)
+    verb = _OPERATION_VERBS[operation]
     if progress_callback:
         progress_callback(
             f"  并行评估{verb} {len(candidate_vars)} 个候选变量 "
@@ -245,7 +241,7 @@ def serial_evaluate_changes(
         评估结果列表（仅包含成功的评估）
     """
     candidate_results = []
-    verb = _get_operation_verb(operation)
+    verb = _OPERATION_VERBS[operation]
 
     for idx, var in enumerate(candidate_vars, 1):
         # 打印正在尝试的变量

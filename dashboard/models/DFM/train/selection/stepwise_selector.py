@@ -38,7 +38,7 @@ class StepwiseSelector:
         evaluator_func: Callable,
         criterion: str = 'rmse',
         min_variables: int = 1,
-        parallel_config: Optional[ParallelConfig] = None
+        parallel_config: ParallelConfig = None
     ):
         """
         Args:
@@ -48,12 +48,14 @@ class StepwiseSelector:
             )
             criterion: 优化准则,'rmse'(RMSE为主，Win Rate为辅)
             min_variables: 最少保留的变量数
-            parallel_config: 并行配置（None表示使用默认串行）
+            parallel_config: 并行配置（必填）
         """
+        if parallel_config is None:
+            raise ValueError("parallel_config参数必填，请提供ParallelConfig对象")
         self.evaluator_func = evaluator_func
         self.criterion = criterion
         self.min_variables = max(1, min_variables)
-        self.parallel_config = parallel_config or ParallelConfig(enabled=False)
+        self.parallel_config = parallel_config
 
     def select(
         self,

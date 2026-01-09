@@ -225,66 +225,6 @@ def _evaluate_variable_selection_model(
 
 # ========== 工厂函数（返回可调用对象） ==========
 
-def create_dfm_evaluator(config: 'TrainingConfig') -> Callable:
-    """
-    创建DFM评估器（函数式接口）
-
-    返回一个可调用对象，用于BackwardSelector的评估回调。
-
-    重构后：返回一个lambda包装器，调用可序列化的顶层函数。
-
-    Args:
-        config: 训练配置对象
-
-    Returns:
-        评估函数，签名为 (variables: List[str], **kwargs) -> Tuple[float, ...]
-
-    Example:
-        >>> evaluator = create_dfm_evaluator(config)
-        >>> selector = BackwardSelector(evaluator_func=evaluator, ...)
-        >>> metrics = evaluator(
-        ...     variables=['target', 'var1', 'var2'],
-        ...     full_data=data,
-        ...     params={'k_factors': 3}
-        ... )
-    """
-    def evaluate(variables: List[str], **kwargs) -> Tuple[float, float, None, None, float, float, bool, None, None]:
-        """
-        评估指定变量组合的DFM模型性能
-
-        Args:
-            variables: 变量列表（包含目标变量）
-            **kwargs: 其他参数
-                - full_data: 完整数据DataFrame
-                - params: DFM参数字典（包含k_factors等）
-                - max_iter: 最大迭代次数
-
-        Returns:
-            9元组: (is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
-                   is_svd_error, _, _)
-        """
-        # 提取参数
-        full_data = kwargs.get('full_data')
-        k_factors = kwargs.get('params', {}).get('k_factors', 2)
-        max_iterations = kwargs.get('max_iter', config.max_iterations)
-
-        # 调用可序列化的顶层函数
-        return _evaluate_dfm_model(
-            variables=variables,
-            target_variable=config.target_variable,
-            full_data=full_data,
-            k_factors=k_factors,
-            training_start=config.training_start,
-            train_end=config.train_end,
-            validation_start=config.validation_start,
-            validation_end=config.validation_end,
-            max_iterations=max_iterations,
-            tolerance=config.tolerance
-        )
-
-    return evaluate
-
-
 def create_variable_selection_evaluator(config: 'TrainingConfig') -> Callable:
     """
     创建变量筛选专用评估器（函数式接口）
@@ -360,7 +300,6 @@ def extract_serializable_config(config: 'TrainingConfig') -> Dict[str, Any]:
 
 
 __all__ = [
-    'create_dfm_evaluator',
     'create_variable_selection_evaluator',
     '_evaluate_dfm_model',
     '_evaluate_variable_selection_model',

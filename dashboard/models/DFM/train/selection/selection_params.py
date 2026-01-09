@@ -98,64 +98,6 @@ class SelectionParams:
             'kaiser_threshold': self.kaiser_threshold
         }
 
-    @classmethod
-    def from_legacy_args(
-        cls,
-        initial_variables: List[str],
-        target_variable: str,
-        full_data: pd.DataFrame,
-        params: Dict[str, Any],
-        validation_start: str,
-        validation_end: str,
-        target_freq: str,
-        training_start_date: str,
-        train_end_date: str,
-        target_mean_original: float = 0.0,
-        target_std_original: float = 1.0,
-        max_iter: int = 30,
-        max_lags: int = 1,
-        progress_callback: Optional[Callable[[str], None]] = None,
-        use_optimization: bool = False
-    ) -> 'SelectionParams':
-        """
-        从旧接口参数创建SelectionParams
-
-        Args:
-            与BackwardSelector.select()相同的参数
-
-        Returns:
-            SelectionParams实例
-        """
-        return cls(
-            initial_variables=initial_variables,
-            target_variable=target_variable,
-            full_data=full_data,
-            training_start_date=training_start_date,
-            train_end_date=train_end_date,
-            validation_start=validation_start,
-            validation_end=validation_end,
-            k_factors=params.get('k_factors', 2),
-            max_iter=max_iter,
-            max_lags=max_lags,
-            target_freq=target_freq,
-            target_mean_original=target_mean_original,
-            target_std_original=target_std_original,
-            rmse_tolerance_percent=params.get('rmse_tolerance_percent', 1.0),
-            win_rate_tolerance_percent=params.get('win_rate_tolerance_percent', 5.0),
-            selection_criterion=params.get('selection_criterion', 'hybrid'),
-            prioritize_win_rate=params.get('prioritize_win_rate', True),
-            training_weight=params.get('training_weight', 0.5),
-            factor_selection_method=params.get('factor_selection_method', 'fixed'),
-            pca_threshold=params.get('pca_threshold', 0.9),
-            kaiser_threshold=params.get('kaiser_threshold', 1.0),
-            progress_callback=progress_callback,
-            use_optimization=use_optimization,
-            extra_params={k: v for k, v in params.items() if k not in [
-                'k_factors', 'rmse_tolerance_percent', 'win_rate_tolerance_percent',
-                'selection_criterion', 'prioritize_win_rate', 'training_weight',
-                'factor_selection_method', 'pca_threshold', 'kaiser_threshold'
-            ]}
-        )
 
 
 __all__ = ['SelectionParams']

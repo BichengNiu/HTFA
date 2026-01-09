@@ -46,12 +46,12 @@ class TrainingConfig:
     # 变量选择配置
     enable_variable_selection: bool = False
     variable_selection_method: str = 'backward'
-    min_variables_after_selection: Optional[int] = None
+    min_variables_after_selection: int = 1
 
     # 因子数选择配置
     factor_selection_method: str = 'fixed'  # fixed, cumulative, kaiser
-    pca_threshold: Optional[float] = 0.9  # cumulative方法的阈值
-    kaiser_threshold: Optional[float] = 1.0  # kaiser方法的特征值阈值
+    pca_threshold: float = 0.9  # cumulative方法的阈值
+    kaiser_threshold: float = 1.0  # kaiser方法的特征值阈值
 
     # 并行计算配置（2025-11-08重构后默认启用）
     enable_parallel: bool = True  # 是否启用并行计算（重构后已解决序列化问题）

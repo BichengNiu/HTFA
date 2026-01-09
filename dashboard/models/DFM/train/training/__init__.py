@@ -12,7 +12,6 @@
 from dashboard.models.DFM.train.training.trainer import DFMTrainer
 from dashboard.models.DFM.train.training.config import TrainingConfig
 from dashboard.models.DFM.train.training.model_ops import train_dfm_with_forecast, evaluate_model_performance
-from dashboard.models.DFM.train.training.evaluator_strategy import create_dfm_evaluator
 from dashboard.models.DFM.train.core.models import (
     EvaluationMetrics,
     DFMModelResult,
@@ -27,9 +26,6 @@ __all__ = [
     # 模型操作
     'train_dfm_with_forecast',
     'evaluate_model_performance',
-
-    # 评估策略
-    'create_dfm_evaluator',
 
     # 数据模型
     'EvaluationMetrics',

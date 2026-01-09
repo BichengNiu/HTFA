@@ -40,7 +40,7 @@ class BackwardSelector:
         evaluator_func: Callable,
         criterion: str = 'rmse',
         min_variables: int = 1,
-        parallel_config: Optional[ParallelConfig] = None
+        parallel_config: ParallelConfig = None
     ):
         """
         Args:
@@ -50,12 +50,14 @@ class BackwardSelector:
             )
             criterion: 优化准则,'rmse'(RMSE为主，Win Rate为辅)
             min_variables: 最少保留的变量数
-            parallel_config: 并行配置（None表示使用默认串行）
+            parallel_config: 并行配置（必填）
         """
+        if parallel_config is None:
+            raise ValueError("parallel_config参数必填，请提供ParallelConfig对象")
         self.evaluator_func = evaluator_func
         self.criterion = criterion
         self.min_variables = max(1, min_variables)
-        self.parallel_config = parallel_config or ParallelConfig(enabled=False)
+        self.parallel_config = parallel_config
 
     def select(
         self,
@@ -278,13 +280,8 @@ class BackwardSelector:
         iteration: int
     ) -> bool:
         """判断是否应该继续变量选择"""
-        # 基本条件：变量数大于最小要求
-        if len(current_predictors) > self.min_variables:
-            return True
-
-        # 调试模式：至少执行一次
-        force_debug_run = len(current_predictors) >= 3
-        return force_debug_run and iteration == 0
+        # 变量数大于最小要求时继续选择
+        return len(current_predictors) > self.min_variables
 
     def _log_iteration_start(
         self,
