@@ -364,7 +364,7 @@ def _render_nowcast_chart(st, accessor: DFMMetadataAccessor, is_ddfm: bool) -> N
     # 设置图表布局
     fig.update_layout(
         title=dict(
-            text=f'周度 {nowcast_display_name} vs. {target_display_name}',
+            text=f'{target_display_name}实时预测',
             x=0.5,
             xanchor='center',
             yanchor='top'
@@ -386,11 +386,13 @@ def _render_nowcast_chart(st, accessor: DFMMetadataAccessor, is_ddfm: bool) -> N
     st.plotly_chart(fig, width='stretch')
 
     # 提供数据下载
-    csv_data = comparison_df.to_csv(index=True).encode('utf-8-sig')
+    comparison_df_download = comparison_df.copy()
+    comparison_df_download.columns = ["实时预测", target_display_name]
+    csv_data = comparison_df_download.to_csv(index=True).encode('utf-8-sig')
     st.download_button(
         label="数据下载",
         data=csv_data,
-        file_name=f"nowcast_vs_{target_variable_name_for_plot}_aligned.csv",
+        file_name=f"{target_variable_name_for_plot}实时预测.csv",
         mime="text/csv",
         key="download_nowcast_comparison",
         type="primary"
@@ -439,6 +441,25 @@ def _render_pca_section(st, accessor: DFMMetadataAccessor, is_ddfm: bool) -> Non
     st.dataframe(pca_df_display, width='stretch')
 
 
+def _translate_factor_name(factor_name: str) -> str:
+    """
+    将英文因子名称转换为中文
+
+    Args:
+        factor_name: 原始因子名称(如'factor_1')
+
+    Returns:
+        str: 中文因子名称(如'因子1')
+    """
+    if isinstance(factor_name, str) and factor_name.lower().startswith('factor_'):
+        try:
+            num = factor_name.split('_')[1]
+            return f"因子{num}"
+        except (IndexError, ValueError):
+            return factor_name
+    return factor_name
+
+
 def _render_factor_loadings(st, accessor: DFMMetadataAccessor) -> bool:
     """
     渲染因子载荷热力图
@@ -478,7 +499,7 @@ def _render_factor_loadings(st, accessor: DFMMetadataAccessor) -> bool:
 
     factor_names_original = data_for_clustering.columns.tolist()
     z_values = data_for_clustering.values
-    x_labels_heatmap = factor_names_original
+    x_labels_heatmap = [_translate_factor_name(name) for name in factor_names_original]
 
     fig_heatmap = go.Figure(data=go.Heatmap(
         z=z_values,
@@ -518,9 +539,8 @@ def _render_factor_loadings(st, accessor: DFMMetadataAccessor) -> bool:
     left_margin = max(200, max_label_width)
 
     fig_heatmap.update_layout(
-        title="因子载荷聚类热力图 (Factor Loadings Clustermap)",
-        xaxis_title="因子 (Factors)",
-        yaxis_title="变量 (Predictors)",
+        title="因子载荷聚类热力图",
+        xaxis_title="因子",
         yaxis=dict(
             type='category',
             categoryorder='array',
@@ -538,11 +558,13 @@ def _render_factor_loadings(st, accessor: DFMMetadataAccessor) -> bool:
         st.plotly_chart(fig_heatmap, width='stretch')
 
     # Download button for factor loadings data
-    csv_loadings = factor_loadings_df.to_csv(index=True).encode('utf-8-sig')
+    factor_loadings_df_cn = factor_loadings_df.copy()
+    factor_loadings_df_cn.columns = [_translate_factor_name(col) for col in factor_loadings_df_cn.columns]
+    csv_loadings = factor_loadings_df_cn.to_csv(index=True).encode('utf-8-sig')
     st.download_button(
         label="数据下载",
         data=csv_loadings,
-        file_name="factor_loadings.csv",
+        file_name="因子载荷.csv",
         mime="text/csv",
         key="download_factor_loadings",
         type="primary"
@@ -585,6 +607,7 @@ def _render_factor_timeseries(st, accessor: DFMMetadataAccessor) -> None:
 
             if factor_idx < num_factors:
                 factor_name = factor_names[factor_idx]
+                factor_name_cn = _translate_factor_name(factor_name)
 
                 with cols[col_idx]:
                     factor_data = factor_series_data[factor_name].dropna()
@@ -596,18 +619,18 @@ def _render_factor_timeseries(st, accessor: DFMMetadataAccessor) -> None:
                             x=factor_data.index,
                             y=factor_data.values,
                             mode='lines+markers',
-                            name=factor_name,
+                            name=factor_name_cn,
                             line=dict(width=2),
                             marker=dict(size=4),
                             hovertemplate=(
                                 f"日期: %{{x|%Y/%m/%d}}<br>" +
-                                f"{factor_name}: %{{y:.4f}}<extra></extra>"
+                                f"{factor_name_cn}: %{{y:.4f}}<extra></extra>"
                             )
                         ))
 
                         fig_factor.update_layout(
-                            title=f"{factor_name}",
-                            xaxis_title="日期",
+                            title=f"{factor_name_cn}",
+                            xaxis_title="",
                             yaxis_title="因子值",
                             height=400,
                             margin=dict(t=60, b=80, l=60, r=30),
@@ -619,14 +642,16 @@ def _render_factor_timeseries(st, accessor: DFMMetadataAccessor) -> None:
 
                         st.plotly_chart(fig_factor, width='stretch')
                     else:
-                        st.warning(f"{factor_name}数据为空，无法绘制图表。")
+                        st.warning(f"{factor_name_cn}数据为空，无法绘制图表。")
 
     # 提供所有因子数据的统一下载
-    all_factors_csv = factor_series_data.to_csv(index=True).encode('utf-8-sig')
+    factor_series_data_cn = factor_series_data.copy()
+    factor_series_data_cn.columns = [_translate_factor_name(col) for col in factor_series_data_cn.columns]
+    all_factors_csv = factor_series_data_cn.to_csv(index=True).encode('utf-8-sig')
     st.download_button(
         label="数据下载",
         data=all_factors_csv,
-        file_name="所有因子时间序列.csv",
+        file_name="因子时间序列.csv",
         mime="text/csv",
         key="download_all_factors_timeseries",
         type="primary"

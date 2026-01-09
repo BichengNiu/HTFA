@@ -291,6 +291,10 @@ def render_dfm_model_training_page(st_instance):
     if current_algorithm not in UIConfig.ALGORITHM_OPTIONS:
         raise ValueError(f"无效的算法类型: {current_algorithm}，有效值: {list(UIConfig.ALGORITHM_OPTIONS.keys())}")
 
+    # 初始化前一次算法值（用于检测变化）
+    if _state.get('_prev_dfm_algorithm') is None:
+        _state.set('_prev_dfm_algorithm', current_algorithm)
+
     # 深度学习模式标志
     is_deep_learning_mode = (current_algorithm == 'deep_learning')
 
@@ -313,6 +317,11 @@ def render_dfm_model_training_page(st_instance):
         )
         _state.set('dfm_algorithm', algorithm_value)
         current_algorithm = algorithm_value
+
+        # 检测算法变化，触发rerun以更新UI布局
+        if algorithm_value != _state.get('_prev_dfm_algorithm'):
+            _state.set('_prev_dfm_algorithm', algorithm_value)
+            st_instance.rerun()
 
     with col_align:
         current_alignment = _state.get('dfm_target_alignment_mode', UIConfig.DEFAULT_TARGET_ALIGNMENT)
