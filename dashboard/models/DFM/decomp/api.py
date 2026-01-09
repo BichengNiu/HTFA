@@ -117,7 +117,7 @@ def execute_news_analysis(
             factor_states_predicted=saved_nowcast_data.factor_states_predicted,
             factor_loadings=saved_nowcast_data.factor_loadings,
             variable_index_map=saved_nowcast_data.variable_index_map,
-            time_index=saved_nowcast_data.nowcast_series.index
+            time_index=saved_nowcast_data.prepared_data.index
         )
         print("[API] 先验预测器创建成功")
 
