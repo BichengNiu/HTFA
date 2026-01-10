@@ -31,8 +31,7 @@ class SavedNowcastData:
         self.target_factor_loading: Optional[np.ndarray] = None  # 新增：目标变量的因子载荷向量
         self.factor_series: Optional[pd.DataFrame] = None
         self.target_variable: Optional[str] = None
-        self.target_variable_index: Optional[int] = None  # 新增：目标变量在观测向量中的索引
-        self.variable_index_map: Optional[Dict[str, int]] = None  # 新增：变量名到索引的映射
+        self.variable_index_map: Optional[Dict[str, int]] = None  # 变量名到索引的映射
         self.var_industry_map: Optional[Dict[str, str]] = None  # 新增：变量名到行业分类的映射
         self.model_parameters: Optional[Dict[str, Any]] = None
         self.metadata: Optional[Dict[str, Any]] = None
@@ -186,9 +185,8 @@ class ModelLoader:
             # 5. 提取目标变量信息
             nowcast_data.target_variable = self._extract_target_variable()
 
-            # 6. 提取变量映射（target_variable_index已弃用，保持为None）
+            # 6. 提取变量映射
             nowcast_data.variable_index_map = self._extract_variable_mapping()
-            nowcast_data.target_variable_index = None  # 目标变量不在预测变量映射中
 
             # 7. 提取模型参数
             nowcast_data.model_parameters = self._extract_model_parameters()
@@ -724,7 +722,6 @@ class ModelLoader:
             info.update({
                 "nowcast_data_points": len(self._nowcast_data.nowcast_series) if self._nowcast_data.nowcast_series is not None else 0,
                 "target_variable": self._nowcast_data.target_variable,
-                "target_variable_index": self._nowcast_data.target_variable_index,
                 "data_period": self._nowcast_data.data_period,
                 "factor_count": factor_count,
                 "variable_count": variable_count,

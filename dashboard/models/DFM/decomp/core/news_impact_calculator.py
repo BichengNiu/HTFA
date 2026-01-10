@@ -11,10 +11,9 @@ import pandas as pd
 import logging
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from ..utils.exceptions import ComputationError, ValidationError
-from ..utils.helpers import detect_outliers
 from ..utils.constants import (
     KEY_DRIVERS_CONTRIBUTION_THRESHOLD,
     PRIMARY_DRIVERS_RANK_THRESHOLD,
@@ -39,19 +38,6 @@ class NewsContribution:
     expected_value: float
     kalman_weight: float
     confidence_interval: Optional[Tuple[float, float]] = None  # 与ImpactResult保持一致
-
-
-@dataclass
-class ContributionSummary:
-    """贡献汇总信息"""
-    total_impact: float
-    positive_impact: float
-    negative_impact: float
-    net_impact: float
-    positive_contributions: List[NewsContribution]
-    negative_contributions: List[NewsContribution]
-    contribution_count: int
-    unique_variables: int
 
 
 class NewsImpactCalculator:
@@ -372,99 +358,6 @@ class NewsImpactCalculator:
         except Exception as e:
             raise ComputationError(f"关键驱动识别失败: {str(e)}", "key_drivers_identification")
 
-    def analyze_temporal_patterns(
-        self,
-        contributions: List[NewsContribution],
-        time_window: str = "W"
-    ) -> Dict[str, Any]:
-        """
-        分析时间模式
-
-        Args:
-            contributions: 新闻贡献列表
-            time_window: 时间窗口 ("D", "W", "M", "Q")
-
-        Returns:
-            时间模式分析结果
-
-        Raises:
-            ComputationError: 分析失败时抛出
-        """
-        try:
-            # 创建时间序列数据
-            contribution_data = []
-            for c in contributions:
-                contribution_data.append({
-                    'timestamp': c.release_date,
-                    'impact_value': c.impact_value,
-                    'variable_name': c.variable_name,
-                    'is_positive': c.is_positive,
-                    'contribution_pct': c.contribution_pct
-                })
-
-            df = pd.DataFrame(contribution_data)
-            df.set_index('timestamp', inplace=True)
-
-            # 按时间窗口聚合
-            if time_window == "D":
-                grouped = df.resample('D')
-            elif time_window == "W":
-                grouped = df.resample('W')
-            elif time_window == "M":
-                grouped = df.resample('M')
-            elif time_window == "Q":
-                grouped = df.resample('Q')
-            else:
-                raise ValidationError(f"不支持的时间窗口: {time_window}")
-
-            # 计算各时间窗口的统计指标
-            temporal_stats = []
-            for timestamp, group in grouped:
-                if len(group) > 0:
-                    stats = {
-                        'timestamp': timestamp,
-                        'count': len(group),
-                        'total_impact': group['impact_value'].sum(),
-                        'avg_impact': group['impact_value'].mean(),
-                        'positive_count': group['is_positive'].sum(),
-                        'negative_count': len(group) - group['is_positive'].sum(),
-                        'unique_variables': group['variable_name'].nunique(),
-                        'max_single_impact': group['impact_value'].abs().max(),
-                        'total_contribution_pct': group['contribution_pct'].sum()
-                    }
-                    temporal_stats.append(stats)
-
-            temporal_df = pd.DataFrame(temporal_stats)
-            temporal_df.set_index('timestamp', inplace=True)
-
-            # 识别异常活跃期
-            outlier_mask = detect_outliers(temporal_df['count'], method="zscore", threshold=2.0)
-            active_periods = temporal_df[outlier_mask]
-
-            # 计算趋势
-            if len(temporal_df) > 1:
-                impact_trend = np.polyfit(range(len(temporal_df)), temporal_df['total_impact'], 1)[0]
-                frequency_trend = np.polyfit(range(len(temporal_df)), temporal_df['count'], 1)[0]
-            else:
-                impact_trend = 0
-                frequency_trend = 0
-
-            temporal_patterns = {
-                'temporal_stats': temporal_df,
-                'active_periods': active_periods,
-                'time_window': time_window,
-                'impact_trend': impact_trend,
-                'frequency_trend': frequency_trend,
-                'peak_period': temporal_df.loc[temporal_df['total_impact'].abs().idxmax()].to_dict() if len(temporal_df) > 0 else None,
-                'most_active_period': temporal_df.loc[temporal_df['count'].idxmax()].to_dict() if len(temporal_df) > 0 else None
-            }
-
-            logger.info(f"时间模式分析: {time_window} 窗口")
-            return temporal_patterns
-
-        except Exception as e:
-            raise ComputationError(f"时间模式分析失败: {str(e)}", "temporal_patterns_analysis")
-
     def _analyze_driver_patterns(
         self,
         key_drivers: pd.DataFrame,
@@ -494,56 +387,3 @@ class NewsImpactCalculator:
         except Exception as e:
             logger.warning(f"驱动模式分析警告: {str(e)}")
             return {}
-
-    def get_comprehensive_summary(
-        self,
-        contributions: List[NewsContribution]
-    ) -> Dict[str, Any]:
-        """
-        获取综合摘要报告
-
-        Args:
-            contributions: 新闻贡献列表
-
-        Returns:
-            综合摘要报告
-        """
-        try:
-            # 基础统计
-            total_impact = sum(c.impact_value for c in contributions)
-            positive_count = sum(1 for c in contributions if c.is_positive)
-            negative_count = len(contributions) - positive_count
-            unique_variables = len(set(c.variable_name for c in contributions))
-
-            # 正负影响分解
-            pn_split = self.calculate_positive_negative_split(contributions)
-
-            # 变量排名
-            ranking_df = self.rank_variables_by_impact(contributions)
-
-            # 关键驱动
-            key_drivers = self.identify_key_drivers(contributions)
-
-            # 时间模式
-            temporal_patterns = self.analyze_temporal_patterns(contributions)
-
-            summary = {
-                'basic_stats': {
-                    'total_contributions': len(contributions),
-                    'total_impact': total_impact,
-                    'positive_count': positive_count,
-                    'negative_count': negative_count,
-                    'unique_variables': unique_variables,
-                    'avg_impact': total_impact / len(contributions) if contributions else 0
-                },
-                'positive_negative_split': pn_split,
-                'variable_ranking': ranking_df,
-                'key_drivers': key_drivers,
-                'temporal_patterns': temporal_patterns,
-                'analysis_timestamp': datetime.now().isoformat()
-            }
-
-            return summary
-
-        except Exception as e:
-            raise ComputationError(f"综合摘要生成失败: {str(e)}", "comprehensive_summary")

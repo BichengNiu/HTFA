@@ -19,7 +19,6 @@ from .core.nowcast_extractor import NowcastExtractor
 from .core.impact_analyzer import ImpactAnalyzer, DataRelease
 from .core.news_impact_calculator import NewsImpactCalculator, NewsContribution
 from .core.prior_predictor import ObservationPriorPredictor
-from .visualization.waterfall_plotter import ImpactWaterfallPlotter
 from .utils.industry_aggregator import IndustryAggregator
 from .utils.data_flow_formatter import DataFlowFormatter
 from .utils.exceptions import DecompError, ModelLoadError, ComputationError, ValidationError
@@ -31,8 +30,6 @@ def execute_news_analysis(
     dfm_model_file_content: bytes,
     dfm_metadata_file_content: bytes,
     target_month: str,
-    plot_start_date: Optional[str] = None,
-    plot_end_date: Optional[str] = None,
     base_workspace_dir: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -44,8 +41,6 @@ def execute_news_analysis(
         dfm_model_file_content: 包含已计算nowcast值的DFM模型文件字节内容
         dfm_metadata_file_content: 模型元数据文件字节内容
         target_month: 目标分析月份 (YYYY-MM格式)
-        plot_start_date: 图表开始日期
-        plot_end_date: 图表结束日期
         base_workspace_dir: 工作目录（可选）
 
     Returns:
@@ -56,7 +51,6 @@ def execute_news_analysis(
             - 'contributions': 贡献分解CSV
         - plot_paths: Dict[str, str]
             - 'combined_chart': 纽约联储风格组合图表HTML
-            - 'waterfall': 影响瀑布图HTML（保留兼容性）
         - summary: Dict[str, Any]
             - 'total_impact': 总影响值
             - 'total_releases': 数据发布总数
@@ -598,21 +592,6 @@ def _create_visualizations(
             )
 
         plot_paths = {}
-
-        if contributions:
-            # 创建瀑布图
-            waterfall_plotter = ImpactWaterfallPlotter()
-            waterfall_fig = waterfall_plotter.create_waterfall_chart(
-                contributions,
-                title=f"数据发布影响瀑布图 - {target_date.strftime('%Y年%m月')}"
-            )
-
-            waterfall_path = waterfall_plotter.save_plot_as_html(
-                waterfall_fig,
-                filename=f"impact_waterfall_{target_date.strftime('%Y%m%d')}.html",
-                directory=workspace_dir
-            )
-            plot_paths['waterfall'] = waterfall_path
 
         print(f"[API] 可视化创建完成: {len(plot_paths)} 个图表")
         return plot_paths

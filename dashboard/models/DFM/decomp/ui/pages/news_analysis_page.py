@@ -169,9 +169,7 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
             result = execute_news_analysis(
                 dfm_model_file_content=model_file.getbuffer(),
                 dfm_metadata_file_content=metadata_file.getbuffer(),
-                target_month=target_month,
-                plot_start_date=None,
-                plot_end_date=None
+                target_month=target_month
             )
 
             if result['returncode'] == 0:
