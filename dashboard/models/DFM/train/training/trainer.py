@@ -248,21 +248,19 @@ class DFMTrainer:
                             'win_rate_tolerance_percent': self.config.win_rate_tolerance_percent,
                             'selection_criterion': self.config.selection_criterion,
                             'prioritize_win_rate': self.config.prioritize_win_rate,
-                            'training_weight': self.config.training_weight,  # 训练期权重（2025-12-20修复）
-                            # 动态因子选择参数（2026-01-03新增）
+                            'training_weight': self.config.training_weight,
                             'factor_selection_method': self.config.factor_selection_method,
                             'pca_threshold': self.config.pca_threshold,
-                            'kaiser_threshold': self.config.kaiser_threshold
+                            'kaiser_threshold': self.config.kaiser_threshold,
+                            'tolerance': self.config.tolerance,
+                            'alignment_mode': self.config.target_alignment_mode
                         },
                         validation_start=self.config.validation_start,
                         validation_end=self.config.validation_end,
                         target_freq=self.config.target_freq,
                         training_start_date=self.config.training_start,
                         train_end_date=self.config.train_end,
-                        target_mean_original=target_data.mean(),
-                        target_std_original=target_data.std(),
                         max_iter=self.config.max_iterations,
-                        max_lags=1,
                         progress_callback=progress_callback
                     )
 

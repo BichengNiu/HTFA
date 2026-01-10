@@ -402,15 +402,6 @@ def render_dfm_model_training_page(st_instance):
             help="模型训练数据的起始日期，默认为数据开始日期"
         )
         _state.set('dfm_training_start_date', training_start_value)
-        # 显示算法模式说明
-        if current_algorithm == 'deep_learning':
-            st_instance.caption(
-                f"DDFM模式: 使用从训练期开始到观察期上一{freq_label}的全部数据进行训练"
-            )
-        else:
-            st_instance.caption(
-                "经典DFM模式: 模型在训练期数据上拟合参数，在验证期数据上评估性能"
-            )
 
     # 判断是否为DDFM模式
     is_ddfm_mode = (current_algorithm == 'deep_learning')
@@ -463,6 +454,16 @@ def render_dfm_model_training_page(st_instance):
             # 经典DFM：validation_end = observation_start的前一期
             validation_end_value = get_previous_period_date(observation_start_value, target_freq_code, periods=1)
             _state.set('dfm_validation_end_date', validation_end_value)
+
+    # 显示算法模式说明（占据整行）
+    if current_algorithm == 'deep_learning':
+        st_instance.caption(
+            f"DDFM模式: 使用从训练期开始到观察期上一{freq_label}的全部数据进行训练"
+        )
+    else:
+        st_instance.caption(
+            "经典DFM模式: 模型在训练期数据上拟合参数，在验证期数据上评估性能"
+        )
 
     # ===== 高级选项 (折叠) =====
     is_deep_learning = (algorithm_value == 'deep_learning')

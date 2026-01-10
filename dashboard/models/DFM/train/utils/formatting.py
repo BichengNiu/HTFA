@@ -130,9 +130,65 @@ def generate_progress_bar(current: int, total: int, width: int = 20) -> str:
     return f"[{bar}]"
 
 
+def format_win_rate(value: float) -> str:
+    """
+    格式化胜率显示
+
+    Args:
+        value: 胜率值（0-100的百分比）
+
+    Returns:
+        str: 格式化的胜率字符串，如 "75.5%" 或 "N/A"
+    """
+    if np.isfinite(value):
+        return f"{value:.1f}%"
+    return "N/A"
+
+
+def format_rmse_change(old_rmse: float, new_rmse: float) -> str:
+    """
+    格式化RMSE变化
+
+    Args:
+        old_rmse: 原RMSE值
+        new_rmse: 新RMSE值
+
+    Returns:
+        str: 格式化的变化字符串，如 "降低5.2%" 或 "上升3.1%" 或 "N/A"
+    """
+    if old_rmse <= 0 or not np.isfinite(old_rmse) or not np.isfinite(new_rmse):
+        return "N/A"
+    pct = (old_rmse - new_rmse) / old_rmse * 100
+    if pct >= 0:
+        return f"降低{pct:.1f}%"
+    return f"上升{abs(pct):.1f}%"
+
+
+def format_win_rate_change(old_win_rate: float, new_win_rate: float) -> str:
+    """
+    格式化胜率变化
+
+    Args:
+        old_win_rate: 原胜率值
+        new_win_rate: 新胜率值
+
+    Returns:
+        str: 格式化的变化字符串，如 "提升5.0%" 或 "下降3.0%" 或空字符串
+    """
+    if not np.isfinite(old_win_rate) or not np.isfinite(new_win_rate):
+        return ""
+    delta = new_win_rate - old_win_rate
+    if delta >= 0:
+        return f"提升{delta:.1f}%"
+    return f"下降{abs(delta):.1f}%"
+
+
 __all__ = [
     'format_training_config',
     'format_training_summary',
     'print_training_summary',
     'generate_progress_bar',
+    'format_win_rate',
+    'format_rmse_change',
+    'format_win_rate_change',
 ]

@@ -50,15 +50,20 @@ def estimate_loadings(
     obs_data = observables.copy()
 
     if use_train_only and train_end:
-        try:
-            factors_data = factors_data.loc[:train_end]
-            if isinstance(obs_data, pd.Series):
-                obs_data = obs_data.loc[:train_end]
-            else:
-                obs_data = obs_data.loc[:train_end]
-            logger.debug(f"使用训练期数据估计载荷: {len(factors_data)}个样本")
-        except KeyError:
-            logger.warning(f"训练期结束日期{train_end}无效，使用全部数据")
+        # Validate train_end exists in index before slicing
+        train_end_ts = pd.Timestamp(train_end)
+        if train_end_ts not in factors_data.index and train_end_ts > factors_data.index.max():
+            raise ValueError(
+                f"训练期结束日期 {train_end} 超出数据范围。"
+                f"数据范围: {factors_data.index.min().strftime('%Y-%m-%d')} 至 "
+                f"{factors_data.index.max().strftime('%Y-%m-%d')}"
+            )
+        factors_data = factors_data.loc[:train_end]
+        if isinstance(obs_data, pd.Series):
+            obs_data = obs_data.loc[:train_end]
+        else:
+            obs_data = obs_data.loc[:train_end]
+        logger.debug(f"使用训练期数据估计载荷: {len(factors_data)}个样本")
 
     n_factors = factors_data.shape[1]
 

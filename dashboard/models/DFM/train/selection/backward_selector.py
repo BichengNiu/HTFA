@@ -16,7 +16,7 @@ from dashboard.models.DFM.train.evaluation.metrics import (
 )
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
 from dashboard.models.DFM.train.utils.formatting import generate_progress_bar
-from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_changes
+from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_variable_changes
 
 logger = get_logger(__name__)
 
@@ -54,9 +54,11 @@ class BackwardSelector:
         """
         if parallel_config is None:
             raise ValueError("parallel_config参数必填，请提供ParallelConfig对象")
+        if min_variables < 1:
+            raise ValueError(f"min_variables必须 >= 1, 当前值: {min_variables}")
         self.evaluator_func = evaluator_func
         self.criterion = criterion
-        self.min_variables = max(1, min_variables)
+        self.min_variables = min_variables
         self.parallel_config = parallel_config
 
     def select(
@@ -70,12 +72,8 @@ class BackwardSelector:
         target_freq: str,
         training_start_date: str,
         train_end_date: str,
-        target_mean_original: float = 0.0,
-        target_std_original: float = 1.0,
         max_iter: int = 30,
-        max_lags: int = 1,
-        progress_callback: Optional[Callable[[str], None]] = None,
-        use_optimization: bool = False
+        progress_callback: Optional[Callable[[str], None]] = None
     ) -> SelectionResult:
         """
         执行后向变量选择
@@ -90,16 +88,21 @@ class BackwardSelector:
             target_freq: 目标频率
             training_start_date: 训练集开始日期（必填）
             train_end_date: 训练集结束日期（必填）
-            target_mean_original: 目标变量原始均值
-            target_std_original: 目标变量原始标准差
             max_iter: 最大EM迭代次数
-            max_lags: 最大滞后阶数
             progress_callback: 进度回调函数
-            use_optimization: 是否使用预计算优化
 
         Returns:
             SelectionResult对象
         """
+        # 验证params中的必需键
+        required_param_keys = ['k_factors', 'rmse_tolerance_percent', 'win_rate_tolerance_percent',
+                               'selection_criterion', 'prioritize_win_rate', 'training_weight',
+                               'factor_selection_method', 'pca_threshold', 'kaiser_threshold',
+                               'tolerance', 'alignment_mode']
+        for key in required_param_keys:
+            if key not in params:
+                raise ValueError(f"params缺少必需参数: {key}")
+
         # 保存评估参数供辅助方法使用
         self._eval_params = {
             'full_data': full_data,
@@ -110,16 +113,15 @@ class BackwardSelector:
             'target_freq': target_freq,
             'training_start_date': training_start_date,
             'train_end_date': train_end_date,
-            'target_mean_original': target_mean_original,
-            'target_std_original': target_std_original,
             'max_iter': max_iter,
-            'max_lags': max_lags,
-            'progress_callback': progress_callback,  # 添加progress_callback
-            'rmse_tolerance_percent': params.get('rmse_tolerance_percent', 1.0),  # RMSE容忍度配置
-            'win_rate_tolerance_percent': params.get('win_rate_tolerance_percent', 5.0),  # Win Rate容忍度配置
-            'selection_criterion': params.get('selection_criterion', 'hybrid'),  # 筛选标准
-            'prioritize_win_rate': params.get('prioritize_win_rate', True),  # 混合策略优先级
-            'training_weight': params.get('training_weight', 0.5)  # 训练期权重（2025-12-20新增）
+            'tolerance': params['tolerance'],
+            'alignment_mode': params['alignment_mode'],
+            'progress_callback': progress_callback,
+            'rmse_tolerance_percent': params['rmse_tolerance_percent'],
+            'win_rate_tolerance_percent': params['win_rate_tolerance_percent'],
+            'selection_criterion': params['selection_criterion'],
+            'prioritize_win_rate': params['prioritize_win_rate'],
+            'training_weight': params['training_weight']
         }
 
         total_evaluations = 0
@@ -170,10 +172,10 @@ class BackwardSelector:
             comparison = compare_scores_with_winrate(
                 best_score_this_iter,
                 current_best_score,
-                rmse_tolerance_percent=self._eval_params.get('rmse_tolerance_percent', 1.0),
-                win_rate_tolerance_percent=self._eval_params.get('win_rate_tolerance_percent', 5.0),
-                selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
-                prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+                rmse_tolerance_percent=self._eval_params['rmse_tolerance_percent'],
+                win_rate_tolerance_percent=self._eval_params['win_rate_tolerance_percent'],
+                selection_criterion=self._eval_params['selection_criterion'],
+                prioritize_win_rate=self._eval_params['prioritize_win_rate']
             )
             if comparison < 0:
                 logger.warning(
@@ -243,7 +245,7 @@ class BackwardSelector:
             # 使用加权得分计算（2025-12-20修改）
             score = calculate_weighted_score(
                 is_rmse, oos_rmse, is_win_rate, oos_win_rate,
-                training_weight=self._eval_params.get('training_weight', 0.5)
+                training_weight=self._eval_params['training_weight']
             )
 
             if not np.isfinite(score[1]):
@@ -315,32 +317,31 @@ class BackwardSelector:
         total_svd_errors = 0
 
         target_variable = self._eval_params['target_variable']
-        k_factors = self._eval_params['params'].get('k_factors', 1)
-        progress_callback = self._eval_params.get('progress_callback')
+        k_factors = self._eval_params['params']['k_factors']
+        progress_callback = self._eval_params['progress_callback']
 
         # 判断是否使用并行
         use_parallel = self.parallel_config.should_use_parallel(len(current_predictors))
 
         if use_parallel:
             # 准备可序列化的评估器配置（从eval_params提取，移除不可序列化的progress_callback）
-            # 从self._eval_params提取可序列化的配置
             evaluator_config = {
                 'training_start': self._eval_params['training_start_date'],
                 'train_end': self._eval_params['train_end_date'],
                 'validation_start': self._eval_params['validation_start'],
                 'validation_end': self._eval_params['validation_end'],
-                'max_iterations': self._eval_params.get('max_iter', 30),
-                'tolerance': self._eval_params.get('tolerance', 1e-4),
-                'alignment_mode': self._eval_params.get('alignment_mode', 'next_month'),
-                # 动态因子选择参数（2026-01-03新增）
-                'factor_selection_method': self._eval_params['params'].get('factor_selection_method', 'fixed'),
-                'pca_threshold': self._eval_params['params'].get('pca_threshold', 0.9),
-                'kaiser_threshold': self._eval_params['params'].get('kaiser_threshold', 1.0)
+                'max_iterations': self._eval_params['max_iter'],
+                'tolerance': self._eval_params['tolerance'],
+                'alignment_mode': self._eval_params['alignment_mode'],
+                'factor_selection_method': self._eval_params['params']['factor_selection_method'],
+                'pca_threshold': self._eval_params['params']['pca_threshold'],
+                'kaiser_threshold': self._eval_params['params']['kaiser_threshold']
             }
 
             # 并行评估
-            logger.info(f"  使用并行评估 ({self.parallel_config.get_effective_n_jobs()} 核心)")
-            candidate_results = evaluate_changes(
+            n_jobs = self.parallel_config.get_effective_n_jobs()
+            logger.info(f"  使用并行评估 ({n_jobs} 核心)")
+            candidate_results = evaluate_variable_changes(
                 current_predictors=current_predictors,
                 candidate_vars=current_predictors,
                 target_variable=target_variable,
@@ -348,8 +349,7 @@ class BackwardSelector:
                 k_factors=k_factors,
                 evaluator_config=evaluator_config,
                 operation='remove',
-                use_parallel=True,
-                n_jobs=self.parallel_config.get_effective_n_jobs(),
+                n_jobs=n_jobs,
                 backend=self.parallel_config.backend,
                 verbose=self.parallel_config.verbose,
                 progress_callback=progress_callback
@@ -393,7 +393,7 @@ class BackwardSelector:
                     # 使用加权得分计算（2025-12-20修改）
                     score = calculate_weighted_score(
                         is_rmse, oos_rmse, is_win_rate, oos_win_rate,
-                        training_weight=self._eval_params.get('training_weight', 0.5)
+                        training_weight=self._eval_params['training_weight']
                     )
 
                     # 打印评估结果（同时输出到UI和日志）
@@ -418,8 +418,8 @@ class BackwardSelector:
                     continue
 
         # 获取容忍度配置
-        rmse_tolerance = self._eval_params.get('rmse_tolerance_percent', 1.0)
-        win_rate_tolerance = self._eval_params.get('win_rate_tolerance_percent', 5.0)
+        rmse_tolerance = self._eval_params['rmse_tolerance_percent']
+        win_rate_tolerance = self._eval_params['win_rate_tolerance_percent']
 
         # 处理评估结果，计算得分并找出最佳候选
         best_is_win_rate = np.nan
@@ -428,16 +428,16 @@ class BackwardSelector:
             # 仅并行模式在此处计数（串行模式已在评估时计数）
             if use_parallel:
                 total_evals += 1
-                if result.get('is_svd_error', False):
+                if result['is_svd_error']:
                     total_svd_errors += 1
 
             # 使用加权得分计算（2025-12-20修改）
             score = calculate_weighted_score(
                 result['is_rmse'],
                 result['oos_rmse'],
-                result.get('is_win_rate', np.nan),
-                result.get('oos_win_rate', np.nan),
-                training_weight=self._eval_params.get('training_weight', 0.5)
+                result['is_win_rate'],
+                result['oos_win_rate'],
+                training_weight=self._eval_params['training_weight']
             )
             result['score'] = score
 
@@ -447,16 +447,16 @@ class BackwardSelector:
                 best_score,
                 rmse_tolerance_percent=rmse_tolerance,
                 win_rate_tolerance_percent=win_rate_tolerance,
-                selection_criterion=self._eval_params.get('selection_criterion', 'hybrid'),
-                prioritize_win_rate=self._eval_params.get('prioritize_win_rate', True)
+                selection_criterion=self._eval_params['selection_criterion'],
+                prioritize_win_rate=self._eval_params['prioritize_win_rate']
             )
             if np.isfinite(score[1]) and comparison > 0:
                 best_score = score
                 best_var = result['var']
                 best_is_rmse = result['is_rmse']
                 best_oos_rmse = result['oos_rmse']
-                best_is_win_rate = result.get('is_win_rate', np.nan)
-                best_oos_win_rate = result.get('oos_win_rate', np.nan)
+                best_is_win_rate = result['is_win_rate']
+                best_oos_win_rate = result['oos_win_rate']
 
                 if not use_parallel:
                     # 串行模式下实时标记最佳候选
@@ -474,7 +474,7 @@ class BackwardSelector:
 
             for res in candidate_results:
                 is_best = " <- 最佳" if res['var'] == best_var else ""
-                win_rate_str = f", Win Rate={res.get('oos_win_rate', np.nan):.1f}%" if np.isfinite(res.get('oos_win_rate', np.nan)) else ""
+                win_rate_str = f", Win Rate={res['oos_win_rate']:.1f}%" if np.isfinite(res['oos_win_rate']) else ""
                 msg = (
                     f"    '{res['var']}': 训练期RMSE={res['is_rmse']:.4f}, "
                     f"验证期RMSE={res['oos_rmse']:.4f}{win_rate_str}{is_best}"

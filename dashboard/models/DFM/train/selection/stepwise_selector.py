@@ -15,7 +15,7 @@ from dashboard.models.DFM.train.evaluation.metrics import (
 )
 from dashboard.models.DFM.train.utils.parallel_config import ParallelConfig
 from dashboard.models.DFM.train.utils.formatting import generate_progress_bar
-from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_changes
+from dashboard.models.DFM.train.selection.parallel_evaluator import evaluate_variable_changes
 
 logger = get_logger(__name__)
 
@@ -405,7 +405,7 @@ class StepwiseSelector:
         use_parallel = self.parallel_config.should_use_parallel(len(candidate_vars))
 
         # 评估每个变量单独的性能
-        candidate_results = evaluate_changes(
+        candidate_results = evaluate_variable_changes(
             current_predictors=[],
             candidate_vars=candidate_vars,
             target_variable=target_variable,
@@ -413,7 +413,6 @@ class StepwiseSelector:
             k_factors=k_factors,
             evaluator_config=evaluator_config,
             operation='add',
-            use_parallel=use_parallel,
             n_jobs=self.parallel_config.get_effective_n_jobs() if use_parallel else 1,
             backend=self.parallel_config.backend,
             verbose=self.parallel_config.verbose,
@@ -622,7 +621,7 @@ class StepwiseSelector:
         use_parallel = self.parallel_config.should_use_parallel(len(remaining_vars))
 
         # 评估添加每个候选变量的效果
-        candidate_results = evaluate_changes(
+        candidate_results = evaluate_variable_changes(
             current_predictors=current_vars,
             candidate_vars=remaining_vars,
             target_variable=target_variable,
@@ -630,7 +629,6 @@ class StepwiseSelector:
             k_factors=k_factors,
             evaluator_config=evaluator_config,
             operation='add',
-            use_parallel=use_parallel,
             n_jobs=self.parallel_config.get_effective_n_jobs() if use_parallel else 1,
             backend=self.parallel_config.backend,
             verbose=self.parallel_config.verbose,
@@ -736,7 +734,7 @@ class StepwiseSelector:
             use_parallel = self.parallel_config.should_use_parallel(len(working_vars))
 
             # 评估移除每个变量的效果
-            candidate_results = evaluate_changes(
+            candidate_results = evaluate_variable_changes(
                 current_predictors=working_vars,
                 candidate_vars=working_vars,
                 target_variable=target_variable,
@@ -744,7 +742,6 @@ class StepwiseSelector:
                 k_factors=k_factors,
                 evaluator_config=evaluator_config,
                 operation='remove',
-                use_parallel=use_parallel,
                 n_jobs=self.parallel_config.get_effective_n_jobs() if use_parallel else 1,
                 backend=self.parallel_config.backend,
                 verbose=self.parallel_config.verbose,

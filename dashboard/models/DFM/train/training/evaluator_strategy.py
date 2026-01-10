@@ -22,80 +22,6 @@ logger = get_logger(__name__)
 
 # ========== 可序列化的顶层评估函数 ==========
 
-def _evaluate_dfm_model(
-    variables: List[str],
-    target_variable: str,
-    full_data: pd.DataFrame,
-    k_factors: int,
-    training_start: str,
-    train_end: str,
-    validation_start: str,
-    validation_end: str,
-    max_iterations: int,
-    tolerance: float
-) -> Tuple[float, float, None, None, float, float, bool, None, None]:
-    """
-    顶层DFM评估函数（可序列化）
-
-    Args:
-        variables: 变量列表（包含目标变量）
-        target_variable: 目标变量名
-        full_data: 完整数据DataFrame
-        k_factors: 因子数
-        training_start: 训练开始日期
-        train_end: 训练结束日期
-        validation_start: 验证开始日期
-        validation_end: 验证结束日期
-        max_iterations: 最大迭代次数
-        tolerance: 容差
-
-    Returns:
-        9元组: (is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate,
-               is_svd_error, _, _)
-    """
-    try:
-        # 分离预测变量
-        predictor_vars = [v for v in variables if v != target_variable]
-
-        if len(predictor_vars) == 0:
-            logger.warning("[Evaluator] 预测变量为空，返回无穷大RMSE")
-            return (np.inf, np.inf, np.nan, np.nan, np.nan, np.nan, False, None, None)
-
-        # 准备数据
-        predictor_data = full_data[predictor_vars]
-        target_data = full_data[target_variable]
-
-        # 训练模型
-        model_result = train_dfm_with_forecast(
-            predictor_data=predictor_data,
-            target_data=target_data,
-            k_factors=k_factors,
-            training_start=training_start,
-            train_end=train_end,
-            validation_start=validation_start,
-            validation_end=validation_end,
-            max_iter=max_iterations,
-            max_lags=1,
-            tolerance=tolerance,
-            progress_callback=None
-        )
-
-        # 评估模型
-        metrics = evaluate_model_performance(
-            model_result=model_result,
-            target_data=target_data,
-            train_end=train_end,
-            validation_start=validation_start,
-            validation_end=validation_end
-        )
-
-        return metrics.to_tuple()
-
-    except Exception as e:
-        logger.exception(f"[Evaluator] 评估失败: {e}")
-        return (np.inf, np.inf, None, None, -np.inf, -np.inf, True, None, None)
-
-
 def _evaluate_variable_selection_model(
     variables: List[str],
     target_variable: str,
@@ -245,15 +171,27 @@ def create_variable_selection_evaluator(config: 'TrainingConfig') -> Callable:
 
         Args:
             variables: 变量列表（包含目标变量）
-            **kwargs: 其他参数
+            **kwargs: 必需参数
+                - full_data: pd.DataFrame
+                - params: Dict (必须包含 k_factors)
+                - max_iter: int (可选，默认使用config.max_iterations)
 
         Returns:
-            9元组: (is_rmse, oos_rmse, None, None, np.nan, np.nan, is_svd_error, None, None)
-                   只有RMSE有意义，其他字段为占位符
+            9元组: (is_rmse, oos_rmse, None, None, is_win_rate, oos_win_rate, is_svd_error, None, None)
         """
-        # 提取参数
+        # 验证必需参数
         full_data = kwargs.get('full_data')
-        k_factors = kwargs.get('params', {}).get('k_factors', 2)
+        if full_data is None:
+            raise ValueError("evaluate()缺少必需参数: full_data")
+
+        params = kwargs.get('params')
+        if params is None:
+            raise ValueError("evaluate()缺少必需参数: params")
+
+        if 'k_factors' not in params:
+            raise ValueError("params必须包含k_factors")
+
+        k_factors = params['k_factors']
         max_iterations = kwargs.get('max_iter', config.max_iterations)
 
         # 调用可序列化的顶层函数
@@ -273,35 +211,7 @@ def create_variable_selection_evaluator(config: 'TrainingConfig') -> Callable:
     return evaluate
 
 
-# ========== 获取可序列化配置的辅助函数 ==========
-
-def extract_serializable_config(config: 'TrainingConfig') -> Dict[str, Any]:
-    """
-    从TrainingConfig提取可序列化的配置字典
-
-    用于并行评估时传递配置参数
-
-    Args:
-        config: 训练配置对象
-
-    Returns:
-        可序列化的配置字典
-    """
-    return {
-        'target_variable': config.target_variable,
-        'training_start': config.training_start,
-        'train_end': config.train_end,
-        'validation_start': config.validation_start,
-        'validation_end': config.validation_end,
-        'max_iterations': config.max_iterations,
-        'tolerance': config.tolerance,
-        'alignment_mode': config.target_alignment_mode
-    }
-
-
 __all__ = [
     'create_variable_selection_evaluator',
-    '_evaluate_dfm_model',
     '_evaluate_variable_selection_model',
-    'extract_serializable_config'
 ]

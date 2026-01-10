@@ -8,7 +8,7 @@
 - 移除不可序列化的参数(evaluator_func, progress_callback)
 - 直接调用可序列化的顶层评估函数
 - 使用可序列化的配置字典代替闭包
-- DRY重构：合并removal/addition函数为通用函数
+- 简化为单一评估函数（joblib自动处理n_jobs=1的串行情况）
 """
 
 import logging
@@ -34,8 +34,9 @@ def _build_temp_predictors(
         return current_predictors + [var]
 
 
-# 操作动词映射
-_OPERATION_VERBS = {'remove': '移除', 'add': '添加'}
+def _get_operation_verb(operation: OperationType) -> str:
+    """获取操作类型的中文描述"""
+    return '移除' if operation == 'remove' else '添加'
 
 
 def evaluate_single_variable_change(
@@ -90,6 +91,13 @@ def evaluate_single_variable_change(
         # 导入可序列化的顶层评估函数
         from dashboard.models.DFM.train.training.evaluator_strategy import _evaluate_variable_selection_model
 
+        # 验证必需的配置参数
+        required_keys = ['training_start', 'train_end', 'validation_start',
+                        'validation_end', 'max_iterations', 'tolerance', 'alignment_mode']
+        for key in required_keys:
+            if key not in evaluator_config:
+                raise ValueError(f"evaluator_config缺少必需参数: {key}")
+
         # 调用可序列化的评估函数
         result_tuple = _evaluate_variable_selection_model(
             variables=temp_variables,
@@ -102,34 +110,31 @@ def evaluate_single_variable_change(
             validation_end=evaluator_config['validation_end'],
             max_iterations=evaluator_config['max_iterations'],
             tolerance=evaluator_config['tolerance'],
-            alignment_mode=evaluator_config.get('alignment_mode', 'next_month')
+            alignment_mode=evaluator_config['alignment_mode']
         )
 
         if len(result_tuple) != 9:
-            logger.warning(f"评估返回了{len(result_tuple)}个值，跳过'{var}'")
-            return (var, None)
+            raise ValueError(f"评估返回了{len(result_tuple)}个值，预期9个")
 
         is_rmse, oos_rmse, _, _, is_win_rate, oos_win_rate, is_svd_error, _, _ = result_tuple
 
         # 返回评估结果
-        result = {
+        return (var, {
             'var': var,
             'is_rmse': is_rmse,
             'oos_rmse': oos_rmse,
             'is_win_rate': is_win_rate,
             'oos_win_rate': oos_win_rate,
             'is_svd_error': is_svd_error
-        }
-
-        return (var, result)
+        })
 
     except Exception as e:
-        verb = _OPERATION_VERBS[operation]
+        verb = _get_operation_verb(operation)
         logger.exception(f"评估{verb}'{var}'时出错: {e}")
         return (var, None)
 
 
-def parallel_evaluate_changes(
+def evaluate_variable_changes(
     current_predictors: List[str],
     candidate_vars: List[str],
     target_variable: str,
@@ -143,7 +148,9 @@ def parallel_evaluate_changes(
     progress_callback: Optional[Callable[[str], None]] = None
 ) -> List[Dict[str, Any]]:
     """
-    并行评估所有候选变量的变更效果（可序列化版本）
+    评估所有候选变量的变更效果
+
+    使用joblib进行并行评估，n_jobs=1时自动退化为串行执行
 
     Args:
         current_predictors: 当前预测变量列表
@@ -153,7 +160,7 @@ def parallel_evaluate_changes(
         k_factors: 因子数
         evaluator_config: 评估器配置字典（可序列化）
         operation: 操作类型 ('remove' 或 'add')
-        n_jobs: 并行任务数（-1=所有核心）
+        n_jobs: 并行任务数（-1=所有核心，1=串行）
         backend: 并行后端（'loky', 'multiprocessing', 'threading'）
         verbose: 是否显示进度
         progress_callback: 进度回调函数（仅在主进程使用，不传递给子进程）
@@ -163,18 +170,20 @@ def parallel_evaluate_changes(
     """
     try:
         from joblib import Parallel, delayed
-    except ImportError:
-        logger.error("未安装joblib库，无法使用并行评估，请安装: pip install joblib")
-        raise
+    except ImportError as e:
+        raise ImportError("未安装joblib库，请安装: pip install joblib") from e
 
-    verb = _OPERATION_VERBS[operation]
+    verb = _get_operation_verb(operation)
+    n_candidates = len(candidate_vars)
+
     if progress_callback:
+        cores_desc = str(n_jobs) if n_jobs > 0 else 'all'
         progress_callback(
-            f"  并行评估{verb} {len(candidate_vars)} 个候选变量 "
-            f"(使用 {n_jobs if n_jobs > 0 else 'max-1'} 个核心, backend={backend})..."
+            f"  评估{verb} {n_candidates} 个候选变量 "
+            f"(n_jobs={cores_desc}, backend={backend})..."
         )
 
-    # 并行评估所有变量
+    # 使用joblib进行评估（n_jobs=1时自动串行）
     results_with_none = Parallel(
         n_jobs=n_jobs,
         backend=backend,
@@ -195,16 +204,15 @@ def parallel_evaluate_changes(
         for var in candidate_vars
     )
 
-    # 过滤掉失败的评估（None结果）
+    # 过滤掉失败的评估（None结果）并报告进度
     candidate_results = []
     for idx, (var, result) in enumerate(results_with_none, 1):
         if result is None:
             continue
 
-        # 打印每个候选的结果
         if progress_callback:
             progress_callback(
-                f"  [{idx}/{len(candidate_vars)}] 完成评估: '{var}' - "
+                f"  [{idx}/{n_candidates}] '{var}' - "
                 f"训练期RMSE: {result['is_rmse']:.4f}, "
                 f"验证期RMSE: {result['oos_rmse']:.4f}"
             )
@@ -214,133 +222,7 @@ def parallel_evaluate_changes(
     return candidate_results
 
 
-def serial_evaluate_changes(
-    current_predictors: List[str],
-    candidate_vars: List[str],
-    target_variable: str,
-    full_data: pd.DataFrame,
-    k_factors: int,
-    evaluator_config: Dict[str, Any],
-    operation: OperationType,
-    progress_callback: Optional[Callable[[str], None]] = None
-) -> List[Dict[str, Any]]:
-    """
-    串行评估所有候选变量的变更效果（可序列化版本）
-
-    Args:
-        current_predictors: 当前预测变量列表
-        candidate_vars: 候选变量列表
-        target_variable: 目标变量名
-        full_data: 完整数据DataFrame（可序列化）
-        k_factors: 因子数
-        evaluator_config: 评估器配置字典（可序列化）
-        operation: 操作类型 ('remove' 或 'add')
-        progress_callback: 进度回调函数
-
-    Returns:
-        评估结果列表（仅包含成功的评估）
-    """
-    candidate_results = []
-    verb = _OPERATION_VERBS[operation]
-
-    for idx, var in enumerate(candidate_vars, 1):
-        # 打印正在尝试的变量
-        if progress_callback:
-            msg = f"  [{idx}/{len(candidate_vars)}] 尝试{verb}: '{var}'"
-            progress_callback(msg)
-
-        # 评估该变量
-        _, result = evaluate_single_variable_change(
-            var,
-            current_predictors,
-            target_variable,
-            full_data,
-            k_factors,
-            evaluator_config,
-            operation
-        )
-
-        if result is None:
-            continue
-
-        # 打印评估结果
-        if progress_callback:
-            progress_callback(
-                f"    训练期RMSE: {result['is_rmse']:.4f}, "
-                f"验证期RMSE: {result['oos_rmse']:.4f}"
-            )
-
-        candidate_results.append(result)
-
-    return candidate_results
-
-
-def evaluate_changes(
-    current_predictors: List[str],
-    candidate_vars: List[str],
-    target_variable: str,
-    full_data: pd.DataFrame,
-    k_factors: int,
-    evaluator_config: Dict[str, Any],
-    operation: OperationType,
-    use_parallel: bool = False,
-    n_jobs: int = -1,
-    backend: str = 'loky',
-    verbose: int = 0,
-    progress_callback: Optional[Callable[[str], None]] = None
-) -> List[Dict[str, Any]]:
-    """
-    评估所有候选变量的变更效果（可序列化版本）
-
-    根据use_parallel参数选择并行或串行评估
-
-    Args:
-        current_predictors: 当前预测变量列表
-        candidate_vars: 候选变量列表
-        target_variable: 目标变量名
-        full_data: 完整数据DataFrame（可序列化）
-        k_factors: 因子数
-        evaluator_config: 评估器配置字典（可序列化）
-        operation: 操作类型 ('remove' 或 'add')
-        use_parallel: 是否使用并行
-        n_jobs: 并行任务数
-        backend: 并行后端
-        verbose: 是否显示进度
-        progress_callback: 进度回调函数
-
-    Returns:
-        评估结果列表
-    """
-    if not use_parallel:
-        return serial_evaluate_changes(
-            current_predictors,
-            candidate_vars,
-            target_variable,
-            full_data,
-            k_factors,
-            evaluator_config,
-            operation,
-            progress_callback
-        )
-
-    return parallel_evaluate_changes(
-        current_predictors,
-        candidate_vars,
-        target_variable,
-        full_data,
-        k_factors,
-        evaluator_config,
-        operation,
-        n_jobs,
-        backend,
-        verbose,
-        progress_callback
-    )
-
-
 __all__ = [
     'evaluate_single_variable_change',
-    'parallel_evaluate_changes',
-    'serial_evaluate_changes',
-    'evaluate_changes',
+    'evaluate_variable_changes',
 ]
