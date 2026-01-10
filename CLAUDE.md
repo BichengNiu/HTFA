@@ -387,10 +387,18 @@ class PipelineResult:
 
 ### 影响分解公式（CRITICAL）
 
-**核心公式**（已于2025-10-27修复）：
+**核心公式**（已于2025-10-27修复，2026-01-10补充反标准化步骤）：
 
 ```
-Δy_t = λ_y' × K_t[:, i] × v_i,t
+影响值 = [λ_y' × K_t[:, i] × v_i,t] × σ_y
+```
+
+**三步计算过程**：
+
+```
+步骤1: Δf_t = K_t[:, i] × v_i,t           [因子状态增量]
+步骤2: Δy_标准化 = λ_y' × Δf_t            [目标变量变化，标准化尺度]
+步骤3: Δy_原始 = Δy_标准化 × σ_y          [反标准化到原始尺度]
 ```
 
 其中：
@@ -398,7 +406,8 @@ class PipelineResult:
 - `K_t` - 第t期卡尔曼增益矩阵 (n_factors, n_variables)
 - `K_t[:, i]` - 变量i对应的卡尔曼增益列向量 (n_factors,)
 - `v_i,t` - 变量i在第t期的新息（观测值 - 先验预测）
-- `Δy_t` - 变量i的数据更新对目标变量y的影响（标量）
+- `σ_y` - 目标变量的标准差（从训练时的`target_std_original`字段获取）
+- `Δy` - 变量i的数据更新对目标变量y的影响（原始尺度，标量）
 
 **数学推导**：
 
@@ -406,15 +415,18 @@ class PipelineResult:
 
 ```
 f_t|t = f_t|t-1 + K_t × v_t              [因子状态更新]
-y_t = H × f_t|t                          [观测方程]
+y_t = H × f_t|t                          [观测方程，标准化尺度]
 ```
 
 当变量i更新时：
 
 ```
 Δf_t = K_t[:, i] × v_i,t                 [因子状态增量]
-Δy_t = λ_y' × Δf_t                       [传递到目标变量]
+Δy_标准化 = λ_y' × Δf_t                  [传递到目标变量，标准化尺度]
+Δy_原始 = Δy_标准化 × σ_y                [反标准化到原始尺度]
 ```
+
+**关键说明**：DFM模型在训练时对所有数据进行标准化，因此计算出的影响值在标准化尺度下。要获得原始尺度的影响值（如GDP增长率百分点），必须乘以目标变量的标准差σ_y。
 
 **数据要求（重要）**：
 
@@ -438,8 +450,8 @@ y_t = H × f_t|t                          [观测方程]
   3. exporter.py: 将kalman_gains_history写入元数据.pkl文件
 
 分析阶段 (decomp):
-  1. model_loader.py: 从元数据.pkl加载kalman_gains_history
-  2. impact_analyzer.py: 使用K_t计算影响 Δy = λ_y' × K_t[:, i] × v_i
+  1. model_loader.py: 从元数据.pkl加载kalman_gains_history和target_std_original
+  2. impact_analyzer.py: 计算影响值 = [λ_y' × K_t[:, i] × v_i] × σ_y
 ```
 
 **向后兼容说明**：

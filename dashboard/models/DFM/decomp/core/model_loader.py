@@ -186,8 +186,9 @@ class ModelLoader:
             # 5. 提取目标变量信息
             nowcast_data.target_variable = self._extract_target_variable()
 
-            # 6. 提取目标变量索引和变量映射（新增）
-            nowcast_data.target_variable_index, nowcast_data.variable_index_map = self._extract_variable_mapping()
+            # 6. 提取变量映射（target_variable_index已弃用，保持为None）
+            nowcast_data.variable_index_map = self._extract_variable_mapping()
+            nowcast_data.target_variable_index = None  # 目标变量不在预测变量映射中
 
             # 7. 提取模型参数
             nowcast_data.model_parameters = self._extract_model_parameters()
@@ -485,11 +486,14 @@ class ModelLoader:
 
         return prepared_data
 
-    def _extract_variable_mapping(self) -> Tuple[None, Dict[str, int]]:
+    def _extract_variable_mapping(self) -> Dict[str, int]:
         """提取变量索引映射
 
         注意：variable_index_map只包含预测变量（不含目标变量），
         因为K_t矩阵的列数对应预测变量数。
+
+        Returns:
+            Dict[str, int]: 变量名到索引的映射
         """
         # 从factor_loadings_df获取变量列表（已排除目标变量，与K_t矩阵对齐）
         if 'factor_loadings_df' not in self._metadata:
@@ -516,7 +520,7 @@ class ModelLoader:
             logger.info(f"目标变量: {target_variable} (不在预测变量映射中)")
 
         logger.info(f"提取变量映射: {len(variable_index_map)} 个预测变量")
-        return None, variable_index_map
+        return variable_index_map
 
     def _extract_industry_map(self) -> Optional[Dict[str, str]]:
         """

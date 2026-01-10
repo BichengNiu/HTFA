@@ -111,7 +111,7 @@ def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
         if st_module.button("执行影响分解", type="primary", width='stretch', key="execute_news_analysis_btn"):
             result = _execute_analysis(st_module, model_file, metadata_file, selected_target_month)
             # 如果分析成功，直接渲染结果，不使用rerun
-            if result and result.get('returncode') == 0:
+            if result and result['returncode'] == 0:
                 _render_results_direct(st_module, result)
         else:
             # 非按钮点击时，检查是否有已完成的分析结果
@@ -127,17 +127,22 @@ def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
 
 def _render_parameter_section(st_module):
     """渲染参数设置区域，返回用户选择的目标月份"""
+    import joblib
+    import io
 
-    # 从状态中获取已选择的目标月份，如果没有则使用当前月份
+    # 1. 尝试从session_state获取已选月份
     current_target_month = get_dfm_state('news_target_month', None)
+
     if current_target_month:
-        # 解析已保存的月份字符串
-        try:
-            default_value = datetime.strptime(current_target_month, '%Y-%m').replace(day=1)
-        except:
-            default_value = datetime.now().replace(day=1)
+        default_value = datetime.strptime(current_target_month, '%Y-%m').replace(day=1)
     else:
-        default_value = datetime.now().replace(day=1)
+        # 2. 从元数据获取最新数据月份 (observation_period_end是实际最新数据日期)
+        metadata_file = get_dfm_state('dfm_metadata_file_news', None)
+        metadata_file.seek(0)
+        metadata = joblib.load(io.BytesIO(metadata_file.read()))
+        metadata_file.seek(0)
+        end_date_str = metadata['observation_period_end']
+        default_value = pd.to_datetime(end_date_str).to_pydatetime().replace(day=1)
 
     target_date = st_module.date_input(
         "**目标月份**",
@@ -170,15 +175,14 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
             )
 
             if result['returncode'] == 0:
-                # 确保result是可序列化的字典
                 serializable_result = {
-                    'returncode': result.get('returncode', 0),
-                    'csv_paths': result.get('csv_paths', {}),
-                    'csv_contents': result.get('csv_contents', {}),  # 保存CSV内容到状态
-                    'plot_paths': result.get('plot_paths', {}),
-                    'summary': result.get('summary', {}),
-                    'data_flow': result.get('data_flow', []),
-                    'workspace_dir': result.get('workspace_dir', '')
+                    'returncode': result['returncode'],
+                    'csv_paths': result['csv_paths'],
+                    'csv_contents': result['csv_contents'],
+                    'plot_paths': result['plot_paths'],
+                    'summary': result['summary'],
+                    'data_flow': result['data_flow'],
+                    'workspace_dir': result['workspace_dir']
                 }
 
                 # 保存结果到状态（用于页面刷新后恢复）
@@ -189,7 +193,7 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
                 st_module.success("分析执行成功！")
                 return serializable_result
             else:
-                st_module.error(f"分析执行失败: {result.get('error_message', '未知错误')}")
+                st_module.error(f"分析执行失败: {result['error_message']}")
                 return None
 
         except Exception as e:
@@ -200,12 +204,7 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
 
 def _render_results_direct(st_module, result):
     """直接渲染分析结果（不从状态读取）"""
-    if not result or result.get('returncode') != 0:
-        st_module.error("分析结果不可用")
-        return
-
     st_module.markdown("---")
-    st_module.markdown("### 分析结果")
 
     # 1. 统计摘要卡片（关键指标和行业分解）
     _render_summary_cards(st_module, result)
@@ -223,11 +222,7 @@ def _render_results_direct(st_module, result):
 
 def _render_results(st_module):
     """渲染分析结果（从状态读取）"""
-    result = get_dfm_state('news_analysis_result', {})
-
-    if not result or result.get('returncode') != 0:
-        st_module.error("分析结果不可用")
-        return
+    result = get_dfm_state('news_analysis_result')
 
     st_module.markdown("---")
 
@@ -247,7 +242,7 @@ def _render_results(st_module):
 
 def _render_data_flow_table(st_module, result):
     """渲染数据流表格"""
-    data_flow = result.get('data_flow', [])
+    data_flow = result['data_flow']
 
     if not data_flow:
         st_module.info("没有数据流信息")
@@ -303,8 +298,8 @@ def _render_data_flow_table(st_module, result):
 
     for date_entry in filtered_data_flow:
         date_str = date_entry['date']
-        nowcast_value = date_entry.get('nowcast_value')
-        releases = date_entry.get('releases', [])
+        nowcast_value = date_entry['nowcast_value']
+        releases = date_entry['releases']
 
         # 日期标题
         if nowcast_value is not None:
@@ -332,64 +327,94 @@ def _render_data_flow_table(st_module, result):
 
 def _render_summary_cards(st_module, result):
     """渲染统计摘要卡片"""
-    summary = result.get('summary', {})
+    summary = result['summary']
 
-    st_module.markdown("##### 关键指标")
-    start_date = summary.get('analysis_start', '')
-    end_date = summary.get('analysis_end', '')
+    st_module.markdown("##### 影响摘要")
+    start_date = summary['analysis_start']
+    end_date = summary['analysis_end']
     if start_date and end_date:
         st_module.info(f"以下指标基于 {start_date} 至 {end_date} 期间的数据计算")
 
-    col1, col2, col3, col4 = st_module.columns(4)
+    col1, col2, col3, col4, col5, col6 = st_module.columns(6)
 
     with col1:
         st_module.metric(
-            label="总影响",
-            value=f"{summary.get('total_impact', 0):.4f}",
-            help="所有数据发布对nowcast的累积影响"
+            label="数据发布数",
+            value=f"{summary['total_releases']}",
+            help="分析期内发布的数据点数量"
         )
 
     with col2:
         st_module.metric(
-            label="数据发布数",
-            value=f"{summary.get('total_releases', 0)}",
-            help="分析期内发布的数据点数量"
+            label="首次预测",
+            value=f"{summary['first_nowcast']:.4f}",
+            help="目标月份的首次Nowcast预测值"
         )
 
     with col3:
         st_module.metric(
             label="正向影响",
-            value=f"{summary.get('positive_impact_sum', 0):.4f}",
+            value=f"{summary['positive_impact_sum']:.4f}",
             delta="+",
-            help="提升nowcast值的数据发布总影响"
+            delta_color="inverse",
+            help="提升nowcast值的数据发布净影响"
         )
 
     with col4:
         st_module.metric(
             label="负向影响",
-            value=f"{summary.get('negative_impact_sum', 0):.4f}",
+            value=f"{summary['negative_impact_sum']:.4f}",
             delta="-",
             delta_color="inverse",
-            help="降低nowcast值的数据发布总影响"
+            help="降低nowcast值的数据发布净影响"
         )
 
-    # 指标说明
-    with st_module.expander("指标说明"):
+    with col5:
+        st_module.metric(
+            label="净影响",
+            value=f"{summary['total_impact']:.4f}",
+            help="所有数据发布对nowcast的累积影响"
+        )
+
+    with col6:
+        st_module.metric(
+            label="最新预测",
+            value=f"{summary['last_nowcast']:.4f}",
+            help="目标月份的最新Nowcast预测值"
+        )
+
+    # 算法说明
+    with st_module.expander("算法说明"):
         st_module.markdown("""
-**影响值（Impact）**：表示该数据发布导致目标变量预测值的绝对变动量。
+**影响值（Impact）**：表示该数据发布导致目标变量预测值的变动量（可正可负）。
 
-- 计算公式：`影响值 = λ_y' × K_t[:, i] × (观测值 - 期望值)`
-  - `λ_y`：目标变量的因子载荷向量
-  - `K_t`：第t期卡尔曼增益矩阵
-  - `观测值 - 期望值`：新息（News）
-- 影响值为正表示该数据发布提升了预测值，为负表示降低了预测值
-- 所有变量的影响值总和等于预测值的总变动量
+**计算公式**：
 
-**示例**：如果GDP增长率预测从5.0%变为5.2%，某变量的影响值为+0.15，说明该变量使预测值提升了0.15个百分点。
+```
+影响值 = [λ_y' × K_t[:, i] × (观测值 - 期望值)] × σ_y
+```
+
+**分步计算过程**：
+1. **因子状态变化**：`Δf = K_t[:, i] × v_i`，其中 v_i = 观测值 - 期望值（新息）
+2. **目标变量变化**（标准化尺度）：`Δy_标准化 = λ_y' × Δf`
+3. **反标准化**（原始尺度）：`影响值 = Δy_标准化 × σ_y`
+
+**参数说明**：
+- `λ_y`：目标变量的因子载荷向量（n_factors维），从因子载荷矩阵H中提取
+- `K_t[:, i]`：第t期卡尔曼增益矩阵的第i列（n_factors维），表示变量i对各因子的影响权重
+- `新息（News）`：观测值与卡尔曼滤波先验预测的偏差，正向新息表示数据好于预期
+- `σ_y`：目标变量的标准差，用于将标准化尺度转换回原始尺度
+
+**性质**：
+- 影响值 > 0：该数据发布提升了预测值
+- 影响值 < 0：该数据发布降低了预测值
+- **加性分解**：所有变量的影响值之和严格等于预测值的总变动量
+
+**示例**：GDP增长率预测从5.0%变为5.2%（总变动+0.2个百分点），其中工业增加值影响值为+0.15，出口影响值为+0.05，则工业增加值贡献了75%的预测变动。
         """)
 
     # 行业分解
-    industry_breakdown = summary.get('industry_breakdown', {})
+    industry_breakdown = summary['industry_breakdown']
     if industry_breakdown:
         st_module.markdown("##### 按行业分解")
 
@@ -397,52 +422,46 @@ def _render_summary_cards(st_module, result):
         for industry, stats in industry_breakdown.items():
             industry_data.append({
                 '行业': industry,
-                '总影响': stats['impact'],
+                '净影响': stats['impact'],
                 '数据发布数': stats['count'],
                 '正向影响': stats['positive_impact'],
                 '负向影响': stats['negative_impact']
             })
 
         industry_df = pd.DataFrame(industry_data)
-        industry_df = industry_df.sort_values(by='总影响', key=abs, ascending=False)
+        industry_df = industry_df.sort_values(by='净影响', key=abs, ascending=False)
         st_module.dataframe(industry_df, width='stretch', hide_index=True)
 
 
 def _render_download_section(st_module, result):
     """渲染下载区域"""
-    csv_paths = result.get('csv_paths', {})
-    csv_contents = result.get('csv_contents', {})
+    csv_paths = result['csv_paths']
+    csv_contents = result['csv_contents']
 
     st_module.markdown("##### 数据导出")
 
     col1, col2 = st_module.columns(2)
 
     with col1:
-        impacts_path = csv_paths.get('impacts')
-        impacts_data = csv_contents.get('impacts')
-        if impacts_data:
-            st_module.download_button(
-                label="下载数据发布影响CSV",
-                data=impacts_data,
-                file_name=os.path.basename(impacts_path) if impacts_path else 'data_release_impacts.csv',
-                mime="text/csv",
-                width='stretch',
-                key="download_impacts_csv"
-            )
-        else:
-            st_module.info("数据发布影响CSV未生成")
+        impacts_path = csv_paths['impacts']
+        impacts_data = csv_contents['impacts']
+        st_module.download_button(
+            label="下载数据发布影响CSV",
+            data=impacts_data,
+            file_name=os.path.basename(impacts_path),
+            mime="text/csv",
+            width='stretch',
+            key="download_impacts_csv"
+        )
 
     with col2:
-        contributions_path = csv_paths.get('contributions')
-        contributions_data = csv_contents.get('contributions')
-        if contributions_data:
-            st_module.download_button(
-                label="下载贡献分解CSV",
-                data=contributions_data,
-                file_name=os.path.basename(contributions_path) if contributions_path else 'contributions_decomposition.csv',
-                mime="text/csv",
-                width='stretch',
-                key="download_contributions_csv"
-            )
-        else:
-            st_module.info("贡献分解CSV未生成")
+        contributions_path = csv_paths['contributions']
+        contributions_data = csv_contents['contributions']
+        st_module.download_button(
+            label="下载贡献分解CSV",
+            data=contributions_data,
+            file_name=os.path.basename(contributions_path),
+            mime="text/csv",
+            width='stretch',
+            key="download_contributions_csv"
+        )

@@ -38,7 +38,7 @@ class NewsContribution:
     observed_value: float
     expected_value: float
     kalman_weight: float
-    confidence_interval: Optional[Tuple[float, float]] = None
+    confidence_interval: Optional[Tuple[float, float]] = None  # 与ImpactResult保持一致
 
 
 @dataclass

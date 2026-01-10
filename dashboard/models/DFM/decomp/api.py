@@ -17,30 +17,14 @@ import traceback
 from .core.model_loader import ModelLoader, SavedNowcastData
 from .core.nowcast_extractor import NowcastExtractor
 from .core.impact_analyzer import ImpactAnalyzer, DataRelease
-from .core.news_impact_calculator import NewsImpactCalculator
+from .core.news_impact_calculator import NewsImpactCalculator, NewsContribution
+from .core.prior_predictor import ObservationPriorPredictor
 from .visualization.waterfall_plotter import ImpactWaterfallPlotter
 from .utils.industry_aggregator import IndustryAggregator
 from .utils.data_flow_formatter import DataFlowFormatter
 from .utils.exceptions import DecompError, ModelLoadError, ComputationError, ValidationError
 from .utils.constants import NORMALIZATION_ZERO_THRESHOLD
-
-
-def _get_month_date_range(target_date: pd.Timestamp) -> Tuple[pd.Timestamp, pd.Timestamp]:
-    """
-    计算目标日期所在月份的起止日期
-
-    Args:
-        target_date: 目标日期
-
-    Returns:
-        (month_start, month_end) 元组
-    """
-    month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
-    if target_date.month == 12:
-        month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
-    else:
-        month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
-    return month_start, month_end
+from .utils.helpers import get_month_date_range
 
 
 def execute_news_analysis(
@@ -112,7 +96,6 @@ def execute_news_analysis(
 
         # 阶段2.5: 创建先验预测器
         print("[API] 阶段2.5: 创建先验预测器")
-        from .core.prior_predictor import ObservationPriorPredictor
         prior_predictor = ObservationPriorPredictor(
             factor_states_predicted=saved_nowcast_data.factor_states_predicted,
             factor_loadings=saved_nowcast_data.factor_loadings,
@@ -212,10 +195,8 @@ def _normalize_impacts_to_actual_change(
     Returns:
         (归一化后的贡献列表, 归一化信息字典)
     """
-    from .core.news_impact_calculator import NewsContribution
-
     # 计算目标月份的日期范围
-    month_start, month_end = _get_month_date_range(target_date)
+    month_start, month_end = get_month_date_range(target_date)
 
     # 筛选目标月份的nowcast值
     month_nowcast = nowcast_series[(nowcast_series.index >= month_start) &
@@ -360,7 +341,7 @@ def _extract_real_data_releases(
 
     # 计算目标月份的日期范围
     target_date = pd.to_datetime(target_month_str)
-    month_start, month_end = _get_month_date_range(target_date)
+    month_start, month_end = get_month_date_range(target_date)
 
     # 筛选目标月份范围内的日期
     selected_dates = prepared_data.index[(prepared_data.index >= month_start) & (prepared_data.index <= month_end)]
@@ -511,8 +492,8 @@ def _generate_analysis_results(
             f.write('# 3. total_impact - 总影响值\n')
             f.write('#    说明: 该变量在分析期内所有数据发布对目标变量预测值的累计影响\n')
             f.write('#    计算: sum(各次发布的impact_value)\n')
-            f.write('#    公式: Δy_total = Σ(λ_y\' × K_t[:, i] × v_i,t)\n')
-            f.write('#    单位: 与目标变量相同（通常为百分点）\n')
+            f.write('#    公式: Δy_total = Σ([λ_y\' × K_t[:, i] × v_i,t] × σ_y)\n')
+            f.write('#    单位: 与目标变量相同（通常为百分点），已反标准化到原始尺度\n')
             f.write('# \n')
             f.write('# 4. avg_impact - 平均影响值\n')
             f.write('#    说明: 该变量每次数据发布的平均影响\n')
@@ -538,12 +519,17 @@ def _generate_analysis_results(
             f.write('#    计算: 统计impact_value < 0的发布次数\n')
             f.write('# \n')
             f.write('# 核心公式详解:\n')
-            f.write('# Δy_t = λ_y\' × K_t[:, i] × v_i,t\n')
+            f.write('# 影响值 = [λ_y\' × K_t[:, i] × v_i,t] × σ_y\n')
+            f.write('# 三步计算过程:\n')
+            f.write('#   1. Δf_t = K_t[:, i] × v_i,t      (因子状态增量)\n')
+            f.write('#   2. Δy_标准化 = λ_y\' × Δf_t       (标准化尺度影响)\n')
+            f.write('#   3. Δy_原始 = Δy_标准化 × σ_y      (反标准化到原始尺度)\n')
             f.write('# 其中:\n')
             f.write('#   - λ_y: 目标变量的因子载荷向量 (n_factors,)\n')
             f.write('#   - K_t: 第t期卡尔曼增益矩阵 (n_factors, n_variables)\n')
             f.write('#   - v_i,t: 变量i在第t期的新息（观测值 - 先验预测）\n')
-            f.write('#   - Δy_t: 变量i的数据更新对目标变量的影响（标量）\n')
+            f.write('#   - σ_y: 目标变量的标准差（用于反标准化）\n')
+            f.write('#   - Δy: 变量i的数据更新对目标变量的影响（原始尺度，标量）\n')
             f.write('# \n')
             f.write('# 使用示例:\n')
             f.write('# 如果GDP增长率预测从5.0%变为5.2%，某变量的total_impact=+0.15，contribution_pct=75%\n')
@@ -561,7 +547,7 @@ def _generate_analysis_results(
 
         # 生成摘要信息
         total_impact = sum(c.impact_value for c in contributions)
-        month_start, month_end = _get_month_date_range(target_date)
+        month_start, month_end = get_month_date_range(target_date)
         summary = {
             'target_date': target_date.strftime('%Y-%m-%d'),
             'analysis_start': month_start.strftime('%Y-%m-%d'),
@@ -604,8 +590,6 @@ def _create_visualizations(
 ) -> Dict[str, str]:
     """创建可视化图表"""
     try:
-        from .core.news_impact_calculator import NewsContribution
-
         # 验证contributions类型（不做兼容转换）
         if contributions and not isinstance(contributions[0], NewsContribution):
             raise ValidationError(

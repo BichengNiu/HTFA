@@ -258,6 +258,24 @@ def nearest_positive_definite(matrix: np.ndarray) -> np.ndarray:
         raise ComputationError(f"正定矩阵计算失败: {str(e)}", "positive_definite")
 
 
+def get_month_date_range(target_date: pd.Timestamp) -> Tuple[pd.Timestamp, pd.Timestamp]:
+    """
+    计算目标日期所在月份的起止日期
+
+    Args:
+        target_date: 目标日期
+
+    Returns:
+        (month_start, month_end) 元组
+    """
+    month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
+    if target_date.month == 12:
+        month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
+    else:
+        month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
+    return month_start, month_end
+
+
 def detect_outliers(
     data: Union[pd.Series, np.ndarray],
     method: str = "zscore",

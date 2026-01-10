@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from ..utils.exceptions import ComputationError, ValidationError
 from ..utils.constants import CONFIDENCE_INTERVAL_Z_SCORE, DEFAULT_MEASUREMENT_ERROR
+from ..utils.helpers import get_month_date_range
 from .nowcast_extractor import NowcastExtractor
 
 logger = logging.getLogger(__name__)
@@ -37,7 +38,7 @@ class ImpactResult:
     impact_on_target: float
     contribution_percentage: float
     kalman_weight: float
-    confidence_interval: Tuple[float, float] = None
+    confidence_interval: Optional[Tuple[float, float]] = None
     calculation_details: Optional[Dict[str, Any]] = None
 
 
@@ -222,12 +223,8 @@ class ImpactAnalyzer:
             current_value = baseline_value
             cumulative_impact = 0.0
 
-            # 计算目标月份的结束日期
-            target_month_start = pd.Timestamp(year=target_date.year, month=target_date.month, day=1)
-            if target_date.month == 12:
-                target_month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
-            else:
-                target_month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
+            # 计算目标月份的日期范围
+            target_month_start, target_month_end = get_month_date_range(target_date)
 
             for release in sorted_releases:
                 # 只处理目标月份范围内的数据发布
