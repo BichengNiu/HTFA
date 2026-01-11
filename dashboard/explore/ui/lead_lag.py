@@ -53,15 +53,9 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
                 st_obj.info("请在左侧侧边栏上传数据文件以进行分析")
                 st_obj.markdown(f"""
                 **使用说明：**
-                1. **数据上传**：在左侧侧边栏上传数据文件（唯一上传入口）
-                2. **数据格式**：第一列为时间戳，其余列为变量数据
-                3. **支持格式**：CSV、Excel (.xlsx, .xls)
-                4. **编码支持**：UTF-8、GBK、GB2312等
-
-                **数据共享说明：**
-                - 侧边栏上传的数据在三个分析模块间自动共享
-                - 平稳性分析、相关性分析、领先滞后分析使用同一数据源
-                - 无需重复上传，一次上传即可在所有模块中使用
+                1. **数据格式**：第一列为时间戳，其余列为变量数据
+                2. **支持格式**：CSV、Excel (.xlsx, .xls)
+                3. **编码支持**：UTF-8、GBK、GB2312等
                 """)
                 return None
 

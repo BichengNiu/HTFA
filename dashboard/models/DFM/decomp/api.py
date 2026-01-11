@@ -10,8 +10,9 @@ import os
 import tempfile
 import pandas as pd
 import numpy as np
+import logging
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime
 import traceback
 
 from .core.model_loader import ModelLoader, SavedNowcastData
@@ -24,6 +25,8 @@ from .utils.data_flow_formatter import DataFlowFormatter
 from .utils.exceptions import DecompError, ModelLoadError, ComputationError, ValidationError
 from .utils.constants import NORMALIZATION_ZERO_THRESHOLD
 from .utils.helpers import get_month_date_range
+
+logger = logging.getLogger(__name__)
 
 
 def execute_news_analysis(
@@ -49,8 +52,6 @@ def execute_news_analysis(
         - csv_paths: Dict[str, str]
             - 'impacts': 数据发布影响CSV
             - 'contributions': 贡献分解CSV
-        - plot_paths: Dict[str, str]
-            - 'combined_chart': 纽约联储风格组合图表HTML
         - summary: Dict[str, Any]
             - 'total_impact': 总影响值
             - 'total_releases': 数据发布总数
@@ -62,7 +63,7 @@ def execute_news_analysis(
         - error_message: Optional[str]
     """
     try:
-        print(f"[API] 开始执行影响分解: 目标月份={target_month}")
+        logger.info(f"开始执行影响分解: 目标月份={target_month}")
 
         # 验证输入参数
         _validate_input_parameters(dfm_model_file_content, dfm_metadata_file_content, target_month)
@@ -71,7 +72,7 @@ def execute_news_analysis(
         workspace_dir = _create_workspace_directory(base_workspace_dir)
 
         # 阶段1: 加载模型和数据
-        print("[API] 阶段1: 加载模型和数据")
+        logger.info("阶段1: 加载模型和数据")
         model_loader = ModelLoader()
         model = model_loader.load_model(dfm_model_file_content)
         metadata = model_loader.load_metadata(dfm_metadata_file_content)
@@ -83,32 +84,32 @@ def execute_news_analysis(
         saved_nowcast_data = model_loader.extract_saved_nowcast()
 
         # 阶段2: 初始化分析器
-        print("[API] 阶段2: 初始化分析器")
+        logger.info("阶段2: 初始化分析器")
         nowcast_extractor = NowcastExtractor(saved_nowcast_data)
         impact_analyzer = ImpactAnalyzer(nowcast_extractor)
         news_calculator = NewsImpactCalculator(impact_analyzer)
 
         # 阶段2.5: 创建先验预测器
-        print("[API] 阶段2.5: 创建先验预测器")
+        logger.info("阶段2.5: 创建先验预测器")
         prior_predictor = ObservationPriorPredictor(
             factor_states_predicted=saved_nowcast_data.factor_states_predicted,
             factor_loadings=saved_nowcast_data.factor_loadings,
             variable_index_map=saved_nowcast_data.variable_index_map,
             time_index=saved_nowcast_data.prepared_data.index
         )
-        print("[API] 先验预测器创建成功")
+        logger.debug("先验预测器创建成功")
 
         # 阶段3: 提取真实数据发布（仅当月）
-        print("[API] 阶段3: 提取真实数据发布")
+        logger.info("阶段3: 提取真实数据发布")
         target_date = pd.to_datetime(target_month)
         data_releases = _extract_real_data_releases(saved_nowcast_data, target_month, prior_predictor)
 
         # 阶段4: 执行影响分析
-        print("[API] 阶段4: 执行影响分析")
+        logger.info("阶段4: 执行影响分析")
         contributions = news_calculator.calculate_news_contributions(data_releases, target_date)
 
         # 阶段4.5: 归一化影响值到实际Nowcast变化
-        print("[API] 阶段4.5: 归一化影响值")
+        logger.info("阶段4.5: 归一化影响值")
         contributions, normalization_info = _normalize_impacts_to_actual_change(
             contributions,
             saved_nowcast_data.nowcast_series,
@@ -116,19 +117,11 @@ def execute_news_analysis(
         )
 
         # 阶段5: 生成分析结果（包括行业聚合和数据流）
-        print("[API] 阶段5: 生成分析结果")
+        logger.info("阶段5: 生成分析结果")
         analysis_results = _generate_analysis_results(
             news_calculator, contributions, target_date, workspace_dir,
             saved_nowcast_data.var_industry_map, saved_nowcast_data.nowcast_series,
             normalization_info
-        )
-
-        # 阶段6: 创建可视化（纽约联储风格）
-        print("[API] 阶段6: 创建可视化")
-        plot_paths = _create_visualizations(
-            contributions, target_date, workspace_dir, plot_start_date, plot_end_date,
-            saved_nowcast_data.var_industry_map, saved_nowcast_data.nowcast_series,
-            saved_nowcast_data
         )
 
         # 读取CSV内容到内存中（避免下载时的文件访问问题）
@@ -142,29 +135,24 @@ def execute_news_analysis(
         result = {
             'returncode': 0,
             'csv_paths': analysis_results['csv_paths'],
-            'csv_contents': csv_contents,  # 新增：CSV内容字节数据
-            'plot_paths': plot_paths,
+            'csv_contents': csv_contents,
             'summary': analysis_results['summary'],
             'data_flow': analysis_results['data_flow'],
             'workspace_dir': workspace_dir
         }
 
-        print(f"[API] 影响分解执行成功: 总影响={analysis_results['summary']['total_impact']:.4f}")
-        print(f"[API] DEBUG 归一化验证: first_nowcast={analysis_results['summary'].get('first_nowcast')}, "
-              f"last_nowcast={analysis_results['summary'].get('last_nowcast')}, "
-              f"scale_factor={analysis_results['summary'].get('normalization_scale_factor')}")
+        logger.info(f"影响分解执行成功: 总影响={analysis_results['summary']['total_impact']:.4f}")
         return result
 
     except (DecompError, ModelLoadError, ComputationError, ValidationError) as e:
         error_msg = f"影响分解执行失败: {str(e)}"
-        print(f"[API] ERROR: {error_msg}")
-        print(f"[API] 详细错误: {traceback.format_exc()}")
+        logger.error(error_msg)
+        logger.debug(f"详细错误: {traceback.format_exc()}")
 
         return {
             'returncode': -1,
             'error_message': error_msg,
             'csv_paths': {},
-            'plot_paths': {},
             'summary': {},
             'data_flow': []
         }
@@ -257,7 +245,7 @@ def _normalize_impacts_to_actual_change(
         'scale_factor': scale_factor
     }
 
-    print(f"[API] 影响归一化: first={first_nowcast:.4f}, last={last_nowcast:.4f}, "
+    logger.info(f"影响归一化: first={first_nowcast:.4f}, last={last_nowcast:.4f}, "
           f"actual_change={actual_change:.4f}, raw_total={raw_total_impact:.4f}, "
           f"scale_factor={scale_factor:.6f}")
 
@@ -294,7 +282,7 @@ def _create_workspace_directory(base_dir: Optional[str]) -> str:
     )
 
     os.makedirs(workspace_dir, exist_ok=True)
-    print(f"[API] 创建工作目录: {workspace_dir}")
+    logger.debug(f"创建工作目录: {workspace_dir}")
     return workspace_dir
 
 
@@ -344,12 +332,10 @@ def _extract_real_data_releases(
         raise ValidationError(f"目标月份 {target_month_str} 没有找到任何数据")
 
     try:
-
-        print(f"[API] 目标月份: {target_month_str} (范围: {month_start.strftime('%Y-%m-%d')} 到 {month_end.strftime('%Y-%m-%d')})")
-        print(f"[API] 提取数据发布: {len(selected_dates)}个时间点 x {len(available_variables)}个变量")
-        if len(selected_dates) > 0:
-            print(f"[API] DEBUG: 实际数据日期范围: {selected_dates[0].strftime('%Y-%m-%d')} 到 {selected_dates[-1].strftime('%Y-%m-%d')}")
-        print(f"[API] DEBUG: available_variables前3个={available_variables[:3]}")
+        logger.info(f"目标月份: {target_month_str} (范围: {month_start.strftime('%Y-%m-%d')} 到 {month_end.strftime('%Y-%m-%d')})")
+        logger.info(f"提取数据发布: {len(selected_dates)}个时间点 x {len(available_variables)}个变量")
+        logger.debug(f"实际数据日期范围: {selected_dates[0].strftime('%Y-%m-%d')} 到 {selected_dates[-1].strftime('%Y-%m-%d')}")
+        logger.debug(f"available_variables前3个={available_variables[:3]}")
 
         # 为每个时间点和每个变量创建数据发布
         skipped_missing = 0
@@ -390,14 +376,16 @@ def _extract_real_data_releases(
         # 按时间排序
         releases.sort(key=lambda x: x.timestamp)
 
-        print(f"[API] 成功提取 {len(releases)} 个真实数据发布事件")
-        print(f"[API] DEBUG: 跳过统计 - 缺失值={skipped_missing}, 不在列中={skipped_not_in_columns}")
+        logger.info(f"成功提取 {len(releases)} 个真实数据发布事件")
+        logger.debug(f"跳过统计 - 缺失值={skipped_missing}, 不在列中={skipped_not_in_columns}")
         return releases
 
     except (ValidationError, ComputationError):
         raise
-    except Exception as e:
-        raise ComputationError(f"真实数据提取失败: {str(e)}")
+    except KeyError as e:
+        raise ValidationError(f"数据访问错误: 日期或变量不存在 - {str(e)}")
+    except (TypeError, ValueError) as e:
+        raise ComputationError(f"数据类型转换失败: {str(e)}")
 
 
 def _generate_analysis_results(
@@ -561,45 +549,12 @@ def _generate_analysis_results(
             'normalization_scale_factor': normalization_info['scale_factor'],
         }
 
-        print(f"[API] 分析结果生成完成: CSV文件={len(csv_paths)} 个, 行业数={len(industry_breakdown)}")
+        logger.info(f"分析结果生成完成: CSV文件={len(csv_paths)} 个, 行业数={len(industry_breakdown)}")
         return {
             'csv_paths': csv_paths,
             'summary': summary,
             'data_flow': data_flow
         }
 
-    except Exception as e:
+    except (KeyError, TypeError, ValueError) as e:
         raise ComputationError(f"分析结果生成失败: {str(e)}")
-
-
-def _create_visualizations(
-    contributions: List,
-    target_date: pd.Timestamp,
-    workspace_dir: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    var_industry_map: Optional[Dict[str, str]] = None,
-    nowcast_series: Optional[pd.Series] = None,
-    saved_nowcast_data: Optional[Any] = None
-) -> Dict[str, str]:
-    """创建可视化图表"""
-    try:
-        # 验证contributions类型（不做兼容转换）
-        if contributions and not isinstance(contributions[0], NewsContribution):
-            raise ValidationError(
-                f"contributions必须是NewsContribution对象列表，"
-                f"实际类型: {type(contributions[0]).__name__}"
-            )
-
-        plot_paths = {}
-
-        print(f"[API] 可视化创建完成: {len(plot_paths)} 个图表")
-        return plot_paths
-
-    except (ValidationError, ComputationError):
-        raise
-    except Exception as e:
-        print(f"[API] 可视化创建失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise ComputationError(f"可视化创建失败: {str(e)}")

@@ -31,7 +31,8 @@ class UnifiedDataUploadComponent(DataInputComponent):
                  show_data_source_selector: bool = True,
                  show_staging_data_option: bool = True,
                  component_id: str = None,
-                 return_file_object: bool = False):
+                 return_file_object: bool = False,
+                 quiet_mode: bool = False):
         """
         Args:
             accepted_types: 接受的文件类型列表
@@ -41,6 +42,7 @@ class UnifiedDataUploadComponent(DataInputComponent):
             show_staging_data_option: 是否显示暂存区选项
             component_id: 组件ID
             return_file_object: 是否返回文件对象而不是DataFrame（某些模块需要）
+            quiet_mode: 静默模式，不显示加载过程中的中间消息
         """
         component_name = component_id or f"upload_{id(self)}"
         super().__init__(component_name, "数据上传")
@@ -50,6 +52,7 @@ class UnifiedDataUploadComponent(DataInputComponent):
         self.show_data_source_selector = show_data_source_selector
         self.show_staging_data_option = show_staging_data_option
         self.return_file_object = return_file_object
+        self.quiet_mode = quiet_mode
     
     def load_and_preprocess_data(self, uploaded_file) -> Tuple[Optional[pd.DataFrame], str]:
         """
@@ -175,14 +178,17 @@ class UnifiedDataUploadComponent(DataInputComponent):
 
                 # 如果需要返回文件对象，直接返回
                 if self.return_file_object:
-                    st_obj.success(f"已上传文件: {uploaded_file.name}")
-                    st_obj.info(f"文件大小: {file_size_mb:.2f} MB")
+                    if not self.quiet_mode:
+                        st_obj.success(f"已上传文件: {uploaded_file.name}")
+                        st_obj.info(f"文件大小: {file_size_mb:.2f} MB")
                     return uploaded_file
 
-                st_obj.info(f"检测到文件: {uploaded_file.name}。正在加载...")
+                if not self.quiet_mode:
+                    st_obj.info(f"检测到文件: {uploaded_file.name}。正在加载...")
 
                 # 加载和预处理数据
-                with st_obj.spinner(f"正在加载文件: {uploaded_file.name}..."):
+                spinner_text = f"正在加载文件: {uploaded_file.name}..." if not self.quiet_mode else "正在加载..."
+                with st_obj.spinner(spinner_text):
                     df, message = self.load_and_preprocess_data(uploaded_file)
 
                 if df is not None and not df.empty:
@@ -192,7 +198,8 @@ class UnifiedDataUploadComponent(DataInputComponent):
                     self.set_state('file_name', uploaded_file.name)
                     self.set_state('data_source', 'upload')
 
-                    st_obj.success(f"文件 '{uploaded_file.name}' 加载成功")
+                    if not self.quiet_mode:
+                        st_obj.success(f"文件 '{uploaded_file.name}' 加载成功")
 
                     # 显示数据概览
                     if kwargs.get('show_overview', True):

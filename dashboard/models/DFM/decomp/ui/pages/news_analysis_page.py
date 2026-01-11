@@ -7,7 +7,6 @@ DFM影响分解页面 - 纽约联储风格
 
 import streamlit as st
 import pandas as pd
-import os
 import traceback
 from datetime import datetime
 from typing import Dict, Any
@@ -17,27 +16,15 @@ from dashboard.models.DFM.decomp import execute_news_analysis
 
 
 def get_dfm_state(key, default=None):
-    """获取DFM状态值 - 仅从news_analysis命名空间读取"""
-    try:
-        import streamlit as st
-        # 所有键都从news_analysis命名空间获取
-        full_key = f'news_analysis.{key}'
-        return st.session_state.get(full_key, default)
-    except Exception as e:
-        print(f"[DFM News Analysis] Error getting state: {key}, {e}")
-        return default
+    """获取DFM状态值"""
+    full_key = f'news_analysis.{key}'
+    return st.session_state.get(full_key, default)
 
 
 def set_dfm_state(key, value):
     """设置DFM状态值"""
-    try:
-        import streamlit as st
-        full_key = f'news_analysis.{key}'
-        st.session_state[full_key] = value
-        return True
-    except Exception as e:
-        print(f"[DFM News Analysis] Error setting state: {key}, {e}")
-        return False
+    full_key = f'news_analysis.{key}'
+    st.session_state[full_key] = value
 
 
 def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
@@ -112,7 +99,7 @@ def render_dfm_news_analysis_page(st_module: Any) -> Dict[str, Any]:
             result = _execute_analysis(st_module, model_file, metadata_file, selected_target_month)
             # 如果分析成功，直接渲染结果，不使用rerun
             if result and result['returncode'] == 0:
-                _render_results_direct(st_module, result)
+                _render_results(st_module, result)
         else:
             # 非按钮点击时，检查是否有已完成的分析结果
             if get_dfm_state('news_analysis_completed', False):
@@ -154,7 +141,6 @@ def _render_parameter_section(st_module):
     # 更新状态并返回选择的月份
     selected_month = target_date.strftime('%Y-%m')
     set_dfm_state('news_target_month', selected_month)
-    print(f"[UI DEBUG] 用户选择的目标月份: {selected_month}")
 
     return selected_month
 
@@ -163,8 +149,6 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
     """执行影响分解，返回结果"""
     with st_module.spinner("正在执行影响分解，请稍候..."):
         try:
-            print(f"[UI DEBUG] 执行分析使用的目标月份: {target_month}")
-
             # 调用后端API
             result = execute_news_analysis(
                 dfm_model_file_content=model_file.getbuffer(),
@@ -177,7 +161,6 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
                     'returncode': result['returncode'],
                     'csv_paths': result['csv_paths'],
                     'csv_contents': result['csv_contents'],
-                    'plot_paths': result['plot_paths'],
                     'summary': result['summary'],
                     'data_flow': result['data_flow'],
                     'workspace_dir': result['workspace_dir']
@@ -200,127 +183,88 @@ def _execute_analysis(st_module, model_file, metadata_file, target_month):
             return None
 
 
-def _render_results_direct(st_module, result):
-    """直接渲染分析结果（不从状态读取）"""
-    st_module.markdown("---")
+def _render_results(st_module, result=None):
+    """渲染分析结果"""
+    if result is None:
+        result = get_dfm_state('news_analysis_result')
 
-    # 1. 统计摘要卡片（关键指标和行业分解）
+    st_module.markdown("---")
     _render_summary_cards(st_module, result)
-
     st_module.markdown("---")
-
-    # 2. 数据流表格区域
     _render_data_flow_table(st_module, result)
-
-    st_module.markdown("---")
-
-    # 3. 数据下载区域
     _render_download_section(st_module, result)
 
 
-def _render_results(st_module):
-    """渲染分析结果（从状态读取）"""
-    result = get_dfm_state('news_analysis_result')
+def _build_variable_df(data_flow):
+    """构建按指标分解DataFrame"""
+    variable_stats = {}
+    for date_entry in data_flow:
+        for release in date_entry.get('releases', []):
+            var_name = release['variable']
+            industry = release['industry']
+            impact = release['impact']
+            if var_name not in variable_stats:
+                variable_stats[var_name] = {
+                    'industry': industry, 'impact': 0.0, 'count': 0,
+                    'positive_impact': 0.0, 'negative_impact': 0.0
+                }
+            variable_stats[var_name]['impact'] += impact
+            variable_stats[var_name]['count'] += 1
+            if impact > 0:
+                variable_stats[var_name]['positive_impact'] += impact
+            elif impact < 0:
+                variable_stats[var_name]['negative_impact'] += impact
 
-    st_module.markdown("---")
+    variable_data = [
+        {
+            '指标名称': var_name,
+            '所属行业': stats['industry'],
+            '净影响': stats['impact'],
+            '数据发布数': stats['count'],
+            '正向影响': stats['positive_impact'],
+            '负向影响': stats['negative_impact']
+        }
+        for var_name, stats in variable_stats.items()
+    ]
+    df = pd.DataFrame(variable_data)
+    if not df.empty:
+        df = df.sort_values(by='净影响', key=abs, ascending=False)
+    return df
 
-    # 1. 统计摘要卡片（关键指标和行业分解）
-    _render_summary_cards(st_module, result)
 
-    st_module.markdown("---")
-
-    # 2. 数据流表格区域
-    _render_data_flow_table(st_module, result)
-
-    st_module.markdown("---")
-
-    # 3. 数据下载区域
-    _render_download_section(st_module, result)
+def _build_industry_df(industry_breakdown):
+    """构建按行业分解DataFrame"""
+    industry_data = [
+        {
+            '行业': industry,
+            '净影响': stats['impact'],
+            '数据发布数': stats['count'],
+            '正向影响': stats['positive_impact'],
+            '负向影响': stats['negative_impact']
+        }
+        for industry, stats in industry_breakdown.items()
+    ]
+    df = pd.DataFrame(industry_data)
+    if not df.empty:
+        df = df.sort_values(by='净影响', key=abs, ascending=False)
+    return df
 
 
 def _render_data_flow_table(st_module, result):
-    """渲染数据流表格"""
+    """渲染数据发布影响明细表（按指标聚合）"""
     data_flow = result['data_flow']
 
     if not data_flow:
         st_module.info("没有数据流信息")
         return
 
-    # 获取用户选择的目标月份
-    target_month = get_dfm_state('news_target_month_executed', datetime.now().strftime('%Y-%m'))
-
-    # 调试信息：显示data_flow的前几个日期
-    if data_flow:
-        print(f"[DEBUG] data_flow总数: {len(data_flow)}")
-        print(f"[DEBUG] target_month: {target_month}")
-        print(f"[DEBUG] 前5个date_entry的日期: {[entry['date'] for entry in data_flow[:5]]}")
-
-    # 计算目标月份的日期范围
-    try:
-        target_date = pd.to_datetime(target_month + '-01')
-        # 目标月份的第一天和最后一天
-        month_start = target_date
-        # 计算下个月的第一天，然后减一天得到当月最后一天
-        if target_date.month == 12:
-            month_end = pd.Timestamp(year=target_date.year + 1, month=1, day=1) - pd.Timedelta(days=1)
-        else:
-            month_end = pd.Timestamp(year=target_date.year, month=target_date.month + 1, day=1) - pd.Timedelta(days=1)
-
-        print(f"[DEBUG] 目标月份日期范围: {month_start.strftime('%Y-%m-%d')} 到 {month_end.strftime('%Y-%m-%d')}")
-    except Exception as e:
-        st_module.error(f"日期解析失败: {e}")
+    variable_df = _build_variable_df(data_flow)
+    if variable_df.empty:
+        st_module.info("没有数据发布记录")
         return
 
-    # 过滤目标月份的数据
-    filtered_data_flow = []
-    for date_entry in data_flow:
-        date_str = date_entry['date']
-        try:
-            entry_date = pd.to_datetime(date_str)
-            # 判断日期是否在目标月份范围内
-            if month_start <= entry_date <= month_end:
-                filtered_data_flow.append(date_entry)
-                print(f"[DEBUG] 匹配日期: {date_str}")
-        except Exception as e:
-            print(f"[DEBUG] 日期解析失败: {date_str}, 错误: {e}")
-            continue
-
-    print(f"[DEBUG] 过滤后的数据流数量: {len(filtered_data_flow)}")
-
-    if not filtered_data_flow:
-        # data_flow是按降序排列的（最新在前），所以[-1]是最早日期，[0]是最新日期
-        st_module.info(f"目标月份 {target_month} 没有数据发布（数据覆盖范围: {data_flow[-1]['date'] if data_flow else 'N/A'} - {data_flow[0]['date'] if data_flow else 'N/A'}）")
-        return
-
-    st_module.markdown(f"##### 数据发布影响明细 - {target_month} ({len(filtered_data_flow)} 个日期)")
-
-    for date_entry in filtered_data_flow:
-        date_str = date_entry['date']
-        nowcast_value = date_entry['nowcast_value']
-        releases = date_entry['releases']
-
-        # 日期标题
-        if nowcast_value is not None:
-            st_module.markdown(f"**{date_str}** - Nowcast: {nowcast_value:.4f}")
-        else:
-            st_module.markdown(f"**{date_str}**")
-
-        # 发布列表
-        if releases:
-            release_data = []
-            for release in releases:
-                release_data.append({
-                    '变量名称': release['variable'],
-                    '所属行业': release['industry'],
-                    '观测值': f"{release['actual']:.4f}",
-                    '影响值': f"{release['impact']:+.4f}",
-                    '方向': '↑' if release['is_positive'] else '↓'
-                })
-
-            df = pd.DataFrame(release_data)
-            st_module.dataframe(df, width='stretch', hide_index=True)
-        else:
-            st_module.caption("无发布数据")
+    st_module.markdown("##### 按指标分解")
+    st_module.dataframe(variable_df, width='stretch', hide_index=True)
 
 
 def _render_summary_cards(st_module, result):
@@ -415,51 +359,52 @@ def _render_summary_cards(st_module, result):
     industry_breakdown = summary['industry_breakdown']
     if industry_breakdown:
         st_module.markdown("##### 按行业分解")
-
-        industry_data = []
-        for industry, stats in industry_breakdown.items():
-            industry_data.append({
-                '行业': industry,
-                '净影响': stats['impact'],
-                '数据发布数': stats['count'],
-                '正向影响': stats['positive_impact'],
-                '负向影响': stats['negative_impact']
-            })
-
-        industry_df = pd.DataFrame(industry_data)
-        industry_df = industry_df.sort_values(by='净影响', key=abs, ascending=False)
+        industry_df = _build_industry_df(industry_breakdown)
         st_module.dataframe(industry_df, width='stretch', hide_index=True)
 
 
 def _render_download_section(st_module, result):
     """渲染下载区域"""
-    csv_paths = result['csv_paths']
-    csv_contents = result['csv_contents']
+    import io
 
     st_module.markdown("##### 数据导出")
 
-    col1, col2 = st_module.columns(2)
+    summary = result['summary']
+    data_flow = result['data_flow']
 
-    with col1:
-        impacts_path = csv_paths['impacts']
-        impacts_data = csv_contents['impacts']
-        st_module.download_button(
-            label="下载数据发布影响CSV",
-            data=impacts_data,
-            file_name=os.path.basename(impacts_path),
-            mime="text/csv",
-            width='stretch',
-            key="download_impacts_csv"
-        )
+    # Sheet 1: 影响摘要
+    summary_data = [
+        {'指标': '数据发布数', '值': summary['total_releases']},
+        {'指标': '首次预测', '值': summary['first_nowcast']},
+        {'指标': '正向影响', '值': summary['positive_impact_sum']},
+        {'指标': '负向影响', '值': summary['negative_impact_sum']},
+        {'指标': '净影响', '值': summary['total_impact']},
+        {'指标': '最新预测', '值': summary['last_nowcast']},
+        {'指标': '分析起始日期', '值': summary.get('analysis_start', '')},
+        {'指标': '分析结束日期', '值': summary.get('analysis_end', '')}
+    ]
+    summary_df = pd.DataFrame(summary_data)
 
-    with col2:
-        contributions_path = csv_paths['contributions']
-        contributions_data = csv_contents['contributions']
-        st_module.download_button(
-            label="下载贡献分解CSV",
-            data=contributions_data,
-            file_name=os.path.basename(contributions_path),
-            mime="text/csv",
-            width='stretch',
-            key="download_contributions_csv"
-        )
+    # Sheet 2: 按行业分解
+    industry_breakdown = summary.get('industry_breakdown', {})
+    industry_df = _build_industry_df(industry_breakdown)
+
+    # Sheet 3: 按指标分解
+    variable_df = _build_variable_df(data_flow)
+
+    # 生成Excel
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        summary_df.to_excel(writer, sheet_name='影响摘要', index=False)
+        industry_df.to_excel(writer, sheet_name='按行业分解', index=False)
+        variable_df.to_excel(writer, sheet_name='按指标分解', index=False)
+
+    target_month = get_dfm_state('news_target_month_executed', 'unknown')
+    st_module.download_button(
+        label="下载分析结果",
+        data=output.getvalue(),
+        file_name=f"影响分解_{target_month}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        key="download_impact_excel"
+    )

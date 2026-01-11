@@ -21,13 +21,14 @@ def render_univariate_analysis_page():
     tab = st.tabs(["平稳性分析"])[0]
 
     with tab:
-        # Tab内数据上传
+        # Tab内数据上传（静默模式，只显示最终结果）
         upload_component = UnifiedDataUploadComponent(
             accepted_types=['csv', 'xlsx', 'xls'],
             help_text="上传CSV或Excel文件进行平稳性分析",
             show_data_source_selector=False,
             show_staging_data_option=False,
-            component_id="univariate_stationarity_upload"
+            component_id="univariate_stationarity_upload",
+            quiet_mode=True
         )
 
         data = upload_component.render_file_upload_section(
@@ -41,7 +42,7 @@ def render_univariate_analysis_page():
             file_name = upload_component.get_state('file_name')
             st.session_state['exploration.stationarity.upload_data'] = data
             st.session_state['exploration.stationarity.file_name'] = file_name
-            st.info(f"数据已加载: {file_name} ({data.shape[0]} 行 x {data.shape[1]} 列)")
+            st.success(f"数据已加载: {file_name} ({data.shape[0]} 行 x {data.shape[1]} 列)")
 
         # 渲染分析组件
         stationarity_component = StationarityAnalysisComponent()

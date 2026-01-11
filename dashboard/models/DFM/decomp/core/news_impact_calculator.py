@@ -19,7 +19,8 @@ from ..utils.constants import (
     PRIMARY_DRIVERS_RANK_THRESHOLD,
     SECONDARY_DRIVERS_RANK_THRESHOLD,
     STABLE_POSITIVE_RATIO_THRESHOLD,
-    STABLE_NEGATIVE_RATIO_THRESHOLD
+    STABLE_NEGATIVE_RATIO_THRESHOLD,
+    TOP_VARIABLES_COUNT
 )
 from .impact_analyzer import ImpactResult, SequentialImpactResult, DataRelease
 
@@ -109,8 +110,12 @@ class NewsImpactCalculator:
             logger.info(f"计算了 {len(contributions)} 个新闻贡献")
             return contributions
 
-        except Exception as e:
-            raise ComputationError(f"计算新闻贡献失败: {str(e)}", "news_contributions_calculation")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"新闻贡献计算数据访问错误: {str(e)}", "news_contributions_calculation")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"新闻贡献计算数值错误: {str(e)}", "news_contributions_calculation")
 
     def rank_variables_by_impact(
         self,
@@ -199,8 +204,12 @@ class NewsImpactCalculator:
             logger.info(f"变量排名完成: {method} 方法")
             return ranking_df
 
-        except Exception as e:
-            raise ComputationError(f"变量排名失败: {str(e)}", "variable_ranking")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"变量排名数据访问错误: {str(e)}", "variable_ranking")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"变量排名数值错误: {str(e)}", "variable_ranking")
 
     def calculate_positive_negative_split(
         self,
@@ -245,8 +254,8 @@ class NewsImpactCalculator:
                 negative_by_var[var_name] = negative_by_var.get(var_name, 0) + c.impact_value
 
             # 识别主要贡献变量
-            top_positive_vars = sorted(positive_by_var.items(), key=lambda x: x[1], reverse=True)[:5]
-            top_negative_vars = sorted(negative_by_var.items(), key=lambda x: x[1])[:5]
+            top_positive_vars = sorted(positive_by_var.items(), key=lambda x: x[1], reverse=True)[:TOP_VARIABLES_COUNT]
+            top_negative_vars = sorted(negative_by_var.items(), key=lambda x: x[1])[:TOP_VARIABLES_COUNT]
 
             split_result = {
                 'total_impact': net_impact,
@@ -260,14 +269,18 @@ class NewsImpactCalculator:
                 'negative_by_variable': negative_by_var,
                 'top_positive_variables': top_positive_vars,
                 'top_negative_variables': top_negative_vars,
-                'balance_factor': abs(total_positive / total_negative) if total_negative != 0 else float('inf')
+                'balance_factor': abs(total_positive / total_negative) if total_negative != 0 else None
             }
 
             logger.info(f"正负影响分解: 正向={total_positive:.4f}, 负向={total_negative:.4f}")
             return split_result
 
-        except Exception as e:
-            raise ComputationError(f"正负影响分解失败: {str(e)}", "positive_negative_split")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"正负影响分解数据访问错误: {str(e)}", "positive_negative_split")
+        except (TypeError, ValueError, ZeroDivisionError) as e:
+            raise ComputationError(f"正负影响分解数值错误: {str(e)}", "positive_negative_split")
 
     def identify_key_drivers(
         self,
@@ -355,8 +368,12 @@ class NewsImpactCalculator:
             logger.info(f"识别关键驱动: {len(key_drivers)} 个变量")
             return key_drivers_result
 
-        except Exception as e:
-            raise ComputationError(f"关键驱动识别失败: {str(e)}", "key_drivers_identification")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"关键驱动识别数据访问错误: {str(e)}", "key_drivers_identification")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"关键驱动识别数值错误: {str(e)}", "key_drivers_identification")
 
     def _analyze_driver_patterns(
         self,

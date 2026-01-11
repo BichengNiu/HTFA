@@ -11,7 +11,7 @@ from typing import Dict, List, Any, Optional
 from collections import defaultdict
 
 from .helpers import normalize_variable_name
-from .constants import DEFAULT_INDUSTRY
+from .constants import DEFAULT_INDUSTRY, INDUSTRY_COLORS
 from ..core.news_impact_calculator import NewsContribution
 
 
@@ -265,18 +265,14 @@ class IndustryAggregator:
 
         # 为所有行业分配颜色
         color_map = {}
-        available_colors = [
-            '#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6',
-            '#1abc9c', '#e67e22', '#95a5a6', '#34495e', '#7f8c8d'
-        ]
 
         for idx, industry in enumerate(industries):
             if industry in default_colors:
                 color_map[industry] = default_colors[industry]
             else:
                 # 使用可用颜色列表循环分配
-                color_idx = idx % len(available_colors)
-                color_map[industry] = available_colors[color_idx]
+                color_idx = idx % len(INDUSTRY_COLORS)
+                color_map[industry] = INDUSTRY_COLORS[color_idx]
 
         return color_map
 

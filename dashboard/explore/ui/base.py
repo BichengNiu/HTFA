@@ -156,8 +156,6 @@ class TimeSeriesAnalysisComponent(UIComponent):
             """)
             return None, "", ""
         else:
-            st_obj.success(f"当前数据源: {data_source}")
-            st_obj.info(f"数据形状: {selected_data.shape[0]} 行 × {selected_data.shape[1]} 列")
             return selected_data, data_source, selected_df_name
 
     @abstractmethod

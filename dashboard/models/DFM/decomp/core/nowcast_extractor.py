@@ -64,8 +64,12 @@ class NowcastExtractor:
 
             return nowcast_series
 
-        except Exception as e:
-            raise ComputationError(f"提取nowcast序列失败: {str(e)}", "nowcast_extraction")
+        except DataFormatError:
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"提取nowcast序列数据访问错误: {str(e)}", "nowcast_extraction")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"提取nowcast序列数值错误: {str(e)}", "nowcast_extraction")
 
     def get_kalman_gains_matrix(self) -> np.ndarray:
         """
@@ -124,8 +128,12 @@ class NowcastExtractor:
             baseline_value = float(nowcast_series.loc[available_dates[-1]])
             logger.info(f"基准预测值 ({target_date}): {baseline_value:.4f}")
             return baseline_value
-        except Exception as e:
-            raise ComputationError(f"计算基准预测失败: {str(e)}", "baseline_computation")
+        except ComputationError:
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"计算基准预测数据访问错误: {str(e)}", "baseline_computation")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"计算基准预测数值错误: {str(e)}", "baseline_computation")
 
     def get_extraction_summary(self) -> Dict[str, Any]:
         """

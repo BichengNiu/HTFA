@@ -188,8 +188,12 @@ class ImpactAnalyzer:
                   f"(innovation={innovation:.4f}, ||K||={effective_kalman_weight:.4f})")
             return result
 
-        except Exception as e:
-            raise ComputationError(f"单次影响计算失败: {str(e)}", "single_impact_calculation")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"数据访问错误: {str(e)}", "single_impact_calculation")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"数值计算错误: {str(e)}", "single_impact_calculation")
 
     def analyze_sequential_impacts(
         self,
@@ -270,8 +274,12 @@ class ImpactAnalyzer:
             logger.info(f"时序影响分析完成: 总影响 = {cumulative_impact:.4f}")
             return result
 
-        except Exception as e:
-            raise ComputationError(f"时序影响分析失败: {str(e)}", "sequential_impact_analysis")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"时序影响分析数据访问错误: {str(e)}", "sequential_impact_analysis")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"时序影响分析数值错误: {str(e)}", "sequential_impact_analysis")
 
     def decompose_total_impact(
         self,
@@ -347,8 +355,12 @@ class ImpactAnalyzer:
             logger.info(f"影响分解完成: {len(variable_summary)} 个变量")
             return decomposition_result
 
-        except Exception as e:
-            raise ComputationError(f"影响分解失败: {str(e)}", "impact_decomposition")
+        except (ComputationError, ValidationError):
+            raise
+        except (KeyError, IndexError) as e:
+            raise ComputationError(f"影响分解数据访问错误: {str(e)}", "impact_decomposition")
+        except (TypeError, ValueError) as e:
+            raise ComputationError(f"影响分解数值错误: {str(e)}", "impact_decomposition")
 
 
     def _get_target_variable_loading(self) -> np.ndarray:
@@ -404,16 +416,12 @@ class ImpactAnalyzer:
 
         K_t = self.extractor.data.kalman_gains_history[closest_date_index]
 
-        # 如果该时刻的K_t为None（无观测），向前查找最近的非None值
+        # 卡尔曼增益为None时直接报错（不使用fallback）
         if K_t is None:
-            for idx in range(closest_date_index - 1, -1, -1):
-                if self.extractor.data.kalman_gains_history[idx] is not None:
-                    K_t = self.extractor.data.kalman_gains_history[idx]
-                    logger.debug(f"使用时刻 {idx} 的卡尔曼增益（最接近 {timestamp}）")
-                    break
-
-        if K_t is None:
-            raise ComputationError(f"未找到可用的卡尔曼增益矩阵（目标时间: {timestamp}）")
+            raise ComputationError(
+                f"时刻 {closest_date_index} 的卡尔曼增益为None（目标时间: {timestamp}）。\n"
+                "请确保模型训练时正确保存了所有时刻的卡尔曼增益。"
+            )
 
         # K_t的原始形状是(n_states, n_obs)，其中n_states = n_factors * max_lags
         # 影响分析只需要前n_factors行（当前因子的增益）

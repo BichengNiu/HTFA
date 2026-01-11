@@ -117,6 +117,13 @@ class ObservationPriorPredictor:
 
         var_idx = self.var_map[var_name]
 
+        # 边界检查：验证var_idx在predictions范围内
+        if var_idx < 0 or var_idx >= self.predictions.shape[0]:
+            raise ComputationError(
+                f"变量索引 {var_idx} 超出预测矩阵范围 [0, {self.predictions.shape[0]})。\n"
+                f"变量名: {var_name}"
+            )
+
         # 找时间索引（找到最接近且不晚于timestamp的时间点）
         earlier = self.time_index[self.time_index <= timestamp]
         if len(earlier) == 0:
