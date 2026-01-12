@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-双变量分析页面
+时序关系页面
 包含相关分析和领先滞后分析功能
 """
 
@@ -12,12 +12,13 @@ from typing import Optional
 from dashboard.explore.ui.unified_correlation import UnifiedCorrelationAnalysisComponent
 from dashboard.explore.ui.lead_lag import LeadLagAnalysisComponent
 from dashboard.core.ui.components.data_input import UnifiedDataUploadComponent
+from dashboard.explore.core.series_utils import clean_dataframe_columns
 
 logger = logging.getLogger(__name__)
 
 
 def render_bivariate_analysis_page():
-    """渲染双变量分析页面"""
+    """渲染时序关系页面"""
     # 权限过滤
     debug_mode = st.session_state.get("auth.debug_mode", False)
     current_user = st.session_state.get("auth.current_user", None)
@@ -38,7 +39,7 @@ def render_bivariate_analysis_page():
         visible_tabs = []
         for tab_name, permission_code in all_tabs_info:
             if auth_middleware.permission_manager.has_granular_access(
-                current_user, "数据探索", "双变量分析", tab_name
+                current_user, "数据探索", "时序关系", tab_name
             ):
                 visible_tabs.append((tab_name, permission_code))
 
@@ -80,8 +81,7 @@ def _render_correlation_tab():
         )
 
         if data_corr is not None:
-            # 统一清理列名空格（在数据入口点处理，避免下游重复清理）
-            data_corr.columns = data_corr.columns.str.strip() if hasattr(data_corr.columns, 'str') else data_corr.columns
+            clean_dataframe_columns(data_corr)
             file_name_corr = upload_component_corr.get_state('file_name')
             st.session_state['exploration.time_lag_corr.upload_data'] = data_corr
             st.session_state['exploration.time_lag_corr.file_name'] = file_name_corr
@@ -111,8 +111,7 @@ def _render_lead_lag_tab():
         )
 
         if data_lag is not None:
-            # 统一清理列名空格（在数据入口点处理，避免下游重复清理）
-            data_lag.columns = data_lag.columns.str.strip() if hasattr(data_lag.columns, 'str') else data_lag.columns
+            clean_dataframe_columns(data_lag)
             file_name_lag = upload_component_lag.get_state('file_name')
             st.session_state['exploration.lead_lag.upload_data'] = data_lag
             st.session_state['exploration.lead_lag.file_name'] = file_name_lag

@@ -56,11 +56,11 @@ class UIConstants:
             "icon": "🔍",
             "description": "深入探索时间序列数据的统计特性和内在规律"
         },
-        "单变量分析": {
+        "时序性质": {
             "icon": "📊",
             "description": "分析单个变量的平稳性特征，包括ADF检验和KPSS检验"
         },
-        "双变量分析": {
+        "时序关系": {
             "icon": "🔗",
             "description": "分析两个变量之间的相关性和领先滞后关系"
         }

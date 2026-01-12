@@ -16,6 +16,7 @@ from dashboard.explore.preprocessing.frequency_alignment import align_multiple_s
 from dashboard.explore.preprocessing.standardization import standardize_series
 from dashboard.explore.core.validation import validate_series
 from dashboard.explore.core.constants import ERROR_MESSAGES
+from dashboard.explore.core.series_utils import clean_dataframe_columns
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,7 @@ def perform_batch_dtw_calculation(
         Tuple[结果列表, 路径字典, 错误列表, 警告列表]
     """
     df = df_input.copy()
-
-    # 清理DataFrame列名中的首尾空格（修复空格导致的匹配问题）
-    df.columns = df.columns.str.strip() if hasattr(df.columns, 'str') else df.columns
+    clean_dataframe_columns(df)
     logger.info(f"[DTW批量计算] 已清理列名空格，列数: {len(df.columns)}")
 
     results_list = []

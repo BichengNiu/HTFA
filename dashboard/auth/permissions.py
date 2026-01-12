@@ -61,13 +61,13 @@ GRANULAR_PERMISSION_MAP = {
     "数据探索": {
         "code": "data_exploration",
         "sub_modules": {
-            "单变量分析": {
+            "时序性质": {
                 "code": "data_exploration.univariate",
                 "tabs": {
                     "平稳性分析": "data_exploration.univariate.stationarity"
                 }
             },
-            "双变量分析": {
+            "时序关系": {
                 "code": "data_exploration.bivariate",
                 "tabs": {
                     "相关分析": "data_exploration.bivariate.correlation",

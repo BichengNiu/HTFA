@@ -51,9 +51,11 @@ from dashboard.explore.metrics import (
 # ==================== Analysis模块 ====================
 from dashboard.explore.analysis import (
     # 平稳性分析
+    run_stationarity_tests,
     test_and_process_stationarity,
     run_adf_test,
-    run_kpss_test,
+    apply_variable_transformations,
+    OPERATIONS,
 
     # 领先滞后分析
     perform_combined_lead_lag_analysis,
@@ -110,9 +112,11 @@ __all__ = [
     'calculate_dtw_path',
 
     # Analysis - 平稳性
+    'run_stationarity_tests',
     'test_and_process_stationarity',
     'run_adf_test',
-    'run_kpss_test',
+    'apply_variable_transformations',
+    'OPERATIONS',
 
     # Analysis - 领先滞后
     'perform_combined_lead_lag_analysis',

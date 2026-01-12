@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 from dashboard.explore.core.validation import validate_analysis_inputs
-from dashboard.explore.core.constants import MIN_SAMPLES_KL_DIVERGENCE, ERROR_MESSAGES
+from dashboard.explore.core.constants import MIN_SAMPLES_KL_DIVERGENCE, ERROR_MESSAGES, MAX_DISPLAY_LAG_RANGE
 from dashboard.explore.core.series_utils import get_lagged_slices
 from dashboard.explore.metrics.correlation import (
     calculate_time_lagged_correlation,
@@ -214,8 +214,7 @@ def calculate_lead_lag_for_pair(
         result['full_correlogram_df'] = correlogram_df
 
         if not correlogram_df.empty and correlogram_df['Correlation'].notna().any():
-            # 限制最优滞后搜索范围到±5
-            opt_lag, opt_corr = find_optimal_lag(correlogram_df, lag_range='all', max_lag_range=5)
+            opt_lag, opt_corr = find_optimal_lag(correlogram_df, lag_range='all', max_lag_range=MAX_DISPLAY_LAG_RANGE)
             if opt_lag is not None:
                 result['k_corr'] = opt_lag
                 result['corr_at_k_corr'] = opt_corr
@@ -234,12 +233,11 @@ def calculate_lead_lag_for_pair(
         standardization_method
     )
 
-    # 找到最优KL散度（限制在±5范围内）
+    # 找到最优KL散度（限制在指定范围内）
     if result['full_kl_divergence_df']['KL_Divergence'].notna().any():
-        # 先过滤到±5范围内
         kl_df_filtered = result['full_kl_divergence_df'][
-            (result['full_kl_divergence_df']['Lag'] >= -5) &
-            (result['full_kl_divergence_df']['Lag'] <= 5)
+            (result['full_kl_divergence_df']['Lag'] >= -MAX_DISPLAY_LAG_RANGE) &
+            (result['full_kl_divergence_df']['Lag'] <= MAX_DISPLAY_LAG_RANGE)
         ].copy()
 
         if not kl_df_filtered.empty:

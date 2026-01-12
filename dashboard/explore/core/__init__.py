@@ -38,9 +38,9 @@ __all__ = [
 
     # series_utils
     'clean_numeric_series',
+    'clean_dataframe_columns',
     'identify_time_column',
     'prepare_time_index',
-    'align_series_indices',
     'get_lagged_slices',
     'get_lagged_series_slices',
 ]

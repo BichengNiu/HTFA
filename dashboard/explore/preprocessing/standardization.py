@@ -29,8 +29,15 @@ def standardize_array(data: np.ndarray, method: str = 'zscore') -> np.ndarray:
         method: 标准化方法 ('zscore', 'minmax', 'none')
 
     Returns:
-        标准化后的数据（失败时返回原数据）
+        标准化后的数据
+
+    Raises:
+        ValueError: 未知的标准化方法
     """
+    VALID_METHODS = {'zscore', 'minmax', 'none'}
+    if method not in VALID_METHODS:
+        raise ValueError(f"未知标准化方法: {method}，有效值: {VALID_METHODS}")
+
     if method == 'none' or len(data) == 0:
         return data
 

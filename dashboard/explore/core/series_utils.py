@@ -47,6 +47,21 @@ def clean_numeric_series(
     return result
 
 
+def clean_dataframe_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    清理DataFrame列名中的首尾空格
+
+    Args:
+        df: 输入DataFrame
+
+    Returns:
+        列名已清理的DataFrame（原地修改）
+    """
+    if hasattr(df.columns, 'str'):
+        df.columns = df.columns.str.strip()
+    return df
+
+
 def identify_time_column(df: pd.DataFrame, exclude_columns: Optional[List[str]] = None) -> Optional[str]:
     """
     智能识别DataFrame中的时间列
@@ -152,42 +167,6 @@ def prepare_time_index(
             logger.error(f"设置时间索引失败: {e}")
 
     return df_work, time_column
-
-
-def align_series_indices(
-    series1: pd.Series,
-    series2: pd.Series,
-    how: str = 'inner'
-) -> Tuple[pd.Series, pd.Series]:
-    """
-    对齐两个序列的索引
-
-    优化版本：直接使用pandas.align方法，避免创建临时DataFrame
-
-    注意：当前未被使用（可能违反YAGNI原则）
-    这只是对pandas.align的简单包装，提供的价值有限
-    考虑删除此函数，直接使用pandas.Series.align()
-
-    Args:
-        series1: 第一个序列
-        series2: 第二个序列
-        how: 对齐方式 ('inner', 'outer', 'left', 'right')
-
-    Returns:
-        Tuple[对齐后的series1, 对齐后的series2]
-    """
-    # 使用pandas的align方法，更高效且避免临时DataFrame
-    s1_aligned, s2_aligned = series1.align(series2, join=how)
-
-    # 如果是inner join，需要移除NaN值
-    if how == 'inner':
-        valid_mask = s1_aligned.notna() & s2_aligned.notna()
-        s1_aligned = s1_aligned[valid_mask]
-        s2_aligned = s2_aligned[valid_mask]
-
-    logger.debug(f"序列对齐完成: {len(series1)}, {len(series2)} -> {len(s1_aligned)} ({how})")
-
-    return s1_aligned, s2_aligned
 
 
 def get_lagged_slices(

@@ -42,7 +42,8 @@ MIN_POINTS_PER_BIN = 2
 # 时间间隔容差（天）
 TIMEDELTA_TOLERANCE_DAYS = {
     'Daily': (0.8, 1.2),
-    'Weekly': (6, 8),
+    'Weekly': (5, 7.9),
+    'Ten_Day': (8, 24),
     'Monthly': (25, 35),
     'Quarterly': (85, 100),
     'Annual': (350, 380)
@@ -52,6 +53,7 @@ TIMEDELTA_TOLERANCE_DAYS = {
 FREQUENCY_MAPPINGS = {
     'Daily': 'D',
     'Weekly': 'W-MON',
+    'Ten_Day': '10D',
     'Monthly': 'ME',
     'Quarterly': 'QE',
     'Annual': 'YE'
@@ -61,6 +63,7 @@ FREQUENCY_MAPPINGS = {
 FREQUENCY_PRIORITY = {
     'Daily': 1,
     'Weekly': 2,
+    'Ten_Day': 2.5,
     'Monthly': 3,
     'Quarterly': 4,
     'Annual': 5
@@ -103,6 +106,9 @@ DEFAULT_STANDARDIZATION_METHOD = 'zscore'
 # 默认最大滞后阶数
 DEFAULT_MAX_LAGS = 12
 
+# 领先滞后分析结果显示的最大滞后范围
+MAX_DISPLAY_LAG_RANGE = 5
+
 # 默认DTW窗口大小
 DEFAULT_DTW_WINDOW = 10
 
@@ -129,4 +135,33 @@ STATE_KEYS = {
         "dtw": "dtw_tab_set_time",
         "lead_lag": "lead_lag_tab_set_time"
     }
+}
+
+# ==================== 差分处理相关常量 ====================
+
+# 同比差分周期映射（根据频率确定k_diff）
+SEASONAL_DIFF_MAP = {
+    'Monthly': 12,      # 月度：12个月
+    'Quarterly': 4,     # 季度：4个季度
+    'Weekly': 52,       # 周度：52周
+    'Ten_Day': 3,       # 旬度：3旬
+    'Annual': 1,        # 年度：退化为环比
+    'Daily': None,      # 日度：不支持
+    'Irregular': None,
+    'Undetermined': None
+}
+
+# 差分处理选项
+DIFFERENCING_OPTIONS = ['不处理', '环比差分', '同比差分']
+
+# 频率中文显示映射
+FREQUENCY_DISPLAY_NAMES = {
+    'Daily': '日度',
+    'Weekly': '周度',
+    'Ten_Day': '旬度',
+    'Monthly': '月度',
+    'Quarterly': '季度',
+    'Annual': '年度',
+    'Irregular': '不规则',
+    'Undetermined': '未确定'
 }

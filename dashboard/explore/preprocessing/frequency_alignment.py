@@ -13,7 +13,7 @@
 
 import pandas as pd
 import numpy as np
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 import warnings
 
 from dashboard.explore.core.constants import FREQUENCY_MAPPINGS, FREQUENCY_PRIORITY, TIMEDELTA_TOLERANCE_DAYS
@@ -79,7 +79,7 @@ def infer_series_frequency(series: pd.Series) -> str:
 
         # 基于中位数时间间隔判断频率
         # 按照从小到大的顺序检查，确保匹配最接近的频率
-        freq_order = ['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual']
+        freq_order = ['Daily', 'Weekly', 'Ten_Day', 'Monthly', 'Quarterly', 'Annual']
 
         for freq_name in freq_order:
             min_days, max_days = TIMEDELTA_TOLERANCE_DAYS[freq_name]
@@ -275,9 +275,9 @@ def _check_frequency_consistency(
 
 def _determine_target_frequency(
     unique_freqs: List[str],
-    target_frequency: str,
+    target_frequency: Optional[str],
     auto_align: bool
-) -> Tuple[str, Dict[str, Any]]:
+) -> Tuple[Optional[str], Dict[str, Any]]:
     """
     确定目标对齐频率
 
