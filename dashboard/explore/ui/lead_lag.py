@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+import matplotlib.dates as mdates
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 
@@ -595,7 +596,6 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
         # 优化x轴标签显示
         if hasattr(target_series_plot.index, 'to_pydatetime'):
             # 如果是日期时间索引，优化显示
-            import matplotlib.dates as mdates
             ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
             ax.xaxis.set_major_locator(mdates.MonthLocator(interval=max(1, len(target_series_plot) // 10)))
             plt.setp(ax.xaxis.get_majorticklabels(), rotation=45, ha='right')

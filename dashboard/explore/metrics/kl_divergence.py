@@ -84,14 +84,16 @@ def series_to_distribution(
     p = counts_a / counts_a.sum() if counts_a.sum() > 0 else np.zeros_like(counts_a, dtype=float)
     q = counts_b / counts_b.sum() if counts_b.sum() > 0 else np.zeros_like(counts_b, dtype=float)
 
-    # 如果有数据但不在分箱中，使用均匀分布作为后备
+    # 检查数据是否在分箱范围内（直接报错，不使用兼容回退）
     if p.sum() == 0 and series_a_clean.shape[0] > 0:
-        p = np.ones_like(counts_a, dtype=float) / bins_actual
-        logger.warning("序列A数据不在分箱范围内，使用均匀分布")
+        raise ValueError(
+            f"序列A数据不在分箱范围内（范围: [{combined_min:.4f}, {combined_max:.4f}]）"
+        )
 
     if q.sum() == 0 and series_b_clean.shape[0] > 0:
-        q = np.ones_like(counts_b, dtype=float) / bins_actual
-        logger.warning("序列B数据不在分箱范围内，使用均匀分布")
+        raise ValueError(
+            f"序列B数据不在分箱范围内（范围: [{combined_min:.4f}, {combined_max:.4f}]）"
+        )
 
     return p, q, bin_edges
 

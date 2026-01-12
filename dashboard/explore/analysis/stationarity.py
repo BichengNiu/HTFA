@@ -13,13 +13,32 @@ from statsmodels.tsa.stattools import adfuller
 from statsmodels.tsa.statespace.tools import diff as statespace_diff
 import warnings
 
-from dashboard.explore.core.constants import MIN_SAMPLES_ADF
+from dashboard.explore.core.constants import MIN_SAMPLES_ADF, SEASONAL_DIFF_MAP, FREQUENCY_DISPLAY_NAMES
 from dashboard.explore.core.series_utils import prepare_time_index
+from dashboard.explore.preprocessing.frequency_alignment import infer_series_frequency
 
 logger = logging.getLogger(__name__)
 
 # 处理方法选项
 OPERATIONS = ['不处理', '对数', '环比差分', '同比差分']
+
+
+def _format_adf_status(adf_result: str) -> str:
+    """
+    格式化ADF检验结果为显示状态（DRY helper）
+
+    Args:
+        adf_result: ADF检验结果 ('是', '否', 或错误信息)
+
+    Returns:
+        显示状态 ('平稳', '非平稳', 或原始错误信息)
+    """
+    if adf_result == '是':
+        return '平稳'
+    elif adf_result == '否':
+        return '非平稳'
+    else:
+        return adf_result
 
 
 def apply_single_operation(series: pd.Series, operation: str) -> Tuple[Optional[pd.Series], str]:
@@ -100,7 +119,7 @@ def apply_variable_transformations(
 
         # 执行检验
         adf_p, adf_result = run_adf_test(series, alpha)
-        adf_status = '平稳' if adf_result == '是' else ('非平稳' if adf_result == '否' else adf_result)
+        adf_status = _format_adf_status(adf_result)
 
         results.append({
             '变量名': var_name,
@@ -151,7 +170,7 @@ def run_stationarity_tests(
             '变量名': col,
             '有效值个数': valid_count,
             'ADF检验P值': round(adf_p, 4) if adf_p is not None else None,
-            'ADF检验结果': '平稳' if adf_result == '是' else ('非平稳' if adf_result == '否' else adf_result)
+            'ADF检验结果': _format_adf_status(adf_result)
         })
 
     return pd.DataFrame(results)
@@ -439,9 +458,6 @@ def auto_detect_differencing_options(
     Returns:
         DataFrame with columns: 变量名, 频率, 环比差分, 同比差分, 推荐处理
     """
-    from dashboard.explore.preprocessing.frequency_alignment import infer_series_frequency
-    from dashboard.explore.core.constants import SEASONAL_DIFF_MAP, FREQUENCY_DISPLAY_NAMES
-
     results = []
 
     # 准备时间索引（修复频率检测需要DatetimeIndex）
@@ -511,8 +527,6 @@ def apply_automated_transformations(
     Returns:
         Tuple[处理后数据, 检验结果, 未通过ADF检验的变量列表]
     """
-    from dashboard.explore.core.constants import SEASONAL_DIFF_MAP
-
     results = []
     failed_vars = []
     processed_data = {}
@@ -538,7 +552,7 @@ def apply_automated_transformations(
 
         # 检验
         adf_p, adf_result = run_adf_test(processed_series, alpha)
-        adf_status = '平稳' if adf_result == '是' else ('非平稳' if adf_result == '否' else adf_result)
+        adf_status = _format_adf_status(adf_result)
 
         results.append({
             '变量名': var_name,

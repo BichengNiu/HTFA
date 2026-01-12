@@ -269,8 +269,7 @@ def perform_batch_dtw_calculation(
             distance, path = calculate_dtw_path(
                 target_np,
                 compare_np,
-                radius=radius,
-                dist_metric=dist_metric_name_param
+                radius=radius
             )
 
             current_result['DTW距离'] = distance

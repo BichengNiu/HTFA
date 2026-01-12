@@ -11,6 +11,7 @@
 4. 完整的对齐报告和错误处理
 """
 
+import logging
 import pandas as pd
 import numpy as np
 from typing import Tuple, List, Dict, Any, Optional
@@ -21,6 +22,8 @@ from dashboard.explore.core.series_utils import identify_time_column
 
 # 抑制pandas频率相关警告
 warnings.filterwarnings('ignore', category=FutureWarning, module='pandas')
+
+logger = logging.getLogger(__name__)
 
 
 def infer_series_frequency(series: pd.Series) -> str:
@@ -33,9 +36,6 @@ def infer_series_frequency(series: pd.Series) -> str:
     Returns:
         频率标识字符串 ('Daily', 'Weekly', 'Monthly', 'Quarterly', 'Annual', 'Irregular', 'Undetermined')
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     if len(series) < 2:
         return 'Undetermined'
 
@@ -494,9 +494,6 @@ def align_multiple_series_frequencies(
     Returns:
         对齐后的DataFrame
     """
-    import logging
-    logger = logging.getLogger(__name__)
-
     logger.info(f"[频率对齐] 开始 - 输入数据形状: {df.shape}, 列: {list(df.columns)}")
 
     if df.empty or len(df.columns) == 0:

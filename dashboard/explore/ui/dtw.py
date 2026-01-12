@@ -46,6 +46,24 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             self.set_state(key, None)
         logger.info("[DTW] 已清除所有分析状态")
 
+    @staticmethod
+    def _parse_alignment_mode(alignment_mode_choice: str) -> Tuple[bool, bool]:
+        """
+        解析对齐模式选择（DRY helper）
+
+        Args:
+            alignment_mode_choice: 对齐模式选择 ('freq_align_strict', 'freq_align_loose', 'no_align')
+
+        Returns:
+            Tuple[enable_alignment, strict_alignment]
+        """
+        if alignment_mode_choice == "freq_align_strict":
+            return True, True
+        elif alignment_mode_choice == "freq_align_loose":
+            return True, False
+        else:  # no_align
+            return False, False
+
     def smart_window_selection(self, target_length: int, comparison_length: int, series_length: int) -> Tuple[str, int]:
         """
         智能选择窗口类型和大小
@@ -350,16 +368,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             else:
                 radius = None
 
-        # 解析对齐模式
-        if alignment_mode_choice == "freq_align_strict":
-            enable_alignment = True
-            strict_alignment = True
-        elif alignment_mode_choice == "freq_align_loose":
-            enable_alignment = True
-            strict_alignment = False
-        else:  # no_align
-            enable_alignment = False
-            strict_alignment = False
+        # 解析对齐模式（使用DRY helper）
+        enable_alignment, strict_alignment = self._parse_alignment_mode(alignment_mode_choice)
 
         # 计算比较序列
         comparison_series = [col for col in numeric_cols if col != target_series]
@@ -661,16 +671,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
         # 直接从st.session_state读取频率和标准化参数
         alignment_mode_choice = st.session_state.get(f"dtw_{data_name}_alignment_mode_choice", 'freq_align_strict')
 
-        # 解析对齐模式
-        if alignment_mode_choice == "freq_align_strict":
-            enable_alignment = True
-            strict_alignment = True
-        elif alignment_mode_choice == "freq_align_loose":
-            enable_alignment = True
-            strict_alignment = False
-        else:  # no_align
-            enable_alignment = False
-            strict_alignment = False
+        # 解析对齐模式（使用DRY helper）
+        enable_alignment, strict_alignment = self._parse_alignment_mode(alignment_mode_choice)
 
         freq_options = {
             'enable_alignment': enable_alignment,
@@ -925,12 +927,15 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # 显示图表
             st_obj.plotly_chart(fig, width='stretch')
 
+        except ValueError as ve:
+            # 用户友好的错误提示（不显示技术堆栈）
+            error_msg = f"绘制DTW路径图失败: {str(ve)}"
+            logger.warning(f"[DTW绘图] {error_msg}")
+            st_obj.error(error_msg)
         except Exception as e:
             error_msg = f"绘制DTW路径图失败: {str(e)}"
             logger.error(f"[DTW绘图] {error_msg}", exc_info=True)
             st_obj.error(error_msg)
-            import traceback
-            st_obj.code(traceback.format_exc())
     
     
     def render_analysis_interface(self, st_obj, data: pd.DataFrame, data_name: str) -> Any:

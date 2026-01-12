@@ -78,38 +78,3 @@ class LeadLagAnalysisConfig:
             )
 
 
-@dataclass
-class StationarityConfig:
-    """
-    平稳性分析配置
-
-    封装平稳性检验的所有配置参数
-
-    注意：当前未使用（stationarity.py直接使用原始参数）
-    保留此类以备未来重构使用，或可考虑删除（YAGNI原则）
-    """
-
-    alpha: float = 0.05
-    processing_method: str = 'keep'  # 'keep', 'diff', 'log_diff'
-    diff_order: int = 1
-    validate_on_init: bool = field(default=False, repr=False, compare=False)
-
-    def __post_init__(self):
-        """条件验证（基于validate_on_init）"""
-        if self.validate_on_init:
-            self.validate()
-
-    def validate(self):
-        """手动验证配置参数"""
-        if not 0 < self.alpha < 1:
-            raise ValueError("alpha必须在(0, 1)之间")
-
-        if self.diff_order < 1:
-            raise ValueError("diff_order必须大于0")
-
-        valid_methods = ['keep', 'diff', 'log_diff']
-        if self.processing_method not in valid_methods:
-            raise ValueError(
-                f"不支持的处理方法: {self.processing_method}，"
-                f"请使用 {valid_methods} 之一"
-            )

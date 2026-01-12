@@ -68,8 +68,7 @@ def calculate_dtw_path(
     series2: np.ndarray,
     window_size: Optional[int] = None,
     use_window: bool = False,
-    radius: Optional[int] = None,
-    dist_metric: str = 'euclidean'
+    radius: Optional[int] = None
 ) -> Tuple[float, Optional[List[Tuple[int, int]]]]:
     """
     计算DTW距离和对齐路径
@@ -80,11 +79,13 @@ def calculate_dtw_path(
         window_size: 窗口大小（原有API）
         use_window: 是否使用窗口约束（原有API）
         radius: 半径约束（兼容旧API，等同于window_size）
-        dist_metric: 距离度量（保留参数以兼容，dtaidistance固定使用欧氏距离）
 
     Returns:
         Tuple[DTW距离, 对齐路径列表]
         对齐路径中每个元素为(index1, index2)元组
+
+    Note:
+        dtaidistance库固定使用欧氏距离
     """
     if not DTW_AVAILABLE:
         raise ImportError("dtaidistance库未安装，无法计算DTW路径")
