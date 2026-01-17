@@ -95,66 +95,6 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
         return window_type, window_size
 
-    def add_similarity_labels(self, results: list) -> list:
-        """
-        基于分位数法为结果添加相似度标签
-
-        Args:
-            results: DTW分析结果列表
-
-        Returns:
-            添加了相似度标签的结果列表
-        """
-        if not results:
-            return results
-
-        # 提取有效的标准化DTW距离
-        valid_distances = []
-        for result in results:
-            if result.get('标准化DTW距离') != 'Error' and isinstance(result.get('标准化DTW距离'), (int, float)):
-                valid_distances.append(result['标准化DTW距离'])
-
-        if not valid_distances:
-            # 如果没有有效距离，所有结果标记为错误
-            for result in results:
-                if result.get('标准化DTW距离') == 'Error':
-                    result['相似度'] = '错误'
-                else:
-                    result['相似度'] = '未知'
-            return results
-
-        # 特殊情况：只有一个有效距离
-        if len(valid_distances) == 1:
-            for result in results:
-                distance = result.get('标准化DTW距离')
-                if distance == 'Error' or not isinstance(distance, (int, float)):
-                    result['相似度'] = '错误'
-                else:
-                    result['相似度'] = '高度相似'  # 单个结果默认为高度相似
-            return results
-
-        # 计算分位数
-        valid_distances = np.array(valid_distances)
-        q25 = np.percentile(valid_distances, 25)
-        q75 = np.percentile(valid_distances, 75)
-        q95 = np.percentile(valid_distances, 95)
-
-        # 为每个结果添加相似度标签
-        for result in results:
-            distance = result.get('标准化DTW距离')
-
-            if distance == 'Error' or not isinstance(distance, (int, float)):
-                result['相似度'] = '错误'
-            elif distance < q25:
-                result['相似度'] = '高度相似'
-            elif distance < q75:
-                result['相似度'] = '中等相似'
-            elif distance < q95:
-                result['相似度'] = '低相似'
-            else:
-                result['相似度'] = '不相似'
-
-        return results
 
     def render_analysis_parameters(self, st_obj, data: pd.DataFrame, data_name: str):
         """
@@ -296,7 +236,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                 "对齐模式:",
                 options=["freq_align_strict", "freq_align_loose", "no_align"],
                 format_func=lambda x: {
-                    "freq_align_strict": "频率对齐 + 严格对齐",
+                    "freq_align_strict": "频率对齐 + 时点对齐",
                     "freq_align_loose": "仅频率对齐",
                     "no_align": "不对齐"
                 }[x],
@@ -437,7 +377,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             comp_var = result.get('对比变量', 'Unknown')
             dtw_distance = result.get('DTW距离', 'Error')
 
-            if isinstance(dtw_distance, (int, float)):
+            if isinstance(dtw_distance, (int, float)) and not np.isnan(dtw_distance) and np.isfinite(dtw_distance):
                 # 获取路径长度
                 path_length = 'N/A'
                 if comp_var in paths_dict:
@@ -457,7 +397,8 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     'Radius': radius if enable_window_constraint else 'N/A',
                     'DTW距离': round(dtw_distance, 4),
                     '对齐路径长度': path_length,
-                    '标准化DTW距离': normalized_dtw
+                    '标准化DTW距离': normalized_dtw,
+                    '分析状态': '计算成功'
                 })
             else:
                 results.append({
@@ -466,23 +407,14 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
                     'Radius': radius if enable_window_constraint else 'N/A',
                     'DTW距离': 'Error',
                     '对齐路径长度': 'Error',
-                    '标准化DTW距离': 'Error'
+                    '标准化DTW距离': 'Error',
+                    '分析状态': '计算失败'
                 })
 
         # 仅显示重要的错误信息
         if errors:
             for error in errors:
                 st_obj.error(error)
-
-        # 重要警告信息简化显示
-        if warnings:
-            important_warnings = [w for w in warnings if any(keyword in w for keyword in ['失败', '错误', '无效'])]
-            if important_warnings:
-                for warning in important_warnings:
-                    st_obj.warning(warning)
-
-        # 添加相似度标签
-        results = self.add_similarity_labels(results)
 
         # 缓存分析时使用的数据和路径字典，避免第二次重复计算
         # 添加数据版本号，用于检测数据是否变化
@@ -561,7 +493,7 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
 
         # 显示统计信息在表格上方
         if not valid_results.empty:
-            col1, col2, col3, col4 = st_obj.columns(4)
+            col1, col2, col3, col4, col5 = st_obj.columns(5)
             with col1:
                 st_obj.metric("成功分析", len(valid_results))
             with col2:
@@ -571,10 +503,10 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             with col4:
                 # 显示实际使用的窗口设置
                 window_constraint = valid_results['窗口约束'].iloc[0] if '窗口约束' in valid_results.columns else '未知'
-                radius = valid_results['Radius'].iloc[0] if 'Radius' in valid_results.columns else '未知'
                 st_obj.metric("窗口约束", f"{window_constraint}")
-                if str(radius) != 'N/A' and radius != '未知':
-                    st_obj.caption(f"Radius: {radius}")
+            with col5:
+                radius = valid_results['Radius'].iloc[0] if 'Radius' in valid_results.columns else '未知'
+                st_obj.metric("Radius", f"{radius}")
 
         # 显示结果表格
         # 转换混合类型列为字符串以避免Arrow序列化错误
@@ -651,15 +583,12 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             if selected_result:
                 dtw_distance = selected_result.get('DTW距离')
                 normalized_distance = selected_result.get('标准化DTW距离')
-                similarity = selected_result.get('相似度', '未知')
-                
-                info_col1, info_col2, info_col3 = st_obj.columns(3)
+
+                info_col1, info_col2 = st_obj.columns(2)
                 with info_col1:
                     st_obj.metric("DTW距离", f"{dtw_distance:.4f}" if isinstance(dtw_distance, (int, float)) else str(dtw_distance))
                 with info_col2:
                     st_obj.metric("标准化DTW距离", f"{normalized_distance:.4f}" if isinstance(normalized_distance, (int, float)) else str(normalized_distance))
-                with info_col3:
-                    st_obj.metric("相似度", similarity)
         
         # 绘制DTW对比图
         # 重新读取当前界面参数（使用实时参数而不是保存的旧参数）
@@ -775,11 +704,6 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             compare_time_index = path_data.get('compare_index')
 
             if s1_data is not None and s2_data is not None and path:
-                # 显示当前使用的参数设置
-                constraint_info = "启用" if enable_constraint else "禁用"
-                radius_info = f"Radius={radius}" if enable_constraint else "无限制"
-                st_obj.caption(f"当前参数: 窗口约束={constraint_info}, {radius_info}")
-
                 # 使用DTW计算时实际使用的时间索引
                 self.plot_dtw_path(st_obj, s1_data, s2_data, path, target_series, selected_comparison,
                                  target_time_index, compare_time_index)
@@ -962,98 +886,6 @@ class DTWAnalysisComponent(TimeSeriesAnalysisComponent):
             # 分析按钮
             analysis_key = f"dtw_analyze_btn_{data_name}"
             analyze_clicked = st_obj.button("开始分析", key=analysis_key, type="primary")
-
-            # 统一的参数说明expander
-            with st_obj.expander("参数说明"):
-                # 使用3列布局展示所有参数说明
-                exp_col1, exp_col2, exp_col3 = st_obj.columns(3)
-
-                with exp_col1:
-                    st_obj.markdown("""
-                    **对齐模式**
-
-                    1. **频率对齐 + 严格对齐 (推荐)**
-                    - 流程：统一频率 → 成对删除NA值
-                    - 适用：精确时间点对应，数据完整性要求高
-                    - 优缺点：数据质量高 / 可能损失数据点
-
-                    2. **仅频率对齐**
-                    - 流程：统一频率 → 独立删除NA值
-                    - 适用：保留更多数据点，NA分布不均匀
-                    - 优缺点：保留更多数据 / 时间点对应不严格
-
-                    3. **不对齐**
-                    - 流程：直接使用原始频率数据
-                    - 适用：所有序列已经是相同频率
-                    - 警告：不同频率可能产生不合理结果
-
-                    ---
-
-                    **聚合方法**
-
-                    - **平均值**: 平滑噪声，适合大多数经济指标
-                    - **最后值**: 适合期末值指标（股价、汇率）
-                    - **首个值**: 适合期初值指标
-                    - **求和**: 适合流量型指标（销售额、产量）
-                    - **中位数**: 对异常值不敏感，适合有离群点数据
-                    """)
-
-                with exp_col2:
-                    st_obj.markdown("""
-                    **标准化方法**
-
-                    **为什么需要标准化？**
-                    - 不同量纲序列会使大数值主导DTW距离
-                    - 例：GDP(万亿级) vs 通胀率(个位数)
-                    - 导致相似性分析结果不客观
-
-                    **Z-Score标准化 (推荐)**
-                    - 公式：(x-μ)/σ
-                    - 转换为均值0、标准差1的分布
-                    - 适合正态分布数据
-                    - 推荐用于经济指标分析
-
-                    **Min-Max归一化**
-                    - 公式：(x-min)/(max-min)
-                    - 缩放到[0,1]区间
-                    - 适合有界数据
-                    - 可用于技术指标分析
-
-                    **不标准化**
-                    - 保持原始数据
-                    - 适合同量纲数据比较
-                    - 警告：不同量纲可能导致不合理距离
-                    """)
-
-                with exp_col3:
-                    st_obj.markdown("""
-                    **窗口约束**
-
-                    限制DTW对齐路径在对角线附近
-                    - **启用**: 提高计算效率，适合序列长度接近
-                    - **禁用**: 完全灵活对齐，适合序列长度差异大
-
-                    **Radius参数**
-
-                    限制对齐路径的偏离程度（Sakoe-Chiba约束）：
-                    - **目标序列**（您选择的目标变量）的第i个点
-                    - 只能与**比较序列**的第(i-radius)到(i+radius)个点对齐
-
-                    **举例**: 设radius=5，目标序列第10个点只能与比较序列第5-15个点对齐
-
-                    **重要限制**:
-                    当两序列长度差异较大时，radius必须 >= 长度差异。
-                    例如：序列A有59点，序列B有303点，
-                    则长度差异=244，radius至少设为244才有效。
-
-                    **推荐值**:
-                    - 长度接近时: 序列长度的5-15%
-                    - 长度差异大时: 使用"无限制"模式
-
-                    **权衡**:
-                    - 越小：计算更快，对齐更严格（接近对角线）
-                    - 越大：对齐更灵活，计算更慢
-                    """)
 
             # 初始化分析结果变量
             current_results = None

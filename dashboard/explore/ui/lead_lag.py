@@ -193,7 +193,8 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             if st_obj.button(
                 "开始分析",
                 key="lead_lag_analyze_button",
-                use_container_width=False
+                use_container_width=False,
+                type = "primary"
             ):
                 analyze_button = True
             else:

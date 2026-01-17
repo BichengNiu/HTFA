@@ -51,7 +51,7 @@ def perform_batch_dtw_calculation(
         enable_freq_alignment: 是否启用频率对齐
         freq_alignment_mode: 频率对齐模式 ('stat_align' 或 'value_align')
         freq_agg_method: 聚合方法 ('mean', 'last', 'first', 'sum', 'median')
-        strict_alignment: 是否严格对齐（成对删除NA值）
+        strict_alignment: 是否时点对齐（成对删除NA值）
         standardization_method: 标准化方法 ('zscore', 'minmax', 'none')
 
     Returns:
@@ -165,7 +165,7 @@ def perform_batch_dtw_calculation(
         # 准备对比序列数据
         compare_data_clean = compare_validation.cleaned_data
 
-        # 严格对齐模式：成对删除NA值
+        # 时点对齐模式：成对删除NA值
         if strict_alignment:
             # 创建包含目标序列和对比序列的DataFrame
             pair_df = pd.DataFrame({
@@ -180,11 +180,11 @@ def perform_batch_dtw_calculation(
             target_data_for_dtw = pair_df_clean['target']
             compare_data_for_dtw = pair_df_clean['compare']
 
-            logger.debug(f"[严格对齐] {target_series_name} vs {compare_name}: "
+            logger.debug(f"[时点对齐] {target_series_name} vs {compare_name}: "
                         f"对齐前=({len(target_data_clean)}, {len(compare_data_clean)}), "
                         f"对齐后={len(pair_df_clean)}")
         else:
-            # 非严格对齐模式：使用共同时间范围计算DTW（各自保持原有频率）
+            # 非时点对齐模式：使用共同时间范围计算DTW（各自保持原有频率）
             # 首先去除各自的NaN
             target_clean = target_data_clean.dropna()
             compare_clean = compare_data_clean.dropna()
@@ -205,19 +205,19 @@ def perform_batch_dtw_calculation(
             target_data_for_dtw = target_clean[(target_clean.index >= common_start) & (target_clean.index <= common_end)]
             compare_data_for_dtw = compare_clean[(compare_clean.index >= common_start) & (compare_clean.index <= common_end)]
 
-            logger.debug(f"[非严格对齐-共同时间范围] {target_series_name} vs {compare_name}: "
+            logger.debug(f"[非时点对齐-共同时间范围] {target_series_name} vs {compare_name}: "
                         f"共同时间范围=[{common_start}, {common_end}], "
                         f"筛选后长度=({len(target_data_for_dtw)}, {len(compare_data_for_dtw)})")
 
         # 检查序列是否有足够的样本
         if len(target_data_for_dtw) < 10:
-            warning_messages.append(f"目标序列 '{target_series_name}' 有效样本不足10个 ({len(target_data_for_dtw)})")
+            current_result['分析状态'] = f'目标序列样本不足 (需要 10, 实际 {len(target_data_for_dtw)})'
             current_result['原因'] = f'目标序列样本不足: {len(target_data_for_dtw)}'
             results_list.append(current_result)
             continue
 
         if len(compare_data_for_dtw) < 10:
-            warning_messages.append(f"对比序列 '{compare_name}' 有效样本不足10个 ({len(compare_data_for_dtw)})")
+            current_result['分析状态'] = f'对比序列样本不足 (需要 10, 实际 {len(compare_data_for_dtw)})'
             current_result['原因'] = f'对比序列样本不足: {len(compare_data_for_dtw)}'
             results_list.append(current_result)
             continue

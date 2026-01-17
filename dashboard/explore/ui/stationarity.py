@@ -250,6 +250,9 @@ class StationarityAnalysisComponent(TimeSeriesAnalysisComponent):
                 })
 
         final_data = pd.DataFrame(final_columns)
+        final_data['日期'] = original_data.iloc[final_data.index, 0].values
+        final_data = final_data[['日期'] + [c for c in final_data.columns if c != '日期']]
+        final_data = final_data.sort_values('日期', ascending=False).reset_index(drop=True)
         metadata = pd.DataFrame(metadata_rows)
 
         return final_data, metadata

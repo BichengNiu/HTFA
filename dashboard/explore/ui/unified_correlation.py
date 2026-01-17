@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-统一相关分析组件
+统一同步分析组件
 提供多变量领先滞后筛选分析功能，包含相关性和KL散度双重评估
 """
 
@@ -23,10 +23,10 @@ logger = logging.getLogger(__name__)
 
 
 class UnifiedCorrelationAnalysisComponent(TimeSeriesAnalysisComponent):
-    """统一相关分析组件"""
+    """统一同步分析组件"""
 
     def __init__(self):
-        super().__init__("time_lag_corr", "相关分析")
+        super().__init__("time_lag_corr", "同步分析")
 
     def render(self, st_obj, **kwargs) -> Any:
         """
@@ -66,7 +66,7 @@ class UnifiedCorrelationAnalysisComponent(TimeSeriesAnalysisComponent):
 
     def render_analysis_interface(self, st_obj, data: pd.DataFrame, data_name: str) -> Any:
         """
-        渲染统一相关分析界面
+        渲染统一同步分析界面
 
         Args:
             st_obj: Streamlit对象
@@ -80,6 +80,7 @@ class UnifiedCorrelationAnalysisComponent(TimeSeriesAnalysisComponent):
             results = {}
 
             # 第一部分：DTW分析
+            st_obj.markdown("---")
             st_obj.markdown("#### DTW分析")
             dtw_component = DTWAnalysisComponent()
             dtw_result = dtw_component.render_analysis_interface(st_obj, data, data_name)
@@ -88,7 +89,7 @@ class UnifiedCorrelationAnalysisComponent(TimeSeriesAnalysisComponent):
             return results
 
         except Exception as e:
-            logger.error(f"渲染统一相关分析界面时出错: {e}")
+            logger.error(f"渲染统一同步分析界面时出错: {e}")
             st_obj.error(f"渲染分析界面时出错: {e}")
             return None
 

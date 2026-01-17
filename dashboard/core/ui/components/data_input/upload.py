@@ -183,9 +183,6 @@ class UnifiedDataUploadComponent(DataInputComponent):
                         st_obj.info(f"文件大小: {file_size_mb:.2f} MB")
                     return uploaded_file
 
-                if not self.quiet_mode:
-                    st_obj.info(f"检测到文件: {uploaded_file.name}。正在加载...")
-
                 # 加载和预处理数据
                 spinner_text = f"正在加载文件: {uploaded_file.name}..." if not self.quiet_mode else "正在加载..."
                 with st_obj.spinner(spinner_text):
@@ -197,9 +194,6 @@ class UnifiedDataUploadComponent(DataInputComponent):
                     self.set_state('original_data', df.copy())
                     self.set_state('file_name', uploaded_file.name)
                     self.set_state('data_source', 'upload')
-
-                    if not self.quiet_mode:
-                        st_obj.success(f"文件 '{uploaded_file.name}' 加载成功")
 
                     # 显示数据概览
                     if kwargs.get('show_overview', True):
