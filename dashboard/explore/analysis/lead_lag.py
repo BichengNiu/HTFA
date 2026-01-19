@@ -13,11 +13,7 @@ import numpy as np
 from dashboard.explore.core.validation import validate_analysis_inputs
 from dashboard.explore.core.constants import MIN_SAMPLES_KL_DIVERGENCE, ERROR_MESSAGES, MAX_DISPLAY_LAG_RANGE
 from dashboard.explore.core.series_utils import get_lagged_slices
-from dashboard.explore.metrics.correlation import (
-    calculate_time_lagged_correlation,
-    find_optimal_lag
-)
-from dashboard.explore.metrics.kl_divergence import calculate_kl_divergence_series, series_to_distribution, kl_divergence
+from dashboard.explore.metrics.kl_divergence import series_to_distribution, kl_divergence
 from dashboard.explore.preprocessing.frequency_alignment import align_series_for_analysis, format_alignment_report
 from dashboard.explore.preprocessing.standardization import standardize_array
 from dashboard.explore.analysis.config import LeadLagAnalysisConfig
@@ -85,7 +81,6 @@ def calculate_kl_divergence_optimized(
     series_target: pd.Series,
     series_candidate: pd.Series,
     max_lags: int,
-    kl_bins: int,
     standardize_for_kl: bool,
     standardization_method: str
 ) -> pd.DataFrame:
@@ -97,6 +92,7 @@ def calculate_kl_divergence_optimized(
     2. 预先标准化（如果需要）
     3. 使用numpy数组和view切片（减少复制）
     4. 减少重复验证
+    5. 使用Stata自动分箱算法
 
     预期性能提升：50-70%
 
@@ -104,7 +100,6 @@ def calculate_kl_divergence_optimized(
         series_target: 目标序列
         series_candidate: 候选序列
         max_lags: 最大滞后阶数
-        kl_bins: KL散度分箱数
         standardize_for_kl: 是否标准化
         standardization_method: 标准化方法
 
@@ -116,7 +111,7 @@ def calculate_kl_divergence_optimized(
     cand_clean = series_candidate.dropna()
 
     # 验证长度
-    min_required = max_lags + max(kl_bins * 2, MIN_SAMPLES_KL_DIVERGENCE)
+    min_required = max_lags + MIN_SAMPLES_KL_DIVERGENCE
     if len(target_clean) < min_required or len(cand_clean) < min_required:
         # 数据不足，返回全NaN
         lags = list(range(-max_lags, max_lags + 1))
@@ -137,7 +132,6 @@ def calculate_kl_divergence_optimized(
     # 4. 批量计算KL散度（使用统一切片函数）
     kl_lags = []
     kl_values = []
-    min_points = max(kl_bins * 2, MIN_SAMPLES_KL_DIVERGENCE)
 
     for k_lag in range(-max_lags, max_lags + 1):
         kl_lags.append(k_lag)
@@ -145,17 +139,16 @@ def calculate_kl_divergence_optimized(
         # 使用统一的切片函数（view，零拷贝）
         a_view, c_view = get_lagged_slices(target_arr, cand_arr, k_lag)
 
-        if a_view is None or c_view is None or len(a_view) < min_points or len(c_view) < min_points:
+        if a_view is None or c_view is None or len(a_view) < MIN_SAMPLES_KL_DIVERGENCE:
             kl_values.append(np.nan)
             continue
 
-        # 直接计算KL散度（避免重复转换）
+        # 直接计算KL散度（避免重复转换，使用自动分箱）
         try:
-            # 使用优化的分布转换（基于numpy数组）
             a_series_temp = pd.Series(a_view)
             c_series_temp = pd.Series(c_view)
 
-            p, q, _ = series_to_distribution(a_series_temp, c_series_temp, kl_bins)
+            p, q, _ = series_to_distribution(a_series_temp, c_series_temp)
             kl_val = kl_divergence(p, q)
             kl_values.append(kl_val)
         except Exception as e:
@@ -172,18 +165,16 @@ def calculate_lead_lag_for_pair(
     series_target: pd.Series,
     series_candidate: pd.Series,
     max_lags: int,
-    kl_bins: int,
     standardize_for_kl: bool,
     standardization_method: str
 ) -> Dict[str, Any]:
     """
-    计算单对序列的领先滞后分析
+    计算单对序列的领先滞后分析（基于KL散度）
 
     Args:
         series_target: 目标序列
         series_candidate: 候选序列
         max_lags: 最大滞后阶数
-        kl_bins: KL散度分箱数
         standardize_for_kl: 是否标准化KL计算
         standardization_method: 标准化方法
 
@@ -193,42 +184,17 @@ def calculate_lead_lag_for_pair(
     result = {
         'target_variable': series_target.name,
         'candidate_variable': series_candidate.name,
-        'k_corr': np.nan,
-        'corr_at_k_corr': np.nan,
-        'full_correlogram_df': pd.DataFrame(),
         'k_kl': np.nan,
         'kl_at_k_kl': np.nan,
         'full_kl_divergence_df': pd.DataFrame(),
-        'notes': ''
+        'notes': '计算失败'
     }
 
-    # 1. 相关性分析（使用优化版本）
-    try:
-        correlogram_df = calculate_time_lagged_correlation(
-            series_target,
-            series_candidate,
-            max_lags,
-            use_optimized=True
-        )
-
-        result['full_correlogram_df'] = correlogram_df
-
-        if not correlogram_df.empty and correlogram_df['Correlation'].notna().any():
-            opt_lag, opt_corr = find_optimal_lag(correlogram_df, lag_range='all', max_lag_range=MAX_DISPLAY_LAG_RANGE)
-            if opt_lag is not None:
-                result['k_corr'] = opt_lag
-                result['corr_at_k_corr'] = opt_corr
-
-    except Exception as e:
-        logger.error(f"相关性计算失败: {e}")
-        result['notes'] += f"{ERROR_MESSAGES['correlation_calc_error']}; "
-
-    # 2. KL散度分析（使用优化版本）
+    # KL散度分析（使用优化版本，自动分箱）
     result['full_kl_divergence_df'] = calculate_kl_divergence_optimized(
         series_target,
         series_candidate,
         max_lags,
-        kl_bins,
         standardize_for_kl,
         standardization_method
     )
@@ -251,8 +217,9 @@ def calculate_lead_lag_for_pair(
                     optimal_idx = finite_kl.idxmin()
                     result['k_kl'] = kl_df_filtered.loc[optimal_idx, 'Lag']
                     result['kl_at_k_kl'] = finite_kl.loc[optimal_idx]
+                    result['notes'] = '计算成功'
 
-    logger.debug(f"领先滞后分析完成: {series_candidate.name}, k_corr={result['k_corr']}, k_kl={result['k_kl']}")
+    logger.debug(f"领先滞后分析完成: {series_candidate.name}, k_kl={result['k_kl']}")
     return result
 
 
@@ -278,7 +245,7 @@ def perform_combined_lead_lag_analysis(
 
     Examples:
         # 使用配置类
-        config = LeadLagAnalysisConfig(max_lags=12, kl_bins=10)
+        config = LeadLagAnalysisConfig(max_lags=12)
         results, errors, warnings = perform_combined_lead_lag_analysis(
             df, 'target', ['cand1', 'cand2'], config
         )
@@ -286,7 +253,7 @@ def perform_combined_lead_lag_analysis(
         # 使用字典
         results, errors, warnings = perform_combined_lead_lag_analysis(
             df, 'target', ['cand1', 'cand2'],
-            {'max_lags': 12, 'kl_bins': 10}
+            {'max_lags': 12}
         )
     """
     # 配置处理：支持字典或配置类
@@ -297,7 +264,6 @@ def perform_combined_lead_lag_analysis(
 
     # 提取配置参数
     max_lags = config.max_lags
-    kl_bins = config.kl_bins
     std_for_kl = config.standardize_for_kl
     std_method = config.standardization_method
     enable_freq_align = config.enable_frequency_alignment
@@ -364,9 +330,6 @@ def perform_combined_lead_lag_analysis(
             all_results.append({
                 'target_variable': target_variable_name,
                 'candidate_variable': candidate_name,
-                'k_corr': np.nan,
-                'corr_at_k_corr': np.nan,
-                'full_correlogram_df': pd.DataFrame(),
                 'k_kl': np.nan,
                 'kl_at_k_kl': np.nan,
                 'full_kl_divergence_df': pd.DataFrame(),
@@ -382,7 +345,6 @@ def perform_combined_lead_lag_analysis(
                 series_target,
                 series_candidate,
                 max_lags,
-                kl_bins,
                 std_for_kl,
                 std_method
             )
@@ -395,9 +357,6 @@ def perform_combined_lead_lag_analysis(
             all_results.append({
                 'target_variable': target_variable_name,
                 'candidate_variable': candidate_name,
-                'k_corr': np.nan,
-                'corr_at_k_corr': np.nan,
-                'full_correlogram_df': pd.DataFrame(),
                 'k_kl': np.nan,
                 'kl_at_k_kl': np.nan,
                 'full_kl_divergence_df': pd.DataFrame(),
@@ -413,7 +372,7 @@ def get_detailed_lag_data_for_candidate(
     target_variable_name: str,
     candidate_variable_name: str,
     config: Union[LeadLagAnalysisConfig, Dict]
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """
     获取单个候选变量的详细滞后数据（用于绘图）
 
@@ -426,11 +385,11 @@ def get_detailed_lag_data_for_candidate(
         config: 分析配置对象（LeadLagAnalysisConfig或字典）
 
     Returns:
-        Tuple[相关图DataFrame, KL散度DataFrame]
+        KL散度DataFrame
 
     Examples:
-        config = LeadLagAnalysisConfig(max_lags=12, kl_bins=10)
-        corr_df, kl_df = get_detailed_lag_data_for_candidate(
+        config = LeadLagAnalysisConfig(max_lags=12)
+        kl_df = get_detailed_lag_data_for_candidate(
             df, 'target', 'candidate', config
         )
     """
@@ -442,7 +401,6 @@ def get_detailed_lag_data_for_candidate(
 
     # 提取配置参数
     max_lags = config.max_lags
-    kl_bins = config.kl_bins
     std_for_kl = config.standardize_for_kl
     std_method = config.standardization_method
     enable_freq_align = config.enable_frequency_alignment
@@ -476,30 +434,13 @@ def get_detailed_lag_data_for_candidate(
     series_target = df_aligned[target_variable_name]
     series_candidate = df_aligned[candidate_variable_name]
 
-    # 计算相关图（使用优化版本）
-    try:
-        correlogram_df = calculate_time_lagged_correlation(
-            series_target,
-            series_candidate,
-            max_lags,
-            use_optimized=True
-        )
-    except Exception as e:
-        logger.error(f"相关性计算失败: {e}")
-        lags_range = range(-max_lags, max_lags + 1)
-        correlogram_df = pd.DataFrame({
-            'Lag': list(lags_range),
-            'Correlation': [np.nan] * len(lags_range)
-        })
-
-    # 计算KL散度（使用优化版本）
+    # 计算KL散度（使用优化版本，自动分箱）
     kl_divergence_df = calculate_kl_divergence_optimized(
         series_target,
         series_candidate,
         max_lags,
-        kl_bins,
         std_for_kl,
         std_method
     )
 
-    return correlogram_df, kl_divergence_df
+    return kl_divergence_df

@@ -39,38 +39,24 @@ class IndustrialRenderer(BaseRenderer):
         super().__init__(config, loader)
 
     def render_sidebar(self) -> Optional[Any]:
-        """渲染侧边栏文件上传
+        """渲染侧边栏
 
         Returns:
-            Optional[Any]: 上传的文件对象或None
+            Optional[Any]: 默认文件对象或None
         """
         with st.sidebar:
-            st.markdown("### 上传数据文件")
+            # 自动加载默认文件
+            default_file = self._load_default_data_file()
+            if default_file is None:
+                st.error("默认数据文件不存在：data/经济指标数据库.xlsx")
+                return None
 
-            uploaded_file = st.file_uploader(
-                "选择Excel文件",
-                type=["xlsx", "xls"],
-                accept_multiple_files=False,
-                help="支持上传包含多个sheet的Excel文件"
-            )
+            # 检查是否需要重新处理
+            if self._should_reprocess_file(default_file):
+                with st.spinner("正在加载数据..."):
+                    self._process_uploaded_data(default_file)
 
-            # 如果没有用户上传，尝试加载默认文件
-            if uploaded_file is None:
-                default_file = self._load_default_data_file()
-                if default_file is not None:
-                    uploaded_file = default_file
-                    st.info("已加载默认数据：经济指标数据库.xlsx")
-
-            if uploaded_file:
-                # 检查是否需要重新处理
-                if self._should_reprocess_file(uploaded_file):
-                    with st.spinner("正在处理数据..."):
-                        self._process_uploaded_data(uploaded_file)
-
-                # 显示数据状态
-                self._render_data_status_panel()
-
-            return uploaded_file
+            return default_file
 
     def _load_default_data_file(self) -> Optional[io.BytesIO]:
         """加载默认数据文件

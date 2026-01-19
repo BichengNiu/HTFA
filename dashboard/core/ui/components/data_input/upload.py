@@ -155,6 +155,7 @@ class UnifiedDataUploadComponent(DataInputComponent):
         uploader_reset_key = self.get_state('uploader_reset_key', 0)
 
         # 文件上传器
+        st_obj.markdown("##### 上传数据")
         upload_key = kwargs.get('upload_key', f'{self.component_name}_file_uploader_{uploader_reset_key}')
         uploaded_file = st_obj.file_uploader(
             "选择数据文件",

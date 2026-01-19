@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 import logging
+from pathlib import Path
+import io
 
 from dashboard.preview.modules.industrial.loader import load_and_process_data
 from dashboard.preview.shared.tabs import display_time_series_tab, display_overview_tab
@@ -86,45 +88,6 @@ def _render_data_status_panel(st_module):
         st_module.markdown(f"涵盖行业：{max_industries} 个")
 
 
-def render_file_upload_sidebar(st_module):
-    """渲染侧边栏文件上传和数据状态
-
-    Args:
-        st_module: streamlit模块
-
-    Returns:
-        uploaded_file: 上传的文件对象（如果有）
-    """
-    with st_module.sidebar:
-        st_module.markdown("### 上传数据文件")
-
-        # 使用统一的数据上传组件
-        from dashboard.core.ui.components.data_input import UnifiedDataUploadComponent
-
-        # 创建上传组件（返回文件对象模式）
-        upload_component = UnifiedDataUploadComponent(
-            accepted_types=['xlsx'],
-            help_text="支持上传 Excel 文件，请确保文件包含周度、月度或日度数据表",
-            show_data_source_selector=False,
-            show_staging_data_option=False,
-            component_id="industrial_data_preview_upload",
-            return_file_object=True
-        )
-
-        # 渲染上传组件
-        uploaded_industrial_file = upload_component.render_file_upload_section(
-            st_module,
-            upload_key="industrial_data_uploader_sidebar",
-            show_overview=False,
-            show_preview=False
-        )
-
-        # 数据状态面板（使用批量数据获取优化性能）
-        # 已禁用：不在sidebar显示数据状态统计信息
-        # if get_preview_state('data_loaded_files'):
-        #     _render_data_status_panel(st_module)
-
-    return uploaded_industrial_file
 
 
 
@@ -376,73 +339,28 @@ def render_data_tabs(st_module, logger):
 
 
 def display_industrial_tabs(extract_industry_name_func):
-    """主入口函数：处理文件上传和数据显示
-
-    优化版：简化流程，统一日志，批量状态查询
+    """主入口函数：自动加载并显示数据
 
     Args:
         extract_industry_name_func: 提取行业名称的函数
     """
     logger.debug("[RENDER] display_industrial_tabs 开始渲染")
 
-    # === 侧边栏：文件上传功能 ===
-    uploaded_industrial_file = render_file_upload_sidebar(st)
+    # 自动加载默认数据文件
+    default_path = Path(__file__).parent.parent.parent / "data" / "经济指标数据库.xlsx"
 
-    # === 主区域：数据处理和显示 ===
+    if not default_path.exists():
+        st.error(f"默认数据文件不存在: {default_path}")
+        return
 
-    # 获取状态数据
-    loaded_files = get_preview_state('data_loaded_files')
-    cached_time = get_preview_state('data_processing_time')
+    # 加载文件
+    with open(default_path, 'rb') as f:
+        file_obj = io.BytesIO(f.read())
+        file_obj.name = "经济指标数据库.xlsx"
 
-    # 检测文件是否被删除（用户点击了叉号）
-    # 使用会话标志避免首次加载时的误判
-    if not uploaded_industrial_file and loaded_files:
-        # 检查是否是真正的文件删除（而不是首次加载）
-        # 通过检查会话中是否记录了文件上传状态来判断
-        file_was_uploaded = st.session_state.get('preview._file_upload_session_active', False)
-
-        if file_was_uploaded:
-            # 确实是用户删除了文件
-            logger.info("[RENDER] 检测到文件被删除，清空数据")
-            # 清空preview命名空间的所有状态
-            keys_to_delete = [k for k in st.session_state.keys() if k.startswith('preview.')]
-            for key in keys_to_delete:
-                del st.session_state[key]
-            # 清除会话标志
-            st.session_state['preview._file_upload_session_active'] = False
-            st.success("数据已清空！")
-            st.rerun()
-        else:
-            # 首次加载，只清空数据但不rerun
-            logger.info("[RENDER] 首次加载检测到残留数据，静默清空")
-            keys_to_delete = [k for k in st.session_state.keys() if k.startswith('preview.')]
-            for key in keys_to_delete:
-                del st.session_state[key]
-
-    if uploaded_industrial_file:
-        uploaded_file_name = uploaded_industrial_file.name
-
-        # 设置会话标志，表示文件已上传
-        st.session_state['preview._file_upload_session_active'] = True
-
-        # 智能缓存机制：检查文件和数据是否需要重新处理
-        need_reprocess = should_reprocess_file(uploaded_industrial_file)
-        logger.debug(f"[RENDER] 是否需要重新处理数据: {need_reprocess}, 文件: {uploaded_file_name}")
-
-        if need_reprocess:
-            process_uploaded_data(uploaded_industrial_file, extract_industry_name_func, st, logger)
-        else:
-            # 使用缓存数据
-            logger.info(f"[RENDER] 使用缓存数据 - 文件: {uploaded_file_name}")
-            # 显示缓存状态信息
-            with st.sidebar:
-                st.success("使用缓存数据")
-                if cached_time:
-                    st.caption(f"数据处理时间: {cached_time}")
-
-            # 确保必要的状态键已设置
-            if not loaded_files:
-                st.session_state['preview.data_loaded_files'] = uploaded_file_name
+    # 检查是否需要重新处理
+    if should_reprocess_file(file_obj):
+        process_uploaded_data(file_obj, extract_industry_name_func, st, logger)
 
     # 渲染数据Tab页
     render_data_tabs(st, logger)

@@ -19,12 +19,11 @@ class LeadLagAnalysisConfig:
     """
     领先滞后分析配置
 
-    使用配置类封装12个参数，简化函数调用
+    使用配置类封装参数，简化函数调用
     """
 
     # 核心参数
     max_lags: int
-    kl_bins: int = 10
 
     # 标准化配置
     standardize_for_kl: bool = True
@@ -53,9 +52,6 @@ class LeadLagAnalysisConfig:
         """
         if self.max_lags < 1:
             raise ValueError("max_lags必须大于0")
-
-        if self.kl_bins < 2:
-            raise ValueError("kl_bins必须大于等于2")
 
         if self.standardization_method not in ['zscore', 'minmax', 'none']:
             raise ValueError(

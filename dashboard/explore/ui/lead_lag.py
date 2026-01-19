@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 领先滞后分析组件
-提供多变量领先滞后筛选分析功能，包含相关性和KL散度双重评估
+提供多变量领先滞后筛选分析功能，基于KL散度评估
 """
 
 import streamlit as st
@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.dates as mdates
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any
 
 # 配置matplotlib中文字体
 matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans', 'Arial Unicode MS', 'sans-serif']
@@ -51,7 +51,8 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             data, data_source, data_name = self.get_module_data()
 
             if data is None:
-                st_obj.info("请在左侧侧边栏上传数据文件以进行分析")
+                st_obj.info("请上传数据文件以进行分析")
+                st_obj.divider()
                 st_obj.markdown(f"""
                 **使用说明：**
                 1. **数据格式**：第一列为时间戳，其余列为变量数据
@@ -93,38 +94,25 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
     def render_multivariate_screening(self, st_obj, data: pd.DataFrame, data_name: str) -> Any:
         """渲染多变量领先滞后筛选界面"""
         try:
+
             # 参数设置区域
-            # ========== 第一排：3列布局 ==========
-            row1_col1, row1_col2, row1_col3 = st_obj.columns(3)
+            # ========== 第一排：目标变量（全宽）==========
+            numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
+            if len(numeric_columns) < 2:
+                st_obj.warning("数据中的数值型变量少于2个，无法进行分析")
+                return None
 
-            with row1_col1:
-                numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
-                if len(numeric_columns) < 2:
-                    st_obj.warning("数据中的数值型变量少于2个，无法进行分析")
-                    return None
+            target_var = st_obj.selectbox(
+                "目标变量",
+                numeric_columns,
+                key="lead_lag_target_var",
+                help="选择要预测的目标变量"
+            )
 
-                target_var = st_obj.selectbox(
-                    "目标变量",
-                    numeric_columns,
-                    key="lead_lag_target_var",
-                    help="选择要预测的目标变量"
-                )
+            # ========== 第二排：3列布局 ==========
+            row2_col1, row2_col2, row2_col3 = st_obj.columns(3)
 
-            with row1_col2:
-                standardization_method = st_obj.selectbox(
-                    "标准化方法",
-                    options=['zscore', 'minmax', 'none'],
-                    format_func=lambda x: {
-                        'zscore': 'Z-Score标准化',
-                        'minmax': 'Min-Max归一化',
-                        'none': '不标准化'
-                    }[x],
-                    index=0,
-                    key="lead_lag_standardization_method",
-                    help="选择KL散度计算的标准化方法"
-                )
-
-            with row1_col3:
+            with row2_col1:
                 alignment_mode = st_obj.selectbox(
                     "对齐模式",
                     options=['strict_align', 'no_align'],
@@ -137,39 +125,7 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
                     help="严格对齐：频率对齐+成对删除NA；不对齐：原始数据+成对删除NA"
                 )
 
-            # ========== 第二排：全宽候选变量选择 ==========
-            available_candidates = [col for col in numeric_columns if col != target_var]
-            candidate_vars = st_obj.multiselect(
-                "候选变量",
-                available_candidates,
-                key="lead_lag_candidate_vars",
-                help="选择用于筛选的候选预测变量"
-            )
-
-            # ========== 第三排：3列布局 ==========
-            row3_col1, row3_col2, row3_col3 = st_obj.columns(3)
-
-            with row3_col1:
-                max_lags_val = st_obj.number_input(
-                    "最大滞后期数",
-                    min_value=1,
-                    max_value=5,
-                    value=5,
-                    key="lead_lag_max_lags",
-                    help="设置要分析的最大滞后期数"
-                )
-
-            with row3_col2:
-                kl_bins_val = st_obj.number_input(
-                    "KL散度分箱数",
-                    min_value=5,
-                    max_value=50,
-                    value=10,
-                    key="lead_lag_kl_bins",
-                    help="设置KL散度计算的分箱数量"
-                )
-
-            with row3_col3:
+            with row2_col2:
                 # 聚合方法：只在严格对齐时显示
                 if alignment_mode == 'strict_align':
                     freq_agg_method = st_obj.selectbox(
@@ -187,7 +143,17 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
                         help="频率对齐时的数据聚合方法"
                     )
                 else:
-                    freq_agg_method = 'mean'  # 默认值，不对齐时不使用
+                    freq_agg_method = 'mean'  # 默认值
+
+            with row2_col3:
+                max_lags_val = st_obj.number_input(
+                    "领先滞后期数",
+                    min_value=1,
+                    max_value=5,
+                    value=5,
+                    key="lead_lag_max_lags",
+                    help="设置领先滞后期数范围（如设为5，则分析-5到+5共11个期数，正值表示候选变量领先，负值表示滞后）"
+                )
 
             # ========== 第四排：分析按钮 ==========
             if st_obj.button(
@@ -200,68 +166,16 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             else:
                 analyze_button = False
 
-            # ========== 方法说明和参数说明（并排expander）==========
-            exp_col1, exp_col2 = st_obj.columns(2)
-
-            with exp_col1:
-                with st_obj.expander("分析方法原理"):
-                    st_obj.markdown("""
-                    **相关性分析（Correlation Analysis）**
-
-                    - 计算目标变量与候选变量在不同滞后期下的皮尔逊相关系数
-                    - 找出相关系数绝对值最大的滞后期（最优滞后期）
-                    - 正值表示正相关，负值表示负相关，绝对值越大相关性越强
-                    - 适用场景：检测线性关系，识别领先/滞后的线性指标
-
-                    **KL散度分析（KL Divergence Analysis）**
-
-                    - 将时间序列转换为离散概率分布（通过分箱），计算不同滞后期下的KL散度
-                    - 找出KL散度最小的滞后期（分布最相似）
-                    - KL散度越小表示两个分布越接近，越有可能存在领先滞后关系
-                    - 适用场景：检测非线性关系和分布形态的相似性，对异常值不敏感
-
-                    **两种方法互补**：相关性捕捉线性关系，KL散度捕捉分布相似性，综合评估更全面
-                    """)
-
-            with exp_col2:
-                with st_obj.expander("参数设置说明"):
-                    st_obj.markdown("""
-                    **目标变量**：需要预测或解释的时间序列变量
-
-                    **候选变量**：用于预测目标变量的潜在领先指标，可多选
-
-                    **最大滞后期数**
-                    - 含义：分析的最大滞后范围，正值表示候选变量领先，负值表示滞后
-                    - 推荐值：月度数据10-20期，季度数据8-12期，年度数据5-10期
-                    - 原则：不宜过大以避免失去统计意义，不宜过小以免遗漏关系
-
-                    **KL散度分箱数**
-                    - 含义：将连续数据离散化的区间数量
-                    - 推荐值：10-20个，数据量大时可适当增加
-                    - 原则：过少会丢失信息，过多会导致稀疏分布影响计算稳定性
-
-                    **标准化方法**
-                    - Z-Score：数据转换为均值0、方差1，适用于近似正态分布的数据
-                    - Min-Max：数据归一化到[0,1]区间，适用于有明确上下界的数据
-                    - 不标准化：保持原始量纲，适用于量纲一致的数据
-
-                    **对齐模式**
-                    - 严格对齐：不同频率数据统一到相同频率后分析（推荐）
-                    - 不对齐：保持原始频率，仅删除缺失值配对
-
-                    **聚合方法**（仅严格对齐时有效）
-                    - 平均值：最常用，适用于大多数经济指标
-                    - 最后值：适用于存量指标（如余额、库存）
-                    - 求和：适用于流量指标（如销量、投资额）
-                    - 中位数：对异常值不敏感
-                    """)
-
             # 解析参数
             enable_frequency_alignment = (alignment_mode == 'strict_align')
-            standardize_for_kl = (standardization_method != 'none')
+            standardize_for_kl = True  # 固定为True
+            standardization_method = 'zscore'  # 固定为zscore
 
-            if analyze_button and target_var and candidate_vars:
-                return self.perform_multivariate_screening(st_obj, data, target_var, candidate_vars, max_lags_val, kl_bins_val, standardize_for_kl, standardization_method, enable_frequency_alignment, None, freq_agg_method)
+            # 自动获取所有候选变量（除目标变量外的所有数值型变量）
+            candidate_vars = [col for col in numeric_columns if col != target_var]
+
+            if analyze_button and target_var:
+                return self.perform_multivariate_screening(st_obj, data, target_var, candidate_vars, max_lags_val, standardize_for_kl, standardization_method, enable_frequency_alignment, None, freq_agg_method)
             
             # 显示之前的结果（如果有）
             results = self.get_state('multivariate_results')
@@ -275,13 +189,12 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             st_obj.error(f"渲染多变量领先滞后筛选界面时出错: {e}")
             return None
     
-    def perform_multivariate_screening(self, st_obj, data: pd.DataFrame, target_var: str, candidate_vars: List[str], max_lags: int, kl_bins: int, standardize_for_kl: bool = True, standardization_method: str = 'zscore', enable_frequency_alignment: bool = True, target_frequency: str = None, freq_agg_method: str = 'mean'):
+    def perform_multivariate_screening(self, st_obj, data: pd.DataFrame, target_var: str, candidate_vars: List[str], max_lags: int, standardize_for_kl: bool = True, standardization_method: str = 'zscore', enable_frequency_alignment: bool = True, target_frequency: str = None, freq_agg_method: str = 'mean'):
         """执行多变量领先滞后筛选分析"""
         with st_obj.spinner("正在进行多变量领先滞后筛选分析..."):
             # 构建配置字典
             config = {
                 'max_lags': max_lags,
-                'kl_bins': kl_bins,
                 'standardize_for_kl': standardize_for_kl,
                 'standardization_method': standardization_method,
                 'enable_frequency_alignment': enable_frequency_alignment,
@@ -304,7 +217,6 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
                 'target_var': target_var,
                 'candidate_vars': candidate_vars,
                 'max_lags': max_lags,
-                'kl_bins': kl_bins,
                 'standardize_for_kl': standardize_for_kl,
                 'standardization_method': standardization_method,
                 'enable_frequency_alignment': enable_frequency_alignment,
@@ -345,7 +257,7 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             display_results = results_df.copy()
 
             # 移除不能序列化的列
-            columns_to_remove = ['full_correlogram_df', 'full_kl_divergence_df']
+            columns_to_remove = ['full_kl_divergence_df']
             for col in columns_to_remove:
                 if col in display_results.columns:
                     display_results = display_results.drop(columns=[col])
@@ -354,8 +266,6 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             column_mapping = {
                 'target_variable': '目标变量',
                 'candidate_variable': '候选变量',
-                'k_corr': '最优滞后(相关)',
-                'corr_at_k_corr': '最大相关系数',
                 'k_kl': '最优滞后(KL)',
                 'kl_at_k_kl': '最小KL散度',
                 'notes': '备注'
@@ -364,40 +274,17 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             display_results = display_results.rename(columns=column_mapping)
 
             # 数值格式化
-            if '最大相关系数' in display_results.columns:
-                display_results['最大相关系数'] = display_results['最大相关系数'].round(4)
             if '最小KL散度' in display_results.columns:
                 display_results['最小KL散度'] = display_results['最小KL散度'].round(4)
 
-            # 结果排序：1.首先按相关系数从1到-1，2.最优滞后（相关）绝对值从小到大
-            if not display_results.empty:
-                sort_columns = []
-                sort_ascending = []
-                
-                if '最大相关系数' in display_results.columns:
-                    # 按相关系数原始值降序排列（从1到-1）
-                    sort_columns.append('最大相关系数')
-                    sort_ascending.append(False)  # 降序：1, 0.8, 0.5, 0, -0.2, -0.5, -1
-                
-                if '最优滞后(相关)' in display_results.columns:
-                    # 按最优滞后期绝对值升序排列（滞后期短的在前）
-                    display_results['_sort_lag_abs'] = display_results['最优滞后(相关)'].abs()
-                    sort_columns.append('_sort_lag_abs')
-                    sort_ascending.append(True)  # 升序：0, 1, 2, 3...
-                
-                if sort_columns:
-                    display_results = display_results.sort_values(
-                        by=sort_columns, 
-                        ascending=sort_ascending,
-                        na_position='last'  # NaN值排在最后
-                    )
-                    
-                    # 移除排序辅助列
-                    if '_sort_lag_abs' in display_results.columns:
-                        display_results = display_results.drop(columns=['_sort_lag_abs'])
-                    
-                    # 重置索引
-                    display_results = display_results.reset_index(drop=True)
+            # 结果排序：按KL散度升序排列
+            if not display_results.empty and '最小KL散度' in display_results.columns:
+                display_results = display_results.sort_values(
+                    by='最小KL散度',
+                    ascending=True,
+                    na_position='last'
+                )
+                display_results = display_results.reset_index(drop=True)
 
             st_obj.dataframe(display_results, hide_index=True, width='stretch')
 
@@ -410,7 +297,8 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
                 file_name=f"lead_lag_analysis_{results['target_var']}.csv",
                 mime="text/csv",
                 key="download_lead_lag_data",
-                use_container_width=False
+                use_container_width=False,
+                type = "primary"
             )
 
             st_obj.divider()
@@ -419,27 +307,23 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             st_obj.markdown("##### 领先滞后分析图")
 
             # 变量选择器和指标显示（列布局）
-            select_col, metric_col1, metric_col2 = st_obj.columns([2, 1, 1])
+            select_col, metric_col = st_obj.columns([3, 1])
 
             with select_col:
                 candidate_var_for_plot = st_obj.selectbox(
                     "选择变量查看详细图表",
                     results['candidate_vars'],
                     key="lead_lag_plot_var",
-                    help="选择一个候选变量查看其详细的相关性和KL散度图表"
+                    help="选择一个候选变量查看其详细的KL散度图表"
                 )
 
             # 根据选中的变量显示指标
             if candidate_var_for_plot and not display_results.empty:
                 selected_row = display_results[display_results['候选变量'] == candidate_var_for_plot]
                 if not selected_row.empty:
-                    k_corr_val = selected_row['最优滞后(相关)'].values[0]
                     k_kl_val = selected_row['最优滞后(KL)'].values[0]
 
-                    with metric_col1:
-                        st_obj.metric("最优滞后(相关)", f"{k_corr_val:.0f}" if pd.notna(k_corr_val) else "N/A")
-
-                    with metric_col2:
+                    with metric_col:
                         st_obj.metric("最优滞后(KL)", f"{k_kl_val:.0f}" if pd.notna(k_kl_val) else "N/A")
 
             if candidate_var_for_plot:
@@ -460,7 +344,6 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
         # 构建配置字典
         config = {
             'max_lags': results['max_lags'],
-            'kl_bins': results['kl_bins'],
             'standardize_for_kl': results['standardize_for_kl'],
             'standardization_method': results['standardization_method'],
             'enable_frequency_alignment': results['enable_frequency_alignment'],
@@ -468,57 +351,32 @@ class LeadLagAnalysisComponent(TimeSeriesAnalysisComponent):
             'freq_agg_method': results['freq_agg_method']
         }
 
-        detailed_corr_df, detailed_kl_df = get_detailed_lag_data_for_candidate(
+        detailed_kl_df = get_detailed_lag_data_for_candidate(
             data, results['target_var'], candidate_var, config
         )
 
-        if detailed_corr_df is not None and detailed_kl_df is not None:
+        if detailed_kl_df is not None:
             # 限制图表数据只显示±5期
-            corr_df_filtered = detailed_corr_df[
-                (detailed_corr_df['Lag'] >= -5) &
-                (detailed_corr_df['Lag'] <= 5)
-            ].copy()
-
             kl_df_filtered = detailed_kl_df[
                 (detailed_kl_df['Lag'] >= -5) &
                 (detailed_kl_df['Lag'] <= 5)
             ].copy()
 
-            # 创建两列布局
-            col1, col2 = st_obj.columns(2)
-
-            with col1:
-                st_obj.markdown(f"**{candidate_var} 相关性分析**")
-                if not corr_df_filtered.empty:
-                    # 配置matplotlib以禁用工具栏
-                    plt.rcParams['toolbar'] = 'None'
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    ax.plot(corr_df_filtered['Lag'], corr_df_filtered['Correlation'],
-                           marker='o', linewidth=2, markersize=4)
-                    ax.set_xlabel('滞后期')
-                    ax.set_ylabel('相关系数')
-                    ax.set_title(f'{results["target_var"]} vs {candidate_var} 相关性')
-                    ax.grid(True, alpha=0.3)
-                    ax.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-                    plt.tight_layout()
-                    st_obj.pyplot(fig, width='stretch')
-                    plt.close()
-
-            with col2:
-                st_obj.markdown(f"**{candidate_var} KL散度分析**")
-                if not kl_df_filtered.empty:
-                    # 配置matplotlib以禁用工具栏
-                    plt.rcParams['toolbar'] = 'None'
-                    fig, ax = plt.subplots(figsize=(8, 5))
-                    ax.plot(kl_df_filtered['Lag'], kl_df_filtered['KL_Divergence'],
-                           marker='s', linewidth=2, markersize=4, color='orange')
-                    ax.set_xlabel('滞后期')
-                    ax.set_ylabel('KL散度')
-                    ax.set_title(f'{results["target_var"]} vs {candidate_var} KL散度')
-                    ax.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    st_obj.pyplot(fig, width='stretch')
-                    plt.close()
+            # 单列全宽布局
+            st_obj.markdown(f"**{candidate_var} KL散度分析**")
+            if not kl_df_filtered.empty:
+                # 配置matplotlib以禁用工具栏
+                plt.rcParams['toolbar'] = 'None'
+                fig, ax = plt.subplots(figsize=(12, 5))
+                ax.plot(kl_df_filtered['Lag'], kl_df_filtered['KL_Divergence'],
+                       marker='s', linewidth=2, markersize=4, color='orange')
+                ax.set_xlabel('滞后期')
+                ax.set_ylabel('KL散度')
+                ax.set_title(f'{results["target_var"]} vs {candidate_var} KL散度')
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st_obj.pyplot(fig, use_container_width=True)
+                plt.close()
 
         # 添加时间序列对比图
         st_obj.markdown(f"**{results['target_var']} vs {candidate_var} 时间序列对比**")

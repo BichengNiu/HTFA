@@ -6,12 +6,12 @@ KL散度计算模块
 """
 
 import logging
+import math
 from typing import Tuple, Optional
 import pandas as pd
 import numpy as np
 
 from dashboard.explore.core.constants import (
-    DEFAULT_KL_BINS,
     DEFAULT_KL_SMOOTHING_ALPHA,
     MIN_SAMPLES_KL_DIVERGENCE
 )
@@ -19,10 +19,32 @@ from dashboard.explore.core.constants import (
 logger = logging.getLogger(__name__)
 
 
+def calculate_stata_bins(n: int) -> int:
+    """
+    使用Stata的自动分箱算法计算分箱数
+
+    公式: bins = min(sqrt(N), 10*log10(N))
+
+    Args:
+        n: 样本数量
+
+    Returns:
+        分箱数（整数）
+    """
+    if n <= 0:
+        raise ValueError(f"样本数必须大于0，收到: {n}")
+
+    bins_sqrt = math.sqrt(n)
+    bins_log = 10 * math.log10(n)
+    bins = int(math.ceil(min(bins_sqrt, bins_log)))
+
+    return max(2, bins)
+
+
 def series_to_distribution(
     series_a: pd.Series,
     series_b: pd.Series,
-    bins: int = DEFAULT_KL_BINS
+    bins: Optional[int] = None
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     将两个时间序列转换为离散概率分布
@@ -32,7 +54,7 @@ def series_to_distribution(
     Args:
         series_a: 第一个序列
         series_b: 第二个序列
-        bins: 分箱数
+        bins: 分箱数（None则使用Stata自动分箱算法）
 
     Returns:
         Tuple[P分布, Q分布, 分箱边界]
@@ -46,6 +68,11 @@ def series_to_distribution(
 
     if series_a_clean.empty or series_b_clean.empty:
         raise ValueError("序列在移除NaN后为空，无法创建分布")
+
+    # 自动计算分箱数
+    if bins is None:
+        n_samples = min(len(series_a_clean), len(series_b_clean))
+        bins = calculate_stata_bins(n_samples)
 
     # 检查常数序列
     series_a_is_constant = len(series_a_clean.unique()) == 1
@@ -162,7 +189,7 @@ def kl_divergence(
 def calculate_kl_divergence_series(
     series_a: pd.Series,
     series_b: pd.Series,
-    bins: int = DEFAULT_KL_BINS,
+    bins: Optional[int] = None,
     smoothing_alpha: float = DEFAULT_KL_SMOOTHING_ALPHA,
     min_samples: Optional[int] = None
 ) -> Tuple[Optional[float], Optional[str]]:
@@ -172,19 +199,26 @@ def calculate_kl_divergence_series(
     Args:
         series_a: 第一个序列
         series_b: 第二个序列
-        bins: 分箱数
+        bins: 分箱数（None则使用Stata自动分箱算法）
         smoothing_alpha: 平滑参数
         min_samples: 最小样本数（None则使用默认值）
 
     Returns:
         Tuple[KL散度值, 错误消息（如果有）]
     """
-    if min_samples is None:
-        min_samples = max(bins * 2, MIN_SAMPLES_KL_DIVERGENCE)
-
     # 数据验证
     series_a_clean = series_a.dropna()
     series_b_clean = series_b.dropna()
+
+    # 自动计算分箱数（用于确定最小样本数）
+    if bins is None:
+        n_samples = min(len(series_a_clean), len(series_b_clean))
+        bins_for_validation = calculate_stata_bins(n_samples)
+    else:
+        bins_for_validation = bins
+
+    if min_samples is None:
+        min_samples = max(bins_for_validation * 2, MIN_SAMPLES_KL_DIVERGENCE)
 
     if len(series_a_clean) < min_samples:
         return None, f"序列A样本数不足: {len(series_a_clean)} < {min_samples}"

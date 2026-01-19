@@ -117,6 +117,7 @@ def _render_lead_lag_tab():
             st.session_state['exploration.lead_lag.upload_data'] = data_lag
             st.session_state['exploration.lead_lag.file_name'] = file_name_lag
             st.success(f"数据已加载: {file_name_lag} ({data_lag.shape[0]} 行 x {data_lag.shape[1]} 列)")
+            st.divider()
 
         lead_lag_component = LeadLagAnalysisComponent()
         lead_lag_component.render(st, tab_index=1)
