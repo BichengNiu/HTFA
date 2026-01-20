@@ -2,7 +2,7 @@
 """
 行业映射校验模块
 
-用于检测指标体系定义的行业映射与sheet名称推断的行业映射之间的冲突
+用于检测指标字典定义的行业映射与sheet名称推断的行业映射之间的冲突
 """
 
 import logging
@@ -18,17 +18,17 @@ def validate_industry_mapping(
     variable_list: List[str]
 ) -> Dict[str, Any]:
     """
-    对比指标体系行业映射与sheet名称推断的映射，检测冲突
+    对比指标字典行业映射与sheet名称推断的映射，检测冲突
 
     Args:
-        reference_map: 指标体系定义的行业映射（标准化键）
+        reference_map: 指标字典定义的行业映射（标准化键）
         sheet_based_map: 从sheet名称推断的行业映射（标准化键）
         variable_list: 最终数据中的变量列表（原始名称）
 
     Returns:
         Dict包含:
         - conflicts: 冲突变量列表，每项包含变量名和两个来源的行业
-        - undefined_in_reference: 在指标体系中未定义的变量列表
+        - undefined_in_reference: 在指标字典中未定义的变量列表
         - conflict_count: 冲突数量
         - undefined_count: 未定义数量
         - validation_passed: 是否通过校验（无冲突且无未定义）
@@ -46,7 +46,7 @@ def validate_industry_mapping(
         reference_industry = reference_map.get(var_norm)
         sheet_industry = sheet_based_map.get(var_norm)
 
-        # 检查是否在指标体系中未定义
+        # 检查是否在指标字典中未定义
         if not reference_industry:
             undefined_in_reference.append(var_original)
 
@@ -88,21 +88,21 @@ def print_validation_report(validation_result: Dict[str, Any]) -> None:
     undefined_count = validation_result['undefined_count']
 
     if conflict_count > 0:
-        logger.warning("发现 %d 个变量的指标体系行业与Sheet位置不一致", conflict_count)
-        logger.info("系统将使用指标体系定义的行业（Sheet名称仅用于数据组织）")
+        logger.warning("发现 %d 个变量的指标字典行业与Sheet位置不一致", conflict_count)
+        logger.info("系统将使用指标字典定义的行业（Sheet名称仅用于数据组织）")
 
         conflicts = validation_result['conflicts']
         logger.info("冲突详情（显示前10个）:")
         for item in conflicts[:10]:
             logger.info("  变量: %s", item['variable'])
-            logger.info("    - 指标体系定义: %s", item['reference_industry'])
+            logger.info("    - 指标字典定义: %s", item['reference_industry'])
             logger.info("    - Sheet名称推断: %s", item['sheet_industry'])
 
         if conflict_count > 10:
             logger.info("  ... 还有 %d 个冲突变量", conflict_count - 10)
 
     if undefined_count > 0:
-        logger.warning("发现 %d 个变量在指标体系中未定义行业", undefined_count)
+        logger.warning("发现 %d 个变量在指标字典中未定义行业", undefined_count)
         logger.info("这些变量将被标记为\"Unknown\"行业")
 
         undefined = validation_result['undefined_in_reference']

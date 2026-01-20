@@ -66,8 +66,8 @@ class DataPreparationProcessor:
         Args:
             excel_path: Excel文件路径
             target_variable_name: 目标变量名称（可选，用于将其放在第一列）
-            var_industry_map: 变量-行业映射字典（从指标体系加载）
-            var_frequency_map: 变量-频率映射字典（从指标体系加载）
+            var_industry_map: 变量-行业映射字典（从指标字典加载）
+            var_frequency_map: 变量-频率映射字典（从指标字典加载）
             target_freq: 目标频率，默认'W-FRI'
             consecutive_nan_threshold: 连续缺失值阈值
             data_start_date: 数据起始日期
@@ -76,7 +76,7 @@ class DataPreparationProcessor:
             enable_freq_alignment: 是否启用频率对齐，默认True。选择False时保留原始日期
             zero_handling: 零值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1
             negative_handling: 负值处理方式，'none'不处理，'missing'转为缺失值，'adjust'调正为1
-            var_publication_lag_map: 变量-发布日期滞后映射（从指标体系加载）
+            var_publication_lag_map: 变量-发布日期滞后映射（从指标字典加载）
             enable_publication_calibration: 是否启用发布日期校准，默认False
             parallel_config: 并行处理配置，默认启用并行
         """
@@ -253,7 +253,7 @@ class DataPreparationProcessor:
         with pd.ExcelFile(self.excel_path) as excel_file:
             for sheet_name in excel_file.sheet_names:
                 # 跳过映射表
-                if sheet_name == '指标体系':
+                if sheet_name == '指标字典':
                     continue
 
                 # 读取第一列作为日期列
@@ -304,7 +304,7 @@ class DataPreparationProcessor:
             }
 
             for sheet_name in excel_file.sheet_names:
-                if sheet_name == '指标体系':
+                if sheet_name == '指标字典':
                     continue
 
                 logger.info(f"  加载工作表: {sheet_name}")
@@ -607,7 +607,7 @@ class DataPreparationProcessor:
                 - 转换日志（包含借调日志）
                 - 移除变量日志
         """
-        # 构建最终变量映射（只使用指标体系映射）
+        # 构建最终变量映射（只使用指标字典映射）
         final_var_mapping = {}
         for col in final_df.columns:
             col_norm = normalize_text(col)
@@ -615,7 +615,7 @@ class DataPreparationProcessor:
                 final_var_mapping[col_norm] = self.var_industry_map[col_norm]
             else:
                 final_var_mapping[col_norm] = "Unknown"
-                logger.warning(f"  变量 '{col}' 未在指标体系中定义，标记为Unknown")
+                logger.warning(f"  变量 '{col}' 未在指标字典中定义，标记为Unknown")
 
         # 生成转换日志（平稳性检验已移至变量处理功能区）
         transform_log = {

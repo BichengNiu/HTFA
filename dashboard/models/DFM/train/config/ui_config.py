@@ -184,7 +184,7 @@ class UIConfig:
     MAX_ITERATIONS_STEP = 10
 
     # 文件上传配置
-    EXCEL_MAPPING_SHEET = '指标体系'
+    EXCEL_MAPPING_SHEET = '指标字典'
     INDICATOR_COLUMN_NAME = '指标名称'
     INDUSTRY_COLUMN_NAME = '行业'
     TYPE_COLUMN_NAME = '类型'

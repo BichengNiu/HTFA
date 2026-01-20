@@ -228,7 +228,7 @@ class ProcessingStatusComponent(DFMComponent):
             'remove_consecutive_nans': self._get_state('dfm_param_remove_consecutive_nans', True),
             'data_start_date': self._get_state('dfm_param_data_start_date', '2020-01-01'),
             'data_end_date': self._get_state('dfm_param_data_end_date', '2025-04-30'),
-            'type_mapping_sheet': self._get_state('dfm_param_type_mapping_sheet', '指标体系')
+            'type_mapping_sheet': self._get_state('dfm_param_type_mapping_sheet', '指标字典')
         }
     
     def _execute_data_processing(self, processing_params: Dict[str, Any], 

@@ -58,19 +58,19 @@ atexit.register(_cleanup_temp_files)
 
 def load_mappings_once(
     excel_path: Union[str, Any],
-    reference_sheet_name: str = "指标体系",
+    reference_sheet_name: str = "指标字典",
     reference_column_name: str = "指标名称",
     use_cache: bool = True
 ) -> Dict[str, Any]:
     """
     步骤1: 加载映射表（带简化的缓存机制）
 
-    从Excel文件的"指标体系"工作表加载7种映射关系。
+    从Excel文件的"指标字典"工作表加载7种映射关系。
     使用文件修改时间作为缓存键，避免重复加载。
 
     Args:
         excel_path: Excel文件路径或文件对象
-        reference_sheet_name: 映射表的工作表名称，默认"指标体系"
+        reference_sheet_name: 映射表的工作表名称，默认"指标字典"
         reference_column_name: 映射表的参考列名，默认"指标名称"
         use_cache: 是否使用缓存，默认True
 
@@ -248,7 +248,7 @@ def collect_time_ranges(
         with pd.ExcelFile(file_path) as excel_file:
             for sheet_name in excel_file.sheet_names:
                 # 跳过映射表
-                if sheet_name == '指标体系':
+                if sheet_name == '指标字典':
                     continue
 
                 # 读取第一列作为日期列
@@ -313,7 +313,7 @@ def prepare_dfm_data_simple(
     data_end_date: str = None,
     target_freq: str = "W-FRI",
     consecutive_nan_threshold: int = 10,
-    reference_sheet_name: str = "指标体系",
+    reference_sheet_name: str = "指标字典",
     reference_column_name: str = "指标名称",
     enable_borrowing: bool = True,
     enable_freq_alignment: bool = True,

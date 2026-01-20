@@ -262,7 +262,7 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
         PrepStateKeys.PARAM_TARGET_FREQ: 'W-FRI',
         PrepStateKeys.PARAM_REMOVE_CONSECUTIVE_NANS: "是",
         PrepStateKeys.PARAM_CONSECUTIVE_NAN_THRESHOLD: 10,
-        PrepStateKeys.PARAM_TYPE_MAPPING_SHEET: '指标体系',
+        PrepStateKeys.PARAM_TYPE_MAPPING_SHEET: '指标字典',
         PrepStateKeys.PARAM_DATA_START_DATE: default_start_date,
         PrepStateKeys.PARAM_DATA_END_DATE: default_end_date,
         PrepStateKeys.PARAM_ENABLE_FREQ_ALIGNMENT: '否',
@@ -312,7 +312,7 @@ def _render_parameter_config(st_obj, detected_start, detected_end, min_date, max
             options=publication_options,
             index=publication_index,
             key="ss_dfm_publication_calibration",
-            help="选择'是'将按指标实际发布日期对齐数据（基于指标体系中的'发布日期'列）"
+            help="选择'是'将按指标实际发布日期对齐数据（基于指标字典中的'发布日期'列）"
         )
         _set_state(PrepStateKeys.PARAM_PUBLICATION_DATE_CALIBRATION, publication_calibration)
 
@@ -753,8 +753,8 @@ def _render_mapping_warnings(st_obj):
     # 显示警告信息
     with st_obj.expander("行业映射警告", expanded=True):
         if undefined:
-            st_obj.warning(f"发现 {len(undefined)} 个变量在指标体系中未定义行业（已标记为Unknown）")
-            st_obj.markdown("**建议**: 在Excel模板的\"指标体系\"sheet中为这些变量补充行业信息")
+            st_obj.warning(f"发现 {len(undefined)} 个变量在指标字典中未定义行业（已标记为Unknown）")
+            st_obj.markdown("**建议**: 在Excel模板的\"指标字典\"sheet中为这些变量补充行业信息")
 
             # 最多显示20个
             undefined_to_show = undefined[:20]

@@ -50,7 +50,6 @@ from dashboard.analysis.industrial.validation import validate_data_format, displ
 from dashboard.analysis.industrial.constants import (
     TOTAL_INDUSTRIAL_GROWTH_COLUMN,
     STATE_NAMESPACE_INDUSTRIAL,
-    STATE_KEY_UPLOADED_FILE,
     STATE_KEY_MACRO_DATA,
     STATE_KEY_WEIGHTS_DATA,
     STATE_KEY_FILE_NAME,
@@ -63,7 +62,7 @@ from dashboard.analysis.industrial.constants import (
 )
 
 
-def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, df_weights: pd.DataFrame):
+def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, df_weights: pd.DataFrame, uploaded_file=None):
     """
     使用预加载数据渲染分行业工业增加值同比增速分析
 
@@ -71,6 +70,7 @@ def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, d
         st_obj: Streamlit对象
         df_macro: 分行业工业增加值同比增速数据
         df_weights: 权重数据
+        uploaded_file: 数据文件路径（用于加载总体工业增加值数据）
     """
     if df_macro is None or df_weights is None:
         st_obj.error("数据未正确加载，无法进行分行业工业增加值同比增速分析")
@@ -92,9 +92,7 @@ def render_macro_operations_analysis_with_data(st_obj, df_macro: pd.DataFrame, d
     if target_columns:
         debug_log("开始计算拉动率", "INFO")
         try:
-            # 获取总体增速数据并合并
-            uploaded_file = IndustrialStateManager.get(STATE_KEY_UPLOADED_FILE)
-
+            # 使用传入的文件路径加载总体增速数据
             if uploaded_file is not None:
                 df_overall = load_overall_industrial_data(uploaded_file)
                 if df_overall is not None and len(df_overall.columns) > 0:

@@ -29,8 +29,8 @@ def detect_sheet_format(excel_file, sheet_name: str) -> Dict[str, Any]:
             - source: 数据源
     """
     try:
-        # 特殊处理：指标体系sheet
-        if sheet_name == '指标体系':
+        # 特殊处理：指标字典sheet
+        if sheet_name == '指标字典':
             return {
                 'format': 'indicator_system',
                 'skiprows': None,

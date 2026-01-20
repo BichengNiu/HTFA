@@ -509,7 +509,7 @@ def load_and_process_data(excel_files_input: List[Any]) -> LoadedIndustrialData:
 
     # 处理每个文件
     for idx, file_input in enumerate(excel_files_input):
-        # 只有第一个文件读取指标体系映射
+        # 只有第一个文件读取指标字典映射
         read_mapping = (idx == 0)
 
         file_dfs, source_map, ind_map, unit_map, type_map, freq_map = process_single_excel_file(

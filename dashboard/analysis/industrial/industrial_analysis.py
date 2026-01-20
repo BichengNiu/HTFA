@@ -22,15 +22,11 @@ logger = logging.getLogger(__name__)
 # 导入统一的数据加载函数
 from dashboard.analysis.industrial.utils import load_macro_data, load_weights_data
 
-# 导入新的UI组件
-from dashboard.analysis.industrial.ui import (
-    IndustrialFileUploadComponent
-)
+# UI组件导入已移除（不再需要文件上传组件）
 # 导入统一状态管理
 from dashboard.analysis.industrial.utils import IndustrialStateManager
 from dashboard.analysis.industrial.constants import (
     STATE_NAMESPACE_INDUSTRIAL,
-    STATE_KEY_UPLOADED_FILE,
     STATE_KEY_MACRO_TIME_RANGE_CHART1,
     STATE_KEY_MACRO_TIME_RANGE_CHART2,
     STATE_KEY_MACRO_TIME_RANGE_CHART3,
@@ -58,18 +54,6 @@ def initialize_industrial_states():
                 STATE_KEY_ENTERPRISE_TIME_RANGE_CHART3]:
         if IndustrialStateManager.get(key) is None:
             IndustrialStateManager.set(key, DEFAULT_TIME_RANGE)
-
-
-def render_unified_file_upload(st_obj) -> Optional[object]:
-    """
-    渲染统一的文件上传功能 - 使用新的UI组件
-
-    Returns:
-        uploaded_file: 上传的文件对象，如果没有上传则返回None
-    """
-    # 使用新的UI组件
-    file_upload_component = IndustrialFileUploadComponent()
-    return file_upload_component.render(st_obj)
 
 
 def load_default_monitoring_data() -> Optional[str]:
@@ -118,15 +102,11 @@ def render_macro_operations_with_data(st_obj, df_macro: Optional[pd.DataFrame], 
     使用共享数据渲染分行业工业增加值同比增速分析
     """
     if df_macro is not None and df_weights is not None:
-        # Store uploaded file using unified state management
-        if uploaded_file is not None:
-            st.session_state[f'{STATE_NAMESPACE_INDUSTRIAL}.{STATE_KEY_UPLOADED_FILE}'] = uploaded_file
-
-        # 调用宏观运行分析，传入数据
+        # 调用宏观运行分析，传入数据和文件路径
         from dashboard.analysis.industrial.macro_analysis import render_macro_operations_analysis_with_data
-        render_macro_operations_analysis_with_data(st_obj, df_macro, df_weights)
+        render_macro_operations_analysis_with_data(st_obj, df_macro, df_weights, uploaded_file)
     else:
-        st_obj.info("请先上传Excel数据文件以开始分行业工业增加值同比增速分析")
+        st_obj.info("数据加载失败，无法进行分析")
 
 
 def render_enterprise_operations_with_data(st_obj, df_macro: Optional[pd.DataFrame], df_weights: Optional[pd.DataFrame], uploaded_file=None):
@@ -161,19 +141,20 @@ def render_industrial_analysis(st_obj):
     Args:
         st_obj: Streamlit对象
     """
-    # 1. 统一文件上传（在侧边栏显示）
-    uploaded_file = render_unified_file_upload(st_obj)
+    # 1. 直接加载默认数据文件
+    uploaded_file = load_default_monitoring_data()
 
-    # 2. 如果没有用户上传，加载默认文件
     if uploaded_file is None:
-        uploaded_file = load_default_monitoring_data()
-        if uploaded_file is not None:
-            st_obj.sidebar.info("已加载默认数据：监测分析数据库.xlsx")
+        st_obj.error("默认数据文件不存在: data/监测分析数据库.xlsx")
+        return
 
-    # 3. 加载和缓存数据
+    # 显示成功加载提示
+    st_obj.sidebar.success("成功读取监测分析数据库.xlsx")
+
+    # 2. 加载和缓存数据
     df_macro, df_weights = load_and_cache_data(uploaded_file)
 
-    # 4. 根据权限过滤Tab
+    # 3. 根据权限过滤Tab
     debug_mode = st_obj.session_state.get("auth.debug_mode", False)
     current_user = st_obj.session_state.get("auth.current_user", None)
 
@@ -208,7 +189,7 @@ def render_industrial_analysis(st_obj):
         st_obj.warning("您没有权限访问任何Tab")
         return
 
-    # 4. 创建可见的标签页
+    # 4. 创建标签页
     tab_names = [tab[0] for tab in visible_tabs]
     tabs = st_obj.tabs(tab_names)
 

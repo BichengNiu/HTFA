@@ -34,8 +34,8 @@ class DataLoader:
         初始化数据加载器
 
         Args:
-            reference_industry_map: 从指标体系加载的行业映射（可选，用于校验）
-            reference_frequency_map: 从指标体系加载的频率映射（用于数据分类）
+            reference_industry_map: 从指标字典加载的行业映射（可选，用于校验）
+            reference_frequency_map: 从指标字典加载的频率映射（用于数据分类）
         """
         self.cleaner = DataCleaner()
         self.var_industry_map = {}  # 从sheet名称推断的行业映射（保留用于校验）

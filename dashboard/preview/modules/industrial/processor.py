@@ -15,15 +15,15 @@ logger = logging.getLogger(__name__)
 
 def read_indicator_mapping(
     excel_file_handler,
-    sheet_name: str = '指标体系',
+    sheet_name: str = '指标字典',
     file_buffer=None
 ) -> Tuple[Dict[str, str], Dict[str, str], Dict[str, str], Dict[str, str]]:
     """
-    读取指标体系映射（行业、单位、类型、频率）
+    读取指标字典映射（行业、单位、类型、频率）
 
     Args:
         excel_file_handler: pandas ExcelFile对象
-        sheet_name: 指标体系sheet名称
+        sheet_name: 指标字典sheet名称
         file_buffer: 文件缓冲区（用于BytesIO seek操作）
 
     Returns:
@@ -353,8 +353,8 @@ def process_single_sheet(
 
     logger.debug(f"分析sheet: '{sheet_name}'")
 
-    # 跳过指标体系sheet
-    if sheet_name == '指标体系':
+    # 跳过指标字典sheet
+    if sheet_name == '指标字典':
         return None
 
     try:
@@ -396,7 +396,7 @@ def process_single_sheet(
         if df_sheet is None:
             return None
 
-        # 验证所有变量都在指标体系中定义了频率
+        # 验证所有变量都在指标字典中定义了频率
         data_columns = list(df_sheet.columns)
         unknown_vars = []
         for col in data_columns:
@@ -406,7 +406,7 @@ def process_single_sheet(
 
         if unknown_vars:
             error_msg = (
-                f"Sheet '{sheet_name}' 包含 {len(unknown_vars)} 个未在指标体系中定义频率的变量:\n"
+                f"Sheet '{sheet_name}' 包含 {len(unknown_vars)} 个未在指标字典中定义频率的变量:\n"
                 + "\n".join(f"  - {v}" for v in unknown_vars[:10])
                 + (f"\n  ... 等共 {len(unknown_vars)} 个" if len(unknown_vars) > 10 else "")
             )
@@ -505,7 +505,7 @@ def process_single_excel_file(
         indicator_unit_map: 单位映射字典（会被更新）
         indicator_type_map: 类型映射字典（会被更新）
         indicator_freq_map: 频率映射字典（会被更新）
-        read_mapping_sheet: 是否读取指标体系映射
+        read_mapping_sheet: 是否读取指标字典映射
 
     Returns:
         Tuple: (数据框字典, 指标来源映射, 行业映射, 单位映射, 类型映射, 频率映射)
@@ -537,12 +537,12 @@ def process_single_excel_file(
         sheet_names = excel_file_handler.sheet_names
         logger.debug(f"找到sheets: {', '.join(sheet_names)}")
 
-        # 读取指标体系（如果需要）
-        if read_mapping_sheet and '指标体系' in sheet_names:
-            logger.debug("尝试从'指标体系'sheet读取映射")
+        # 读取指标字典（如果需要）
+        if read_mapping_sheet and '指标字典' in sheet_names:
+            logger.debug("尝试从'指标字典'sheet读取映射")
             industry_map_temp, unit_map_temp, type_map_temp, freq_map_temp = read_indicator_mapping(
                 excel_file_handler,
-                '指标体系',
+                '指标字典',
                 file_buffer
             )
             if industry_map_temp:
@@ -557,7 +557,7 @@ def process_single_excel_file(
 
         # 验证是否有频率映射（必须在处理数据sheet之前完成）
         if not indicator_freq_map:
-            raise ValueError("指标体系中未找到频率映射，无法处理数据。请确保'指标体系'sheet包含'频率'列。")
+            raise ValueError("指标字典中未找到频率映射，无法处理数据。请确保'指标字典'sheet包含'频率'列。")
 
         # 处理每个sheet
         processed_sheets = 0

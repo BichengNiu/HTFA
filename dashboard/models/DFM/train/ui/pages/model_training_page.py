@@ -63,7 +63,7 @@ class TrainModelConfig:
     PROJECT_ROOT = os.path.abspath(os.path.join(current_dir, '..', '..', '..', '..'))
 
     # UI默认配置值
-    TYPE_MAPPING_SHEET = '指标体系'
+    TYPE_MAPPING_SHEET = '指标字典'
     TARGET_VARIABLE = '规模以上工业增加值:当月同比'
     INDICATOR_COLUMN_NAME_IN_EXCEL = '指标名称'
     INDUSTRY_COLUMN_NAME_IN_EXCEL = '行业'
@@ -852,7 +852,7 @@ def render_dfm_model_training_page(st_instance):
 
     var_industry_map = _state.get('dfm_industry_map_obj')
     if not var_industry_map:
-        raise ValueError("行业映射数据未加载，请先上传并加载指标体系文件")
+        raise ValueError("行业映射数据未加载，请先上传并加载指标字典文件")
 
     # 构建行业→有效指标映射缓存
     industry_available_indicators = {}

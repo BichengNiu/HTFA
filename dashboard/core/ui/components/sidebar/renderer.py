@@ -214,17 +214,13 @@ def get_upload_section_config(main_module: str, sub_module: str) -> Dict[str, An
     """
     # 定义支持上传的模块组合
     upload_configs = {
-        ('监测分析', '工业'): {
-            'show_upload': True,
-            'title': '工业监测分析数据上传',
-            'description': '上传一个Excel文件，同时支持宏观运行和企业经营分析'
-        },
         ('数据探索', None): {
             'show_upload': True,
             'title': '数据探索 - 数据上传',
             'description': '上传数据文件进行探索性分析'
         }
         # DFM模型的数据上传已移至数据准备tab中
+        # 监测分析模块已改为直接使用默认数据文件
     }
 
     key = (main_module, sub_module)

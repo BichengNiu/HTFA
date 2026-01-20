@@ -281,7 +281,7 @@ CHINESE_TO_ENGLISH_FREQ = {
 }
 ENGLISH_TO_CHINESE_FREQ = {v: k for k, v in CHINESE_TO_ENGLISH_FREQ.items()}
 
-# 指标体系中频率字符到英文标识的映射（单字格式）
+# 指标字典中频率字符到英文标识的映射（单字格式）
 FREQ_CHAR_TO_ENGLISH = {
     '日': 'daily',
     '周': 'weekly',

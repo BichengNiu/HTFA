@@ -42,11 +42,11 @@ class StatsService:
             xl_file = pd.ExcelFile(excel_file)
             sheet_names = xl_file.sheet_names
 
-            # 读取指标体系获取频率映射
+            # 读取指标字典获取频率映射
             var_frequency_map = {}
-            if '指标体系' in sheet_names:
+            if '指标字典' in sheet_names:
                 excel_file.seek(0)
-                df_mapping = pd.read_excel(excel_file, sheet_name='指标体系')
+                df_mapping = pd.read_excel(excel_file, sheet_name='指标字典')
                 df_mapping.columns = df_mapping.columns.str.strip()
                 if '指标名称' in df_mapping.columns and '频率' in df_mapping.columns:
                     for _, row in df_mapping.iterrows():
@@ -57,7 +57,7 @@ class StatsService:
 
             # 遍历数据工作表
             for sheet_name in sheet_names:
-                if any(kw in str(sheet_name).lower() for kw in ['指标体系', 'mapping', 'meta', 'info']):
+                if any(kw in str(sheet_name).lower() for kw in ['指标字典', 'mapping', 'meta', 'info']):
                     continue
 
                 try:
@@ -159,9 +159,9 @@ class StatsService:
 
             # 读取频率映射
             var_frequency_map = {}
-            if '指标体系' in sheet_names:
+            if '指标字典' in sheet_names:
                 excel_file.seek(0)
-                df_mapping = pd.read_excel(excel_file, sheet_name='指标体系')
+                df_mapping = pd.read_excel(excel_file, sheet_name='指标字典')
                 df_mapping.columns = df_mapping.columns.str.strip()
                 if '指标名称' in df_mapping.columns and '频率' in df_mapping.columns:
                     for _, row in df_mapping.iterrows():
@@ -173,7 +173,7 @@ class StatsService:
             # 收集变量数据
             var_data = {}
             for sheet_name in sheet_names:
-                if any(kw in str(sheet_name).lower() for kw in ['指标体系', 'mapping', 'meta', 'info']):
+                if any(kw in str(sheet_name).lower() for kw in ['指标字典', 'mapping', 'meta', 'info']):
                     continue
 
                 try:

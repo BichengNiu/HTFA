@@ -37,7 +37,7 @@ def _read_single_sheet(
     try:
         from dashboard.models.DFM.utils.text_utils import normalize_text
 
-        if sheet_name == '指标体系':
+        if sheet_name == '指标字典':
             return (sheet_name, None, {})
 
         logger.debug(f"  [Sheet并行] 读取: {sheet_name}")
@@ -140,8 +140,8 @@ def parallel_read_sheets(
     """
     from joblib import Parallel, delayed
 
-    # 过滤掉指标体系sheet
-    sheets_to_read = [s for s in sheet_names if s != '指标体系']
+    # 过滤掉指标字典sheet
+    sheets_to_read = [s for s in sheet_names if s != '指标字典']
 
     if not sheets_to_read:
         return {}, {}

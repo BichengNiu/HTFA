@@ -388,7 +388,17 @@ def display_time_series_tab(st_module, frequency):
         )
 
     # 6. 绑制图表（按行业和类型分组）
-    current_year = datetime.now().year
+    # 从数据中获取实际的最新年份
+    try:
+        if not df.empty:
+            if not isinstance(df.index, pd.DatetimeIndex):
+                df.index = pd.to_datetime(df.index)
+            current_year = df.index.max().year
+        else:
+            current_year = datetime.now().year
+    except Exception:
+        current_year = datetime.now().year
+
     previous_year = current_year - 1
     indicator_unit_map = get_preview_state('indicator_unit_map', {})
     indicator_type_map = get_preview_state('indicator_type_map', {})

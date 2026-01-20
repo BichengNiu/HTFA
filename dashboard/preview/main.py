@@ -123,13 +123,13 @@ def _classify_indicator_industry(
     Args:
         indicator: 指标名称
         full_source: 完整数据源
-        indicator_map_loaded: 指标体系映射
+        indicator_map_loaded: 指标字典映射
         extract_industry_name_func: 提取行业名称的函数
         freq_columns: 频率列名集合
         freq_industries: 频率行业字典（会被修改）
         clean_map: 清理后的行业映射（会被修改）
     """
-    # 优先使用指标体系中的行业名称，如果没有则用文件名提取
+    # 优先使用指标字典中的行业名称，如果没有则用文件名提取
     if indicator in indicator_map_loaded:
         clean_name = indicator_map_loaded[indicator]
         logger.debug(f"指标{indicator}使用体系映射：{clean_name}")
@@ -185,7 +185,7 @@ def _process_industry_classifications(source_map, indicator_map, all_freq_dfs, e
 
     # 第3步：处理指标映射
     indicator_map_loaded = indicator_map or {}
-    logger.debug(f"使用指标体系行业映射，包含{len(indicator_map_loaded)}个映射")
+    logger.debug(f"使用指标字典行业映射，包含{len(indicator_map_loaded)}个映射")
 
     if source_map:
         for indicator, full_source in source_map.items():
