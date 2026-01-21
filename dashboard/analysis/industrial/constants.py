@@ -14,9 +14,9 @@ TOTAL_INDUSTRIAL_GROWTH_COLUMN = "中国:工业增加值:规模以上工业企�
 CUMULATIVE_INDUSTRIAL_GROWTH_COLUMN = "中国:工业增加值:规模以上工业企业:累计同比"
 
 # 三大产业列名
-MINING_INDUSTRY_COLUMN = "采矿业:当月同比"
-MANUFACTURING_INDUSTRY_COLUMN = "制造业:当月同比"
-UTILITIES_INDUSTRY_COLUMN = "电力、热力、燃气及水生产和供应业:当月同比"
+MINING_INDUSTRY_COLUMN = "中国:工业增加值:规模以上工业企业:采矿业:当月同比"
+MANUFACTURING_INDUSTRY_COLUMN = "中国:工业增加值:规模以上工业企业:制造业:当月同比"
+UTILITIES_INDUSTRY_COLUMN = "中国:工业增加值:规模以上工业企业:电力、热力、燃气及水生产和供应业:当月同比"
 
 # 企业利润数据列名
 PROFIT_TOTAL_COLUMN = "中国:利润总额:规模以上工业企业:累计同比"
