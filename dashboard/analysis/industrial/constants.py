@@ -20,11 +20,11 @@ UTILITIES_INDUSTRY_COLUMN = "中国:工业增加值:规模以上工业企业:电
 
 # 企业利润数据列名
 PROFIT_TOTAL_COLUMN = "中国:利润总额:规模以上工业企业:累计同比"
-PROFIT_MARGIN_COLUMN_BASE = "规模以上工业企业:营业收入利润率:累计值"
-PROFIT_MARGIN_COLUMN_YOY = "规模以上工业企业:营业收入利润率:累计同比"
+PROFIT_MARGIN_COLUMN_BASE = "中国:营业收入利润率:规模以上工业企业:累计值"
+PROFIT_MARGIN_COLUMN_YOY = "中国:营业收入利润率:规模以上工业企业:累计同比"
 
 # 价格指数列名
-PPI_COLUMN = "PPI:累计同比"
+PPI_COLUMN = "中国:PPI:累计同比"
 
 # 工作表名称
 SHEET_NAME_MACRO_DATA = "分行业工业增加值同比增速"
