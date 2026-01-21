@@ -520,3 +520,77 @@ debug_navigation(
 set_transitioning(False)
 
 # (End of script)
+
+# ========================================
+# 直接启动支持
+# ========================================
+if __name__ == '__main__':
+    import subprocess
+    import shutil
+    from pathlib import Path
+
+    # 检查是否已经通过启动脚本启动，避免重复执行
+    if os.environ.get('HTFA_LAUNCHER_ACTIVE') != 'true':
+        # 设置启动标记
+        os.environ['HTFA_LAUNCHER_ACTIVE'] = 'true'
+
+        print("=" * 40)
+        print("HTFA Dashboard Startup")
+        print("=" * 40)
+        print()
+
+        # 1. 清理Python缓存
+        print("[1/4] 清理Python缓存文件...")
+        project_root = Path(__file__).parent.parent
+        for pycache in project_root.rglob('__pycache__'):
+            shutil.rmtree(pycache, ignore_errors=True)
+        for pyc in project_root.rglob('*.pyc'):
+            pyc.unlink(missing_ok=True)
+        for pyo in project_root.rglob('*.pyo'):
+            pyo.unlink(missing_ok=True)
+        print("[完成] Python缓存已清理")
+        print()
+
+        # 2. 检查并清理端口8501
+        print("[2/4] 检查端口占用情况...")
+        try:
+            result = subprocess.run(
+                'netstat -ano | findstr ":8501"',
+                shell=True,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0 and result.stdout:
+                print("[警告] 端口8501已被占用，正在关闭占用进程...")
+                # 提取PID并关闭
+                for line in result.stdout.strip().split('\n'):
+                    if 'LISTENING' in line:
+                        parts = line.split()
+                        if parts:
+                            pid = parts[-1]
+                            subprocess.run(f'taskkill /F /PID {pid}',
+                                         shell=True,
+                                         capture_output=True)
+                            print(f"[信息] 已关闭进程 PID: {pid}")
+                time.sleep(2)
+                print("[完成] 端口已清理")
+            else:
+                print("[完成] 端口8501空闲")
+        except Exception as e:
+            print(f"[警告] 端口检查失败: {e}")
+        print()
+
+        # 3. 设置环境变量
+        print("[3/4] 配置运行环境...")
+        os.environ['HTFA_DEBUG_MODE'] = 'true'
+        print("[信息] 调试模式: true")
+        print()
+
+        # 4. 启动Streamlit
+        print("[4/4] 启动应用程序...")
+        print()
+        subprocess.run([
+            sys.executable, '-m', 'streamlit', 'run',
+            __file__,
+            '--server.port=8501'
+        ])
